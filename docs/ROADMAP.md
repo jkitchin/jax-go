@@ -21,7 +21,7 @@ seriously.
 | area | today | state of the art (BARON, SCIP, Couenne, MAiNGO, EAGO) |
 |---|---|---|
 | relaxations | reduced-space McCormick plus per-primitive αBB | extended formulations with auxiliary variables; multivariate McCormick; convex/concave envelopes of bilinear, trilinear, fractional and edge-concave terms |
-| bound tightening | interval infeasibility only | FBBT every node; OBBT at the root and selectively in the tree; duality-based (marginals) range reduction; probing |
+| bound tightening | FBBT every node; OBBT at the root; duality-based range reduction | FBBT every node; OBBT at the root and selectively in the tree; duality-based (marginals) range reduction; probing |
 | cuts | Frank–Wolfe/Kelley linearizations | outer approximation, RLT, SDP/eigenvalue cuts for QCQP, perspective cuts |
 | LP | dense IPM, fixed iterations | warm-started sparse simplex (dual simplex in the tree) |
 | branching | widest nonlinear variable, bisection | violation-weighted, pseudocost/reliability branching, branching at the relaxation solution |
@@ -82,6 +82,45 @@ reduction.
   every node to shrink variable ranges, at almost no cost.
 - **Exit:** node counts on the current 21 problems drop at least 3×; at least
   half of the ≤ 10-variable MINLPLib subset is solved.
+
+**Status (implemented).** `jaxglobal/fbbt.py` (FBBT on the flattened jaxpr,
+5 rounds per node in a `fori_loop`), duality-based range reduction in both
+bounders (`lp.reduce_ranges`), and batched OBBT (`lp.make_obbt`, root by
+default, `obbt="tree"` for every node). Node counts on the 21 problems
+(defaults, same tolerances as `examples/benchmark.py` and the tests):
+
+| problem | before | after | ratio |
+|---|---:|---:|---:|
+| gramacy_lee | 23 | 5 | 4.6× |
+| six_hump_camel | 407 | 167 | 2.4× |
+| mccormick | 41 | 11 | 3.7× |
+| goldstein_price | 8883 | 7309 | 1.2× |
+| shubert | 2399 | 1781 | 1.3× |
+| michalewicz_2d | 65 | 9 | 7.2× |
+| holder_table | 391 | 183 | 2.1× |
+| eggholder | 153 | 47 | 3.3× |
+| hartmann3 | 1769 | 515 | 3.4× |
+| styblinski_tang_3d | 451 | 333 | 1.4× |
+| shekel10_4d | 133 | 83 | 1.6× |
+| hartmann6 | 6515 | 2261 | 2.9× |
+| piecewise_2d | 87 | 31 | 2.8× |
+| tanh_net_2d | 387 | 323 | 1.2× |
+| G06 | 119 | 25 | 4.8× |
+| G08 | 99 | 33 | 3.0× |
+| G11 | 127 | 35 | 3.6× |
+| G24 | 43 | 37 | 1.2× |
+| G04 | 67 | 5 | 13.4× |
+| haverly | 229 | 21 | 10.9× |
+| reactor | 2587 | 541 | 4.8× |
+
+Geometric mean 3.0×; 11 of 21 reach 3×. The constrained problems gain most
+(geometric mean 4.6×). Unconstrained problems with a flat objective
+landscape (Goldstein–Price, Shubert, tanh net) barely change: there the
+cutoff `f <= UB` removes little until the gap is already small. Wall time is
+currently higher on these small problems because the extra kernels must be
+compiled. The MINLPLib half of the exit criterion has not been measured yet.
+Remaining phase-1 items: feeding FBBT's intermediate ranges back into the
+relaxations, choosing tree-OBBT variables by impact, and probing.
 
 ### Phase 2 — stronger relaxations (6–8 weeks)
 

@@ -30,6 +30,16 @@ huge, invalid bound. Constraint cuts are relaxed by ``tol`` (the B&B
 feasibility tolerance), which keeps the LP interior non-empty when an equality
 gives two opposing cuts, and makes the bound valid for the problem B&B
 actually solves (constraints satisfied to ``tol``).
+
+The same certificate gives bound tightening for free:
+
+* **duality-based range reduction** (Ryoo & Sahinidis): the certificate is
+  ``f >= lb + T (r_j u_j - min(r_j, 0))`` with reduced costs ``r = c + A^T y``,
+  so with an incumbent ``f <= cutoff`` each ``u_j`` is confined to an interval
+  (each ``|r_j|`` is first shrunk by its own rounding-error bound);
+* **optimality-based bound tightening** (``make_obbt``): minimize and maximize
+  each variable over the cut LP (2n LPs, one ``vmap``) and keep the
+  certified bounds.
 """
 
 from __future__ import annotations
@@ -52,7 +62,7 @@ def ipm(c, A, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10):
     all iterates is returned as well, so a late bad step can never lose a good
     certificate.
 
-    Returns ``(z, y, best_cert)``.
+    Returns ``(z, y_best, best_cert)`` where ``y_best`` attains ``best_cert``.
     """
     m, n = A.shape
     eye = jnp.eye(n)
@@ -63,7 +73,7 @@ def ipm(c, A, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10):
         return jnp.minimum(1.0, 0.99 * jnp.min(r))
 
     def body(_, st):
-        z, s, y, best = st
+        z, s, y, best, yb = st
         rp = A @ z + s - b
         rd = c + A.T @ y
         mu = s @ y / m
@@ -77,13 +87,40 @@ def ipm(c, A, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10):
         ok = jnp.all(jnp.isfinite(new[0])) & jnp.all(jnp.isfinite(new[2])) & (mu > mu_tol)
         z, s, y = jax.tree.map(lambda a, b_: jnp.where(ok, a, b_), new, (z, s, y))
         cy = cert(y)
-        return z, s, y, jnp.maximum(best, jnp.where(jnp.isnan(cy), -jnp.inf, cy))
+        cy = jnp.where(jnp.isnan(cy), -jnp.inf, cy)
+        better = cy > best
+        return z, s, y, jnp.where(better, cy, best), jnp.where(better, y, yb)
 
     z0 = jnp.full(n, 0.5)
     s0 = jnp.maximum(b - A @ z0, 1.0)
     y0 = jnp.ones(m)
-    z, s, y, best = jax.lax.fori_loop(0, iters, body, (z0, s0, y0, cert(y0)))
-    return z, y, best
+    c0 = cert(y0)
+    st = (z0, s0, y0, jnp.where(jnp.isnan(c0), -jnp.inf, c0), y0)
+    z, s, y, best, yb = jax.lax.fori_loop(0, iters, body, st)
+    return z, yb, best
+
+
+def _safe_costs(r, A, y):
+    """Reduced costs shrunk toward 0 by their rounding error (|A| <= 1)."""
+    err = (A.shape[0] + 2) * EPS * (1.0 + jnp.abs(A).T @ y)
+    return jnp.sign(r) * jnp.maximum(jnp.abs(r) - err, 0.0)
+
+
+def reduce_ranges(lo, hi, lb, r, cutoff):
+    """Duality-based range reduction from ``f(x) >= lb + sum_j (r_j x_j - min_box r_j x_j)``.
+
+    Every point of the box with ``f(x) <= cutoff`` satisfies
+    ``r_j x_j - min(r_j lo_j, r_j hi_j) <= cutoff - lb`` for each ``j``.
+    Returns the reduced box (possibly empty when ``lb > cutoff``).
+    """
+    gap = cutoff - lb
+    gap = gap + 1e-9 * (1 + jnp.abs(cutoff))  # floating-point slack
+    use = jnp.isfinite(gap) & jnp.isfinite(lb) & (gap >= 0)
+    rs = jnp.where(r != 0, r, 1.0)
+    new_hi = jnp.where(use & (r > 0), lo + gap / rs, hi)
+    new_lo = jnp.where(use & (r < 0), hi + gap / rs, lo)
+    ok = jnp.isfinite(new_lo) & jnp.isfinite(new_hi)
+    return jnp.where(ok, jnp.maximum(lo, new_lo), lo), jnp.where(ok, jnp.minimum(hi, new_hi), hi)
 
 
 def _as_vec(fn):
@@ -91,7 +128,12 @@ def _as_vec(fn):
 
 
 def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, tol=0.0):
-    """Return ``bound(lo, hi) -> (lb, x_lp, infeasible)`` for one box."""
+    """Return ``bound(lo, hi, cutoff) -> (lb, x_lp, infeasible, lo', hi')`` for one box.
+
+    ``[lo', hi']`` is the box after duality-based range reduction against
+    ``f <= cutoff`` (the incumbent value); it is the input box when
+    ``cutoff`` is infinite.
+    """
     rf = relax(f)
     rg = relax(_as_vec(ineq)) if ineq is not None else None
     rh = relax(_as_vec(eq)) if eq is not None else None
@@ -106,7 +148,7 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
             parts += [mh.cv, -mh.cc]
         return jnp.concatenate(parts)
 
-    def bound(lo, hi):
+    def bound(lo, hi, cutoff=jnp.inf):
         n = lo.size
         w = hi - lo
         c = 0.5 * (lo + hi)
@@ -165,11 +207,12 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
         box_b = jnp.concatenate([jnp.ones(n + 1), jnp.zeros(n + 1)])
         cobj = jnp.zeros(n + 1).at[n].set(1.0)
 
-        def lagrangian_bound(A, bvec, y):
+        def dual(A, bvec, y):
             # Certificate over u in [0,1]^n, tau in [0, inf): the cap tau <= 1
             # used inside the LP is NOT relied on (later Kelley cuts may exceed
             # thi). Objective-row duals are rescaled so the tau coefficient
             # 1 - sum(y_obj * T / |row|) stays >= 0; any y >= 0 is then valid.
+            # Returns the bound and the reduced costs of u.
             y = jnp.where(jnp.isfinite(y), jnp.maximum(y, 0.0), 0.0)
             s_obj = -(A[:, n] @ y)
             y = y * jnp.where(s_obj > 1.0, 1.0 / s_obj, 1.0) ** (A[:, n] < 0)
@@ -177,19 +220,25 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
             val = jnp.sum(jnp.minimum(coef[:n], 0.0)) - y @ bvec
             # rounding error of the two sums (|A| <= 1 after row scaling)
             err = (A.shape[0] + n + 2) * EPS * (jnp.sum(1.0 + jnp.abs(A).T @ y) + jnp.abs(bvec) @ y)
-            return tlo_s + T * (val - err)
+            return tlo_s + T * (val - err), _safe_costs(coef[:n], A[:, :n], y)
 
         const, coef = const0, coef0
         best = jnp.where(bad_t, -jnp.inf, tlo)
         u = jnp.full(n, 0.5)
+        rlo, rhi = lo, hi
         for k in range(n_kelley + 1):
             A, bvec = rows(const, coef)
             nA = A.shape[0]
-            z, _, lb = ipm(
+            z, y, lb = ipm(
                 cobj, jnp.concatenate([A, box_A]), jnp.concatenate([bvec, box_b]), ipm_iters,
-                cert=lambda y, A=A, bvec=bvec, nA=nA: lagrangian_bound(A, bvec, y[:nA]),
+                cert=lambda y, A=A, bvec=bvec, nA=nA: dual(A, bvec, y[:nA])[0],
             )  # fmt: skip
-            best = jnp.maximum(best, jnp.where(jnp.isnan(lb) | bad_t, -jnp.inf, lb))
+            lb = jnp.where(jnp.isnan(lb) | bad_t, -jnp.inf, lb)
+            best = jnp.maximum(best, lb)
+            # range reduction from this round's certificate (r is per unit of u)
+            _, r = dual(A, bvec, y[:nA])
+            klo, khi = reduce_ranges(lo, hi, lb, T * r / jnp.where(w > 0, w, 1.0), cutoff)
+            rlo, rhi = jnp.maximum(rlo, klo), jnp.minimum(rhi, khi)
             u = jnp.clip(z[:n], 0.0, 1.0)
             if k < n_kelley:  # Kelley: add cuts at the LP solution
                 ck, gk = cuts_at(lo + w * u)
@@ -197,6 +246,90 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
                 coef = jnp.concatenate([coef, gk[None]])
 
         lb = jnp.where(infeasible, jnp.inf, best)
-        return lb, lo + w * u, infeasible
+        return lb, lo + w * u, infeasible, rlo, rhi
 
     return bound
+
+
+def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0):
+    """Return ``obbt(lo, hi, cutoff) -> (lo', hi', infeasible)`` for one box.
+
+    Optimality-based bound tightening: each variable is minimized and
+    maximized over the outer-approximation LP
+
+        cut_f(u) <= cutoff,   cut_g(u) <= tol,   cut_h(u) <= tol,   -cut_cc_h(u) <= tol,
+
+    with cuts at the box center and 2n axis points (and, in later rounds, at the
+    previous round's 2n LP solutions). The 2n LPs are one ``vmap``. As in the
+    node bound, the new variable bounds are weak-duality certificates, so an
+    inexact LP solve can only make them looser, never invalid.
+    """
+    rf = relax(f)
+    rg = relax(_as_vec(ineq)) if ineq is not None else None
+    rh = relax(_as_vec(eq)) if eq is not None else None
+
+    def convex_parts(x, lo, hi):
+        parts = [jnp.atleast_1d(rf(x, lo, hi).cv)]
+        if rg is not None:
+            parts.append(rg(x, lo, hi).cv)
+        if rh is not None:
+            mh = rh(x, lo, hi)
+            parts += [mh.cv, -mh.cc]
+        return jnp.concatenate(parts)
+
+    def obbt(lo, hi, cutoff=jnp.inf):
+        n = lo.size
+        w = hi - lo
+        c = 0.5 * (lo + hi)
+
+        def cuts_at(p):
+            v = convex_parts(p, lo, hi)
+            J = jax.jacfwd(convex_parts)(p, lo, hi)
+            const = v + J @ (lo - p)
+            coef = J * w
+            ok = jnp.isfinite(const) & jnp.all(jnp.isfinite(coef), axis=1)
+            return jnp.where(ok, const, -jnp.inf), jnp.where(ok[:, None], coef, 0.0)
+
+        def rows(const, coef):
+            rhs = jnp.concatenate([cutoff - const[:, :1], tol - const[:, 1:]], axis=1).reshape(-1)
+            A = coef.reshape(-1, n)
+            nrm = jnp.linalg.norm(A, axis=1)
+            live = jnp.isfinite(rhs) & (nrm > 0)
+            nrm = jnp.where(live, nrm, 1.0)
+            return jnp.where(live[:, None], A / nrm[:, None], 0.0), jnp.where(live, rhs / nrm, 1.0)
+
+        box_A = jnp.concatenate([jnp.eye(n), -jnp.eye(n)])
+        box_b = jnp.concatenate([jnp.ones(n), jnp.zeros(n)])
+        C = jnp.concatenate([jnp.eye(n), -jnp.eye(n)])
+
+        def solve(cvec, A, bvec):
+            nA = A.shape[0]
+
+            def cert(y):
+                y = jnp.where(jnp.isfinite(y[:nA]), jnp.maximum(y[:nA], 0.0), 0.0)
+                val = jnp.sum(jnp.minimum(cvec + A.T @ y, 0.0)) - y @ bvec
+                err = (nA + n + 2) * EPS * (jnp.sum(1.0 + jnp.abs(A).T @ y) + jnp.abs(bvec) @ y)
+                return val - err
+
+            z, _, best = ipm(cvec, jnp.concatenate([A, box_A]), jnp.concatenate([bvec, box_b]), ipm_iters, cert=cert)
+            return jnp.clip(z, 0.0, 1.0), best
+
+        axis = jnp.concatenate([jnp.eye(n), -jnp.eye(n)]) * (w / 4)
+        const, coef = jax.vmap(cuts_at)(jnp.concatenate([c[None], c + axis]))
+        ulo, uhi = jnp.zeros(n), jnp.ones(n)
+        for k in range(rounds):
+            A, bvec = rows(const, coef)
+            Z, B = jax.vmap(solve, (0, None, None))(C, A, bvec)
+            ulo = jnp.maximum(ulo, jnp.where(jnp.isfinite(B[:n]), B[:n], 0.0))
+            uhi = jnp.minimum(uhi, jnp.where(jnp.isfinite(B[n:]), -B[n:], 1.0))
+            if k < rounds - 1:
+                ck, gk = jax.vmap(cuts_at)(lo + w * Z)
+                const, coef = jnp.concatenate([const, ck]), jnp.concatenate([coef, gk])
+
+        infeasible = jnp.any(ulo > uhi + 1e-9)
+        ulo, uhi = ulo - 1e-9, uhi + 1e-9  # floating-point slack
+        new_lo = jnp.where(w > 0, jnp.maximum(lo, lo + w * ulo), lo)
+        new_hi = jnp.where(w > 0, jnp.minimum(hi, lo + w * uhi), hi)
+        return jnp.minimum(new_lo, new_hi), jnp.maximum(new_lo, new_hi), infeasible
+
+    return obbt

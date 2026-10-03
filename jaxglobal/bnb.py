@@ -12,6 +12,13 @@ Lower bound of a box = max of
     Frank-Wolfe duality-gap bound.
 Upper bounds come from evaluating f at the box center and FW iterate, plus a
 batch of local solves (see ``make_local``) whenever a batch improves the incumbent.
+
+Bound tightening (all against the incumbent cutoff ``f <= UB``), every
+node unless switched off:
+  * FBBT over the jaxpr before bounding (``fbbt.py``);
+  * duality-based range reduction from the cuts / LP duals after bounding;
+  * OBBT on the root box (and optionally every node) via batched LPs.
+Children are created from the tightened box.
 """
 
 from __future__ import annotations
@@ -24,14 +31,21 @@ import jax.numpy as jnp
 import numpy as np
 
 from .local import make_local
-from .lp import make_constrained_bounder
+from .fbbt import make_fbbt
+from .lp import make_constrained_bounder, make_obbt, reduce_ranges
 from .relax import relax
 
 
 def make_bounder(f, n_fw=20):
+    """Return ``bound(lo, hi, cutoff) -> (lb, x, f(x), lo', hi')`` for one box.
+
+    ``[lo', hi']`` is the box after duality-based range reduction: every
+    Frank-Wolfe cut ``f(z) >= cv(x) + g.(z - x)`` with ``f(z) <= cutoff``
+    confines each ``z_j`` to an interval.
+    """
     rf = relax(f)
 
-    def bound(blo, bhi):
+    def bound(blo, bhi, cutoff=jnp.inf):
         def cv(x):
             return rf(x, blo, bhi).cv
 
@@ -40,21 +54,23 @@ def make_bounder(f, n_fw=20):
         ilb = rf(c, blo, bhi).lo
 
         def step(carry, k):
-            x, best = carry
+            x, best, rlo, rhi = carry
             v, g = vg(x)
             vert = jnp.where(g > 0, blo, bhi)
             lb = v + jnp.dot(g, vert - x)
             ok = jnp.isfinite(lb) & jnp.all(jnp.isfinite(g))
             best = jnp.maximum(best, jnp.where(ok, lb, -jnp.inf))
+            klo, khi = reduce_ranges(blo, bhi, jnp.where(ok, lb, -jnp.inf), jnp.where(ok, g, 0.0), cutoff)
             gamma = 2.0 / (k + 2.0)
             xn = jnp.where(ok, x + gamma * (vert - x), x)
-            return (xn, best), None
+            return (xn, best, jnp.maximum(rlo, klo), jnp.minimum(rhi, khi)), None
 
-        (xfw, cut), _ = jax.lax.scan(step, (c, -jnp.inf), jnp.arange(n_fw))
+        init = (c, -jnp.inf, blo, bhi)
+        (xfw, cut, rlo, rhi), _ = jax.lax.scan(step, init, jnp.arange(n_fw))
         lb = jnp.maximum(jnp.where(jnp.isnan(ilb), -jnp.inf, ilb), cut)
         fc, ff = f(c), f(xfw)
         use_c = ~(ff < fc)
-        return lb, jnp.where(use_c, c, xfw), jnp.where(use_c, fc, ff)
+        return lb, jnp.where(use_c, c, xfw), jnp.where(use_c, fc, ff), rlo, rhi
 
     return bound
 
@@ -116,6 +132,11 @@ def minimize(
     local_solve=True,
     local_solver="auto",
     n_starts=1,
+    fbbt=True,
+    fbbt_rounds=5,
+    dbbt=True,
+    obbt="root",
+    obbt_rounds=2,
     time_limit=np.inf,
     verbose=False,
 ):
@@ -128,6 +149,12 @@ def minimize(
     ``"optax"`` (pure JAX), ``"scipy"``, or ``"auto"`` (pounce if installed).
     The search stops with status ``"time_limit"`` after ``time_limit`` seconds
     (checked between batches, so compile time counts).
+
+    Bound tightening against the incumbent: ``fbbt`` (forward-backward interval
+    propagation over the jaxpr, ``fbbt_rounds`` sweeps per node), ``dbbt``
+    (duality-based range reduction from each node's bound certificate), and
+    ``obbt`` (LP-based tightening of every variable: ``"root"``, ``"tree"`` for
+    every node, or ``False``).
     """
     t0 = time.perf_counter()
     lo = np.asarray(lo, dtype=np.float64)
@@ -145,17 +172,41 @@ def minimize(
     def violation(x):
         return jnp.maximum(jnp.max(jnp.maximum(g(x), 0.0), initial=0.0), jnp.max(jnp.abs(h(x)), initial=0.0))
 
+    if obbt not in (False, None, "root", "tree"):
+        raise ValueError(f"obbt must be False, 'root' or 'tree', not {obbt!r}")
     if constrained:
         cb = make_constrained_bounder(f, ineq, eq, n_kelley=n_kelley, tol=feas_tol)
 
-        def node(blo, bhi):
-            lb, x, _ = cb(blo, bhi)
+        def raw_bound(blo, bhi, cutoff):
+            lb, x, _, rlo, rhi = cb(blo, bhi, cutoff)
             fx = jnp.where(violation(x) <= feas_tol, f(x), jnp.inf)
-            return lb, x, fx
-
-        bound = jax.jit(jax.vmap(node))
+            return lb, x, fx, rlo, rhi
     else:
-        bound = jax.jit(jax.vmap(make_bounder(f, n_fw)))
+        raw_bound = make_bounder(f, n_fw)
+    tighten = make_fbbt(f, ineq, eq, rounds=fbbt_rounds, feas_tol=feas_tol) if fbbt else None
+    lp_tighten = make_obbt(f, ineq, eq, rounds=obbt_rounds, tol=feas_tol) if obbt else None
+
+    def node(blo, bhi, cutoff, with_obbt=False):
+        """Tighten, then bound one box. Returns (lb, x, f(x), lo', hi')."""
+        empty = jnp.array(False)
+        if tighten is not None:
+            blo, bhi, e = tighten(blo, bhi, cutoff)
+            empty |= e
+        if with_obbt:
+            blo, bhi, e = lp_tighten(blo, bhi, cutoff)
+            empty |= e
+            if tighten is not None:
+                blo, bhi, e = tighten(blo, bhi, cutoff)
+                empty |= e
+        lb, x, fx, rlo, rhi = raw_bound(blo, bhi, cutoff)
+        if not dbbt:
+            rlo, rhi = blo, bhi
+        # an empty box holds no feasible point with f <= cutoff
+        return (jnp.where(empty, cutoff, lb), x, jnp.where(empty, jnp.inf, fx),
+                jnp.where(empty, blo, rlo), jnp.where(empty, bhi, rhi))  # fmt: skip
+
+    bound = jax.jit(jax.vmap(node, in_axes=(0, 0, None)))
+    bound_obbt = jax.jit(jax.vmap(lambda a, b, c: node(a, b, c, True), in_axes=(0, 0, None))) if obbt else None
 
     viol = jax.jit(violation)
     solve_local = make_local(f, ineq, eq, lo, hi, local_solver)
@@ -170,13 +221,15 @@ def minimize(
         i = int(np.argmin(F))
         return X[i], float(F[i])
 
-    def evaluate(blo, bhi):
+    def evaluate(blo, bhi, with_obbt=False):
+        """Tighten and bound a batch of boxes: (lb, x, f(x), lo', hi')."""
         k = len(blo)
         pad = batch - k
         plo = np.concatenate([blo, np.repeat(blo[:1], pad, 0)])
         phi = np.concatenate([bhi, np.repeat(bhi[:1], pad, 0)])
-        lb, xc, fc = (np.asarray(a)[:k] for a in bound(jnp.asarray(plo), jnp.asarray(phi)))
-        return lb, xc, fc
+        fn = bound_obbt if with_obbt else bound
+        out = fn(jnp.asarray(plo), jnp.asarray(phi), jnp.asarray(ub, dtype=jnp.float64))
+        return tuple(np.asarray(a)[:k] for a in out)
 
     ub, xbest = np.inf, 0.5 * (lo + hi)
 
@@ -203,9 +256,15 @@ def minimize(
     def tol():
         return max(abs_tol, rel_tol * abs(ub)) if np.isfinite(ub) else abs_tol
 
-    lb, xc, fc = evaluate(lo[None], hi[None])
+    lb, xc, fc, rlo, rhi = evaluate(lo[None], hi[None])
     update_incumbent(xc, fc, lb)
-    open_lo, open_hi, open_lb = lo[None], hi[None], lb
+    if obbt and (constrained or np.isfinite(ub)):
+        # root OBBT once an incumbent cutoff is known (it is useless without
+        # one when there are no constraints)
+        lb2, xc, fc, rlo, rhi = evaluate(rlo, rhi, with_obbt=True)
+        lb = np.maximum(lb, lb2)
+        update_incumbent(xc, fc, lb)
+    open_lo, open_hi, open_lb = rlo, rhi, lb
     pruned_lb = np.inf  # smallest lower bound among fathomed boxes
     nodes, history = 1, []
     it = 0
@@ -240,7 +299,7 @@ def minimize(
         clo = np.concatenate([plo, right_lo])
         chi = np.concatenate([left_hi, phi])
 
-        clb, cx, cf = evaluate(clo, chi)
+        clb, cx, cf, clo, chi = evaluate(clo, chi, with_obbt=obbt == "tree")
         nodes += 2 * k
         # children cannot be worse than their parent's bound
         clb = np.maximum(clb, np.concatenate([open_lb[sel], open_lb[sel]]))

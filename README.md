@@ -45,6 +45,18 @@ r = minimize(f, [-512, -512], [512, 512])
 4. **Batched spatial branch-and-bound.** Each iteration bisects the 128
    lowest-bound boxes and bounds all 256 children in one `jit(vmap(...))` call.
    L-BFGS-B (with `jax.grad`) polishes the incumbent.
+5. **Bound tightening against the incumbent** (`f <= UB`), all batched:
+   * *FBBT* (`jaxglobal/fbbt.py`): the jaxpr is flattened into a tape and swept
+     forward (interval rules) and backward (inverse rules: `x ∈ Z − Y` for
+     add, `x ∈ log Z` for exp, the two-sided root for `x²ⁿ` and `|x|`, …) to
+     a fixed number of rounds before every node is bounded;
+   * *duality-based range reduction*: the cut / LP-dual certificate
+     `f ≥ lb + Σ r_j (x_j − lo_j)` confines each variable to where it could
+     still beat the incumbent, at no extra cost;
+   * *OBBT* (`lp.make_obbt`): min and max of every variable over the
+     outer-approximation LP, as 2n `vmap`-ed LPs with weak-duality-certified
+     results; on the root by default (`obbt="tree"` for every node).
+   Children are split from the tightened box.
 
 ![relaxations](figures/relaxations.png)
 
@@ -164,14 +176,16 @@ Any AMPL `.nl` model (text or binary) can be loaded with
   `lax.cond`/`while`/`scan` with variable-dependent control flow are not
   supported; Python control flow on static values is fine.
 * Unsupported primitives raise `NotImplementedError` naming the primitive.
-* Bounds are first-order McCormick/αBB plus interval arithmetic. There is no
-  bound tightening, no reduced-cost or optimality-based tightening, and no LP
-  over multiple cuts, so node counts are far from the state of the art.
+* Bounds are first-order McCormick/αBB plus interval arithmetic. Tightened
+  intermediate ranges from FBBT are not yet fed back into the relaxations
+  (Wechsung-style reverse McCormick), and there is no probing.
+* Bound tightening adds compile time (the FBBT tape and the OBBT LPs are
+  separate kernels), which dominates wall time on the small test problems.
 
 ## Natural next steps
 
 * Harder constrained sets (larger pooling problems, MINLPLib `ex8_*`).
-* Feasibility-based bound tightening by backward propagation over the jaxpr.
+* Feed FBBT's intermediate ranges into the McCormick rules.
 * Multivariate McCormick / tighter envelopes for common patterns
   (x·exp(x), x·log(x), bilinear `dot_general`).
 * Outward rounding (e.g. `nextafter`) for rigorous bounds.
