@@ -3,10 +3,11 @@ name = "jaxglobal"
 version = "0.0.1"
 description = "Proof-of-concept deterministic global optimization of plain JAX functions via jaxpr-derived relaxations"
 requires-python = ">=3.10"
-dependencies = ["jax>=0.4.30", "numpy", "scipy"]
+dependencies = ["jax>=0.4.30", "numpy", "scipy", "optax"]
 
 [project.optional-dependencies]
-dev = ["pytest", "matplotlib"]
+pounce = ["pounce-solver>=0.12"]  # default local NLP solver when installed
+dev = ["pytest", "matplotlib", "pounce-solver>=0.12"]
 
 [build-system]
 requires = ["setuptools>=64"]

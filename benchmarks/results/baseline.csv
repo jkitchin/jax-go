@@ -1,0 +1,574 @@
+solver,name,status,time,primal,dual,nodes,message
+jaxglobal,ex4_1_4,optimal,0.7851643329486251,0.0,-5.882224924741671e-07,89,optimal
+jaxglobal,ex4_1_3,optimal,0.9114532079547644,-443.6717047411246,-443.7058790465345,37,optimal
+jaxglobal,ex4_1_1,optimal,0.9647894999943674,-7.487312364902364,-7.487604841595931,41,optimal
+jaxglobal,ex4_1_6,optimal,0.6121229999698699,7.0,6.999612961827129,71,optimal
+jaxglobal,ex4_1_7,optimal,0.7210607500746846,-7.5,-7.500556365552119,23,optimal
+jaxglobal,mathopt5_2,optimal,0.7961458330973983,-1.0,-1.0,1,optimal
+jaxglobal,mathopt5_1,optimal,1.0203477498143911,-0.9996118219097785,-0.9997039552699432,9,optimal
+jaxglobal,ex8_1_2,optimal,2.856455458328128,-1.0708610192625143,-1.0709521528301365,59,optimal
+jaxglobal,mathopt5_4,optimal,0.8166719172149897,8.590695257856819e-26,0.0,1,optimal
+jaxglobal,mathopt5_3,optimal,0.9340203749015927,-1.6164249282925456,-1.6164729006645504,35,optimal
+jaxglobal,mathopt5_5,optimal,1.0140017089433968,-14.83795002571059,-14.838782898305304,57,optimal
+jaxglobal,mathopt5_6,optimal,0.9804995418526232,-0.9432915033603444,-0.9432958254089854,17,optimal
+jaxglobal,mathopt5_7,optimal,0.9185355831868947,-4.436728338451456,-4.436972402605802,31,optimal
+jaxglobal,ex14_1_9,unsupported,0.4834231249988079,,,,unbounded variables
+jaxglobal,mathopt5_8,optimal,0.6163655002601445,-0.6860722798102232,-0.6861352910363073,41,optimal
+jaxglobal,ex4_1_5,unsupported,0.4532653749920428,,,,unbounded variables
+jaxglobal,ex4_1_8,optimal,2.1325983749702573,-16.73889318439464,-16.74017301085866,3,optimal
+jaxglobal,ex8_1_1,optimal,1.4915652088820934,-2.021806783359787,-2.0219583682097393,19,optimal
+jaxglobal,trig,optimal,5.069372791796923,-3.76250149139259,-3.7626625590292684,53,optimal
+jaxglobal,ex4_1_9,optimal,4.310691874939948,-5.5080132815752965,-5.508203348180106,37,optimal
+jaxglobal,ex8_1_3,unsupported,0.4852138329297304,,,,unbounded variables
+jaxglobal,ex8_1_4,unsupported,0.47926308307796717,,,,unbounded variables
+jaxglobal,ex8_1_5,unsupported,0.47636220790445805,,,,unbounded variables
+jaxglobal,ex8_1_6,unsupported,0.47036154195666313,,,,unbounded variables
+jaxglobal,filter,unsupported,0.4745509587228298,,,,unbounded variables
+jaxglobal,kriging_peaks-red010,optimal,7.392117000184953,0.29112078217353415,0.29109172157391505,3749,optimal
+jaxglobal,kriging_peaks-red020,optimal,17.712193708866835,0.3724285365612836,0.37239132118780943,2935,optimal
+jaxglobal,kriging_peaks-red030,optimal,31.504162542056292,-1.5865879183085934,-1.5867456560720565,1083,optimal
+jaxglobal,ex4_1_2,optimal,18.082152583170682,-663.5000966105,-663.5227382850225,29,optimal
+jaxglobal,kriging_peaks-red050,time_limit,62.48190900031477,-1.1565899100085255,-282.6515491223936,1,time_limit
+jaxglobal,mathopt1,optimal,2.8411127920262516,1.0047142030072756e-26,0.0,1,optimal
+jaxglobal,mathopt2,unsupported,0.42891958402469754,,,,unbounded variables
+jaxglobal,mathopt4,optimal,3.8429986666888,1.9444608170423416e-24,0.0,3,optimal
+jaxglobal,mathopt6,optimal,1.4459280828014016,-3.3068686474752367,-3.3069765397175064,1899,optimal
+jaxglobal,prob06,optimal,2.7251378749497235,1.177124271377521,1.177069549008113,29,optimal
+jaxglobal,rbrock,optimal,0.6261475826613605,3.895739746229365e-21,0.0,1,optimal
+jaxglobal,st_e01,optimal,1.7997818337753415,-6.666666664576006,-6.6666666677731135,1,optimal
+jaxglobal,st_e08,optimal,2.613657208159566,0.741781954558145,0.7417200854657091,27,optimal
+jaxglobal,st_e09,optimal,2.4594979998655617,-0.5000000024900002,-0.5000409031473756,51,optimal
+jaxglobal,st_e18,optimal,2.3931941245682538,-2.828427128271724,-2.8284272707700495,5,optimal
+jaxglobal,st_e19,optimal,2.795489584095776,-118.70485980947632,-118.71633747028143,127,optimal
+jaxglobal,st_e22,optimal,2.6061052503064275,-85.00000013998,-85.00000013998,13,optimal
+jaxglobal,st_e23,optimal,2.5779012916609645,-1.08333333499,-1.0834121704145698,49,optimal
+jaxglobal,st_e24,optimal,2.659141832962632,3.0000000000075007,2.9999999956245254,9,optimal
+jaxglobal,st_e26,optimal,2.838824791368097,-185.7792007596579,-185.79492188117354,33,optimal
+jaxglobal,st_ht,optimal,2.426201792433858,-1.5999999966194445,-1.60000000347737,9,optimal
+jaxglobal,st_ph10,unsupported,0.4433647091500461,,,,unbounded variables
+jaxglobal,st_phex,unsupported,0.4372686669230461,,,,unbounded variables
+jaxglobal,st_qpc-m0,unsupported,0.44568704115226865,,,,unbounded variables
+jaxglobal,st_qpk1,unsupported,0.4436998749151826,,,,unbounded variables
+jaxglobal,trigx,unsupported,0.43833700008690357,,,,unbounded variables
+jaxglobal,ex14_1_1,unsupported,0.4298750408925116,,,,unbounded variables
+jaxglobal,ex14_1_3,unsupported,0.4403157918713987,,,,unbounded variables
+jaxglobal,ex14_1_4,unsupported,0.4439032496884465,,,,unbounded variables
+jaxglobal,ex14_1_8,unsupported,0.45473045809194446,,,,unbounded variables
+jaxglobal,ex3_1_4,unsupported,0.4417247078381479,,,,unbounded variables
+jaxglobal,ex6_2_11,optimal,34.25253920769319,-2.672407764997553e-06,-3.6677302378951435e-06,86987,optimal
+jaxglobal,kriging_peaks-red200,time_limit,60.0,,,,killed
+jaxglobal,kriging_peaks-red100,time_limit,60.0,,,,killed
+jaxglobal,hs62,unsupported,0.4434875422157347,,,,unbounded variables
+jaxglobal,least,unsupported,0.45436241663992405,,,,unbounded variables
+jaxglobal,prob09,optimal,2.098417999688536,-6.392987786846732e-18,-9.520260135786884e-08,3,optimal
+jaxglobal,st_bsj2,unsupported,0.4586660829372704,,,,unbounded variables
+jaxglobal,st_e02,optimal,3.6296208342537284,201.1593340608648,201.15271942555387,25,optimal
+jaxglobal,st_e06,optimal,3.2782657090574503,0.0,0.0,1,optimal
+jaxglobal,st_e11,optimal,3.8222195003181696,189.3116296866205,189.30625406431338,31,optimal
+jaxglobal,st_pan1,unsupported,0.42006754176691175,,,,unbounded variables
+jaxglobal,st_ph11,unsupported,0.4221039582043886,,,,unbounded variables
+jaxglobal,st_ph12,unsupported,0.4222342921420932,,,,unbounded variables
+jaxglobal,st_ph13,unsupported,0.427931166253984,,,,unbounded variables
+jaxglobal,st_ph14,unsupported,0.4371922924183309,,,,unbounded variables
+jaxglobal,kriging_peaks-red500,time_limit,60.0,,,,killed
+jaxglobal,st_ph20,unsupported,0.44503791723400354,,,,unbounded variables
+jaxglobal,st_z,unsupported,0.44544391660019755,,,,unbounded variables
+jaxglobal,chance,unsupported,0.44435962475836277,,,,unbounded variables
+jaxglobal,dispatch,unsupported,0.44222141709178686,,,,unbounded variables
+jaxglobal,ex14_2_2,unsupported,0.438744958024472,,,,unbounded variables
+jaxglobal,ex14_2_5,unsupported,0.4511329587548971,,,,unbounded variables
+jaxglobal,ex14_2_8,unsupported,0.44680600007995963,,,,unbounded variables
+jaxglobal,ex14_2_9,unsupported,0.4387417081743479,,,,unbounded variables
+jaxglobal,ex6_1_2,unsupported,0.4604371660389006,,,,unbounded variables
+jaxglobal,ex6_2_14,optimal,26.75096083432436,-0.6953579427597103,-0.695427056248669,15679,optimal
+jaxglobal,ex6_2_8,optimal,47.81189150037244,-0.027006348844864636,-0.027009031751387594,154155,optimal
+jaxglobal,ex7_3_1,unsupported,0.4291719160974026,,,,unbounded variables
+jaxglobal,ex7_3_2,unsupported,0.4312615841627121,,,,unbounded variables
+jaxglobal,st_bpk1,unsupported,0.43289508298039436,,,,unbounded variables
+jaxglobal,ex6_2_6,optimal,52.692541709169745,7.107625399349615e-07,-2.8225092225796286e-07,179333,optimal
+jaxglobal,st_bpv1,optimal,2.5611756672151387,9.999999040030241,9.999999040030241,1,optimal
+jaxglobal,st_bpv2,optimal,3.278718000277877,-8.000000027968337,-8.000000027968337,9,optimal
+jaxglobal,st_e12,optimal,3.9131095418706536,-4.514201760610513,-4.514466981402083,15,optimal
+jaxglobal,st_e25,unsupported,0.43051941599696875,,,,unbounded variables
+jaxglobal,st_e04,optimal,5.741928916890174,5194.866282760366,5194.866237548178,143,optimal
+jaxglobal,st_e41,optimal,6.832480667158961,641.8235606414521,641.7944523005401,27,optimal
+jaxglobal,st_glmp_fp1,unsupported,0.5518027921207249,,,,unbounded variables
+jaxglobal,st_glmp_fp2,unsupported,0.4276193752884865,,,,unbounded variables
+jaxglobal,st_glmp_fp3,unsupported,0.43515591602772474,,,,unbounded variables
+jaxglobal,st_glmp_kk92,unsupported,0.4455546662211418,,,,unbounded variables
+jaxglobal,st_ph15,unsupported,0.4782997090369463,,,,unbounded variables
+jaxglobal,ex14_2_1,unsupported,0.6843450842425227,,,,unbounded variables
+jaxglobal,ex14_2_4,unsupported,0.5973078329116106,,,,unbounded variables
+jaxglobal,ex14_2_6,unsupported,0.5676884581334889,,,,unbounded variables
+jaxglobal,st_e37,optimal,13.86219683336094,0.0010417202403970862,0.0010411895396204292,253,optimal
+jaxglobal,ex2_1_1,optimal,4.081702625378966,-17.0,-17.0,17,optimal
+jaxglobal,ex7_3_3,unsupported,0.43274516705423594,,,,unbounded variables
+jaxglobal,ex6_2_12,time_limit,60.154699500184506,0.2891947484704959,0.2881275266551678,120255,time_limit
+jaxglobal,ex8_5_3,unsupported,0.5407122909091413,,,,unbounded variables
+jaxglobal,ex8_5_4,unsupported,0.4483705828897655,,,,unbounded variables
+jaxglobal,ex8_5_5,unsupported,0.6966208340600133,,,,unbounded variables
+jaxglobal,mhw4d,unsupported,0.4616094580851495,,,,unbounded variables
+jaxglobal,ex3_1_2,optimal,9.918440666981041,-30665.538708827287,-30667.73583456105,43,optimal
+jaxglobal,nemhaus,unsupported,0.4546031253412366,,,,unbounded variables
+jaxglobal,pointpack02,unsupported,0.44542512483894825,,,,unbounded variables
+jaxglobal,st_glmp_kk90,unsupported,0.4437721245922148,,,,unbounded variables
+jaxglobal,st_glmp_ss1,unsupported,0.4541178746148944,,,,unbounded variables
+jaxglobal,st_glmp_ss2,unsupported,0.4393825000151992,,,,unbounded variables
+jaxglobal,st_qpc-m1,unsupported,0.45354904094710946,,,,unbounded variables
+jaxglobal,ex14_1_2,unsupported,0.5974465003237128,,,,unbounded variables
+jaxglobal,ex14_1_5,unsupported,0.4714215421117842,,,,unbounded variables
+jaxglobal,ex14_2_3,unsupported,0.4835743336006999,,,,unbounded variables
+jaxglobal,ex14_2_7,unsupported,0.49753887532278895,,,,unbounded variables
+jaxglobal,ex2_1_2,unsupported,0.49151833401992917,,,,unbounded variables
+jaxglobal,ex2_1_4,unsupported,0.48473249981179833,,,,unbounded variables
+jaxglobal,ex3_1_3,unsupported,0.4833287079818547,,,,unbounded variables
+jaxglobal,ex6_1_4,unsupported,0.4998827092349529,,,,unbounded variables
+jaxglobal,st_e05,optimal,6.135394542012364,7049.249272475994,7048.565472845048,471,optimal
+jaxglobal,ex8_1_7,optimal,14.411290207877755,0.02931082655879184,0.029307921572675498,1895,optimal
+jaxglobal,ex7_2_2,optimal,14.695271417032927,-0.38881102858147787,-0.38882413003625144,2215,optimal
+jaxglobal,ex8_5_1,unsupported,0.5485528339631855,,,,unbounded variables
+jaxglobal,ex8_5_2,unsupported,0.46784433303400874,,,,unbounded variables
+jaxglobal,ex8_5_6,unsupported,0.4485227921977639,,,,unbounded variables
+jaxglobal,ex9_2_8,unsupported,0.4944184171035886,,,,unbounded variables
+jaxglobal,mathopt3,unsupported,0.4558559157885611,,,,unbounded variables
+jaxglobal,ex6_2_9,time_limit,60.17910516727716,-0.03406618411601192,-0.06608969795446312,92095,time_limit
+jaxglobal,st_bsj3,optimal,3.1581335407681763,-86768.55,-86768.55,1,optimal
+jaxglobal,st_bsj4,optimal,8.026493332814425,-70262.04999637436,-70263.14180427737,57,optimal
+jaxglobal,st_e21,optimal,8.271904915571213,-13.401903535047337,-13.40272050413769,61,optimal
+jaxglobal,st_ph1,unsupported,0.45456145890057087,,,,unbounded variables
+jaxglobal,st_ph2,unsupported,0.4814210832118988,,,,unbounded variables
+jaxglobal,st_ph3,unsupported,0.6650064173154533,,,,unbounded variables
+jaxglobal,st_qpk2,unsupported,0.5037927920930088,,,,unbounded variables
+jaxglobal,wallfix,unsupported,0.7236640830524266,,,,unbounded variables
+jaxglobal,st_e34,optimal,6.279882709030062,0.015619531128071643,0.015619486849213297,1,optimal
+jaxglobal,ex5_2_4,optimal,11.531141334213316,-449.99997671227516,-450.0033255299002,569,optimal
+jaxglobal,st_e42,unsupported,0.5676832497119904,,,,unbounded variables
+jaxglobal,st_glmp_kky,unsupported,0.47862649988383055,,,,unbounded variables
+jaxglobal,ex6_2_10,time_limit,60.310213666874915,-3.0519761257821845,-10.627519055245408,26415,time_limit
+jaxglobal,ex6_2_13,time_limit,60.19928600033745,-0.216209642776372,-1.350774474825368,42287,time_limit
+jaxglobal,ex6_1_1,unsupported,0.49803024996072054,,,,unbounded variables
+jaxglobal,ex3_1_1,optimal,19.180962333921343,7049.247897681535,7048.54459227074,3649,optimal
+jaxglobal,ex7_2_1,optimal,32.800642707850784,1227.2256181448727,1227.138161488893,427,optimal
+jaxglobal,ex9_2_4,unsupported,0.49749079206958413,,,,unbounded variables
+jaxglobal,ex9_2_5,unsupported,0.5034051248803735,,,,unbounded variables
+jaxglobal,house,unsupported,0.49508033273741603,,,,unbounded variables
+jaxglobal,inscribedsquare01,unsupported,0.4914108752273023,,,,unbounded variables
+jaxglobal,inscribedsquare02,unsupported,0.5780213749967515,,,,unbounded variables
+jaxglobal,inscribedsquare03,unsupported,0.7403776249848306,,,,unbounded variables
+jaxglobal,ex5_4_2,optimal,16.96146299969405,7512.230145920979,7511.539950908201,1357,optimal
+jaxglobal,ex7_2_4,optimal,35.416340874973685,3.9182272138812735,3.9178429734536735,12051,optimal
+jaxglobal,st_iqpbk1,optimal,32.37636408302933,-621.487831395328,-621.5332665517595,251,optimal
+jaxglobal,ex14_1_6,unsupported,0.5156934591941535,,,,unbounded variables
+jaxglobal,st_robot,optimal,6.230856958311051,0.0,0.0,1,optimal
+jaxglobal,st_iqpbk2,optimal,32.50626575015485,-1195.225662210703,-1195.316533158413,265,optimal
+jaxglobal,ex7_2_3,time_limit,60.13558500027284,7049.247647517024,2662.5,53967,time_limit
+jaxglobal,ex5_2_2_case1,optimal,21.20017895800993,-399.99382536295644,-400.0027548789885,4723,optimal
+jaxglobal,ex5_2_2_case2,optimal,19.513549958821386,-599.9755603173065,-600.0034576122083,4039,optimal
+jaxglobal,himmel11,unsupported,0.45298354187980294,,,,unbounded variables
+jaxglobal,like,unsupported,0.45215787505730987,,,,unbounded variables
+jaxglobal,ex5_2_2_case3,optimal,18.950637249741703,-749.9755467617446,-750.0171110272607,5727,optimal
+jaxglobal,pointpack04,unsupported,0.44144437462091446,,,,unbounded variables
+jaxglobal,st_e28,unsupported,0.4394706250168383,,,,unbounded variables
+jaxglobal,st_e33,optimal,8.877774083055556,-399.99994403296694,-400.022714776831,45,optimal
+jaxglobal,ex14_1_7,unsupported,0.5603867499157786,,,,unbounded variables
+jaxglobal,ex2_1_5,optimal,20.715601708739996,-268.01463573994596,-268.03523023051883,47,optimal
+jaxglobal,ex2_1_6,optimal,10.388887917157263,-39.0,-39.0,41,optimal
+jaxglobal,ex2_1_9,unsupported,0.658186124637723,,,,unbounded variables
+jaxglobal,ex9_1_2,unsupported,0.5647325827740133,,,,unbounded variables
+jaxglobal,ex9_1_4,unsupported,0.5651754173450172,,,,unbounded variables
+jaxglobal,ex9_2_2,unsupported,0.5548207089304924,,,,unbounded variables
+jaxglobal,ex9_2_7,unsupported,0.5529935415834188,,,,unbounded variables
+jaxglobal,ex6_2_5,time_limit,60.37581195915118,-70.75207783345161,-6458.019257361067,21117,time_limit
+jaxglobal,ex6_2_7,time_limit,60.337220875080675,-0.16084761546361603,-84.51093186432206,9085,time_limit
+jaxglobal,alkylation,time_limit,60.423261833842844,nan,1980.8465173354075,17969,time_limit
+jaxglobal,pooling_haverly1pq,optimal,8.931058917194605,-400.0000001799316,-400.00344987030667,5,optimal
+jaxglobal,pooling_haverly1tp,optimal,9.017980541102588,-400.00000017986906,-400.0002409629573,5,optimal
+jaxglobal,pooling_haverly2pq,optimal,8.205004667397588,-600.0000002499451,-600.0002876254828,3,optimal
+jaxglobal,pooling_haverly2tp,optimal,12.590402708854526,-600.0000002499953,-600.0015702893443,15,optimal
+jaxglobal,pooling_haverly3pq,optimal,10.16184658324346,-750.0000001273701,-750.029640895705,7,optimal
+jaxglobal,pooling_haverly3tp,optimal,11.147260291036218,-750.0000001207733,-750.0000575933243,9,optimal
+jaxglobal,shiporig,unsupported,0.6526151248253882,,,,unbounded variables
+jaxglobal,kall_congruentcircles_c31,time_limit,60.52765120891854,0.6438054199058243,0.6397306934579204,7431,time_limit
+jaxglobal,kall_congruentcircles_c32,time_limit,60.60502295801416,1.375856222143793,1.3751708654800943,1347,time_limit
+jaxglobal,st_bpaf1b,optimal,18.397779250051826,-42.96255750404936,-42.96255860030568,49,optimal
+jaxglobal,st_bpaf1a,optimal,39.88914383389056,-45.3797101094905,-45.382665367437674,137,optimal
+jaxglobal,st_e07,optimal,18.259220500010997,-399.99995128777164,-400.03269083292764,155,optimal
+jaxglobal,st_qpc-m3a,unsupported,0.6416810839436948,,,,unbounded variables
+jaxglobal,st_qpc-m3b,unsupported,0.6652983329258859,,,,unbounded variables
+jaxglobal,process,time_limit,60.58520608395338,-1160.8580251184826,-1161.3420946896122,14365,time_limit
+jaxglobal,st_qpc-m3c,unsupported,0.5102815418504179,,,,unbounded variables
+jaxglobal,st_qpc-m4,unsupported,0.49664770904928446,,,,unbounded variables
+jaxglobal,st_rv1,unsupported,0.4727612501010299,,,,unbounded variables
+jaxglobal,chem,unsupported,0.4730093339458108,,,,unbounded variables
+jaxglobal,st_qpk3,unsupported,0.49626566655933857,,,,unbounded variables
+jaxglobal,ann_fermentation_exp,unsupported,0.5003396249376237,,,,unbounded variables
+jaxglobal,ann_fermentation_tanh,unsupported,0.50736637506634,,,,unbounded variables
+jaxglobal,ex6_1_3,unsupported,0.5123236672952771,,,,unbounded variables
+jaxglobal,ex7_3_4,unsupported,0.5167205417528749,,,,unbounded variables
+jaxglobal,haverly,unsupported,0.5157746253535151,,,,unbounded variables
+jaxglobal,st_jcbpaf2,optimal,26.29737383313477,-794.8558952413804,-794.8559706929949,193,optimal
+jaxglobal,st_e03,time_limit,60.06619287515059,-1161.0519161078084,-1161.3382810372557,19407,time_limit
+jaxglobal,ex2_1_3,unsupported,0.6965573751367629,,,,unbounded variables
+jaxglobal,ex7_3_5,unsupported,0.5758423339575529,,,,unbounded variables
+jaxglobal,ex9_1_1,unsupported,0.583046792075038,,,,unbounded variables
+jaxglobal,ex9_1_5,unsupported,0.5966529590077698,,,,unbounded variables
+jaxglobal,pointpack06,unsupported,0.6169912093318999,,,,unbounded variables
+jaxglobal,pooling_bental4pq,optimal,19.096715916879475,-450.00000019490795,-450.0039619131807,21,optimal
+jaxglobal,kall_congruentcircles_c41,time_limit,60.783487000036985,0.8584072715009626,0.852368995314464,145,time_limit
+jaxglobal,kall_congruentcircles_c42,time_limit,61.18464400013909,0.8584072315399449,0.6957611926697354,4781,time_limit
+jaxglobal,pooling_bental4tp,optimal,13.541078417096287,-450.00000016986246,-450.000239169439,5,optimal
+jaxglobal,ex9_1_8,unsupported,0.487897917162627,,,,unbounded variables
+jaxglobal,st_e16,optimal,54.95685258321464,12292.467278548238,12291.736355569827,991,optimal
+jaxglobal,alkyl,time_limit,60.27791125001386,-1.7650000658070901,-1.7815091688613163,3791,time_limit
+jaxglobal,kall_congruentcircles_c51,time_limit,61.69456408312544,1.0730090431727604,0.0,673,time_limit
+jaxglobal,ex8_4_6,time_limit,68.25191737478599,0.229246941674268,0.0,1,time_limit
+jaxglobal,kall_congruentcircles_c52,time_limit,61.740772916935384,1.5371106726686912,0.0,1567,time_limit
+jaxglobal,kall_diffcircles_5a,optimal,19.114164917264134,8.91428580158988,8.91428580158988,1,optimal
+jaxglobal,kall_diffcircles_5b,optimal,20.005107125267386,6.222831039154992,6.222831039154992,1,optimal
+jaxglobal,pooling_haverly2stp,optimal,21.48935900023207,-600.0000002499698,-600.0173928999191,17,optimal
+jaxglobal,pooling_haverly1stp,optimal,33.371458042412996,-400.0000001798861,-400.03060714663724,19,optimal
+jaxglobal,prob07,unsupported,0.6588625418953598,,,,unbounded variables
+jaxglobal,pooling_haverly3stp,optimal,31.51520908297971,-750.00000012737,-750.0286836349463,19,optimal
+jaxglobal,st_e30,time_limit,61.661436332855374,-1.5811388558180266,-1.59827899336912,267,time_limit
+jaxglobal,ex9_2_3,unsupported,0.7455121669918299,,,,unbounded variables
+jaxglobal,ex9_2_6,unsupported,0.7371733337640762,,,,unbounded variables
+jaxglobal,ex8_4_5,time_limit,60.66429025027901,0.00030748598774045765,0.0,3329,time_limit
+jaxglobal,eq6_1,time_limit,60.65834041731432,976.324649311202,-72456.3614015064,63,time_limit
+jaxglobal,ex5_4_3,time_limit,60.073220666032284,5043.864827400845,3269.8585694112217,355,time_limit
+jaxglobal,kall_congruentcircles_c61,time_limit,62.97612816700712,1.2876108548053105,0.0,971,time_limit
+jaxglobal,ex7_3_6,unsupported,0.8134566247463226,,,,unbounded variables
+jaxglobal,kall_congruentcircles_c62,time_limit,61.676445208024234,1.287610884783347,0.0,531,time_limit
+jaxglobal,pointpack08,unsupported,0.6778442501090467,,,,unbounded variables
+jaxglobal,himmel16,unsupported,0.5469159167259932,,,,unbounded variables
+jaxglobal,kall_congruentcircles_c63,time_limit,62.00860337493941,1.2876108548053105,0.0,387,time_limit
+jaxglobal,kall_diffcircles_6,time_limit,61.752822207752615,nan,0.0,511,time_limit
+jaxglobal,kall_circles_c6a,optimal,39.06573841627687,3.5937198653701223,3.5937198653701223,1,optimal
+jaxglobal,ex8_4_4,time_limit,62.12567404098809,0.21245983869020382,0.1085497830068141,2293,time_limit
+jaxglobal,kall_circles_c6b,time_limit,60.82041895808652,1.9735995257920966,0.0,203,time_limit
+jaxglobal,kall_congruentcircles_c71,time_limit,60.47586083319038,1.5022126664378606,0.0,125,time_limit
+jaxglobal,kall_congruentcircles_c72,time_limit,63.282599959056824,1.966314308924216,0.0,29,time_limit
+jaxglobal,ex2_1_10,unsupported,0.7265355000272393,,,,unbounded variables
+jaxglobal,ex2_1_7,unsupported,0.6810361668467522,,,,unbounded variables
+jaxglobal,kall_diffcircles_7,time_limit,61.773748375009745,nan,0.0,31,time_limit
+jaxglobal,pooling_bental4stp,optimal,54.07532366691157,-450.0000001948562,-450.0395196263748,45,optimal
+jaxglobal,wastewater02m1,time_limit,61.50343708321452,197.97979796988847,77.99348489040403,379,time_limit
+jaxglobal,prolog,unsupported,0.5586270838975906,,,,unbounded variables
+jaxglobal,st_fp7a,unsupported,0.45760404085740447,,,,unbounded variables
+jaxglobal,st_fp7b,unsupported,0.4734363332390785,,,,unbounded variables
+jaxglobal,st_fp7c,unsupported,0.4633357501588762,,,,unbounded variables
+jaxglobal,st_fp7d,unsupported,0.45184066612273455,,,,unbounded variables
+jaxglobal,st_fp7e,unsupported,0.48709741700440645,,,,unbounded variables
+jaxglobal,st_m1,unsupported,0.455443000420928,,,,unbounded variables
+jaxglobal,st_rv2,unsupported,0.4565791659988463,,,,unbounded variables
+jaxglobal,st_rv3,unsupported,0.45365083310753107,,,,unbounded variables
+jaxglobal,pointpack10,unsupported,0.4543610829859972,,,,unbounded variables
+jaxglobal,kall_circles_c6c,optimal,51.737364416942,3.518994193710278,3.518994193710278,1,optimal
+jaxglobal,kall_diffcircles_8,optimal,54.74558020895347,20.52461262042997,20.52461262042997,1,optimal
+jaxglobal,kall_circles_c7a,time_limit,64.28782800026238,4.284478400572114,0.0,3,time_limit
+jaxglobal,ex5_3_2,time_limit,61.57388412486762,1.8641594583875651,1.2426787317866521,261,time_limit
+jaxglobal,ex8_4_1,time_limit,60.847054874990135,0.6185727594370453,4.930380657631324e-32,2815,time_limit
+jaxglobal,kall_diffcircles_9,optimal,77.24407641589642,19.39363927642503,19.39363927642503,1,optimal
+jaxglobal,kall_circles_c8a,time_limit,86.40324945794418,4.2998944289693215,0.0,1,time_limit
+jaxglobal,wastewater04m1,time_limit,61.63611908303574,nan,69.18737705174927,161,time_limit
+jaxglobal,st_fp8,unsupported,0.594481167383492,,,,unbounded variables
+jaxglobal,ex2_1_8,time_limit,60.53937333263457,16250.99997551991,-59010.011222325935,27,time_limit
+jaxglobal,pointpack12,unsupported,0.5729948747903109,,,,unbounded variables
+jaxglobal,ex8_4_2,time_limit,62.53054150007665,0.48515248692703716,0.0,1535,time_limit
+jaxglobal,kriging_peaks-full010,time_limit,68.71667137509212,nan,-111.66897282199884,377,time_limit
+jaxglobal,maxmin,unsupported,0.7854378330521286,,,,unbounded variables
+jaxglobal,hhfair,unsupported,0.6690665828064084,,,,unbounded variables
+jaxglobal,pointpack14,unsupported,0.6596134169958532,,,,unbounded variables
+jaxglobal,kall_diffcircles_10,time_limit,90.37576766638085,nan,5406720.0,1,time_limit
+jaxglobal,st_m2,unsupported,0.6937360838055611,,,,unbounded variables
+jaxglobal,st_rv7,unsupported,0.5957858748733997,,,,unbounded variables
+jaxglobal,hydro,unsupported,0.6578915831632912,,,,unbounded variables
+jaxglobal,ex5_4_4,time_limit,60.243531208019704,11009.722171349287,2164.1846918905117,847,time_limit
+jaxglobal,orth_d3m6,time_limit,60.0,,,,killed
+jaxglobal,ex5_2_5,time_limit,80.67256400035694,nan,-9748.792818157053,1,time_limit
+jaxglobal,pooling_adhya1pq,time_limit,63.23683841712773,-68.74074339985842,-576.5182358603781,19,time_limit
+jaxglobal,pooling_adhya1tp,time_limit,68.959014874883,-340.92727410882134,-858.1232918437306,9,time_limit
+jaxglobal,ramsey,unsupported,0.6409346247091889,,,,unbounded variables
+jaxglobal,ex8_6_2,time_limit,60.0,,,,killed
+jaxglobal,pooling_adhya2pq,time_limit,62.05980550032109,-65.0000017910743,-576.8200061868006,3,time_limit
+jaxglobal,pooling_adhya2tp,time_limit,62.9043077910319,-509.7826098517626,-577.4623282195254,3,time_limit
+jaxglobal,pooling_rt2pq,time_limit,62.15844241715968,-4391.825961178194,-6054.618744221949,1,time_limit
+jaxglobal,knp3-12,unsupported,1.3421519580297172,,,,unbounded variables
+jaxglobal,launch,unsupported,1.251406833063811,,,,unbounded variables
+jaxglobal,st_rv8,unsupported,1.2493636249564588,,,,unbounded variables
+jaxglobal,pooling_rt2tp,time_limit,65.12591958371922,-4391.825960186145,-5536.213193473818,1,time_limit
+jaxglobal,pooling_foulds2pq,time_limit,66.94764770800248,-1100.000000472996,-1101.910724368499,7,time_limit
+jaxglobal,water,unsupported,0.72367979073897,,,,unbounded variables
+jaxglobal,ex8_4_8_bnd,unsupported,0.6903503751382232,,,,unbounded variables
+jaxglobal,orth_d3m6_pl,unsupported,0.8245081668719649,,,,unbounded variables
+jaxglobal,pooling_foulds2tp,time_limit,63.020149582996964,-1100.0000004109027,-1167.9412633643412,7,time_limit
+jaxglobal,chenery,unsupported,0.4155888329260051,,,,unbounded variables
+jaxglobal,waterund01,time_limit,67.97255116701126,86.83333330825708,9.38287900577174,1,time_limit
+jaxglobal,wastewater02m2,time_limit,75.66957566700876,130.70254424555472,43.96749713464487,5,time_limit
+jaxglobal,kall_circlespolygons_c1p11,time_limit,73.07915899995714,0.1996017966425509,0.0,3,time_limit
+jaxglobal,kall_circlespolygons_c1p12,time_limit,69.390035583172,0.33960177667255065,0.0,3,time_limit
+jaxglobal,kall_circlespolygons_c1p13,time_limit,64.38829237502068,0.33960177667244296,0.0,3,time_limit
+jaxglobal,orth_d4m6_pl,time_limit,60.0,,,,killed
+jaxglobal,kriging_peaks-full020,time_limit,82.74873933335766,nan,-103.657414018965,1,time_limit
+jaxglobal,pooling_adhya1stp,time_limit,76.64014029223472,nan,-878.981434972317,1,time_limit
+jaxglobal,pooling_adhya2stp,time_limit,99.49153283331543,-549.8030344114923,-585.6443327763939,1,time_limit
+jaxglobal,wastewater05m1,time_limit,88.03223329083994,nan,75.5998563581503,1,time_limit
+jaxglobal,pooling_rt2stp,time_limit,100.82875158311799,-4391.825959908737,-5561.926784636166,1,time_limit
+jaxglobal,wastewater15m1,time_limit,85.3761501670815,nan,974.1789543900281,1,time_limit
+jaxglobal,kall_circlesrectangles_c1r11,time_limit,73.7294921670109,0.1996017966425439,0.0,1,time_limit
+jaxglobal,pooling_foulds2stp,time_limit,85.22473354218528,-587.215881675259,-1327.7242722335875,1,time_limit
+jaxglobal,kall_circlesrectangles_c1r12,time_limit,73.61657712515444,0.33960177667255065,0.0,1,time_limit
+jaxglobal,st_rv9,unsupported,0.4262884999625385,,,,unbounded variables
+scip,ex4_1_1,optimal,0.06,-7.4873130969579,-7.4873130969579,31.0,problem is solved [optimal solution found]
+scip,ex4_1_2,optimal,0.11,-663.50009662049,-663.505837901933,21.0,solving was interrupted [gap limit reached]
+scip,ex4_1_3,optimal,0.08,-443.671704751115,-443.690531009792,31.0,solving was interrupted [gap limit reached]
+scip,ex4_1_4,optimal,0.06,-8.50451797873575e-07,-8.50451797873575e-07,60.0,problem is solved [optimal solution found]
+scip,ex4_1_6,optimal,0.07,6.99999910000998,6.99939418725936,51.0,solving was interrupted [gap limit reached]
+scip,ex4_1_7,optimal,0.05,-7.50000076452198,-7.50006195493104,11.0,solving was interrupted [gap limit reached]
+scip,ex8_1_2,optimal,0.53,-1.07086102925846,-1.07096756784041,3333.0,solving was interrupted [gap limit reached]
+scip,mathopt5_1,optimal,0.0,-0.999611831899778,-0.99961544470928,1.0,solving was interrupted [gap limit reached]
+scip,mathopt5_2,optimal,0.01,-1.0000000099878,-1.0000000099878,1.0,problem is solved [optimal solution found]
+scip,mathopt5_3,optimal,0.04,-1.61642529291098,-1.61656056630123,21.0,solving was interrupted [gap limit reached]
+scip,mathopt5_4,optimal,0.3,-9.70040211711876e-07,-1.41503744544025e-06,1391.0,solving was interrupted [gap limit reached]
+scip,mathopt5_5,optimal,0.08,-14.837950054239,-14.8392517288557,13.0,solving was interrupted [gap limit reached]
+scip,mathopt5_6,optimal,0.0,-0.943291513487297,-0.943333223377102,1.0,solving was interrupted [gap limit reached]
+scip,mathopt5_7,optimal,0.07,-4.43672917235607,-4.43672917235607,41.0,problem is solved [optimal solution found]
+scip,mathopt5_8,optimal,0.07,-0.686072849796284,-0.686072849796284,39.0,problem is solved [optimal solution found]
+scip,trig,optimal,0.03,-3.76250150138873,-3.76268916532985,3.0,solving was interrupted [gap limit reached]
+scip,ex14_1_9,optimal,0.0,-9.96949942597553e-09,-9.96949942597553e-09,1.0,problem is solved [optimal solution found]
+scip,ex4_1_5,optimal,1.43,-1.23541947150878e-08,-1.23541947150878e-08,10122.0,problem is solved [optimal solution found]
+scip,ex4_1_8,optimal,0.0,-16.7388931943846,-16.7396571798078,1.0,solving was interrupted [gap limit reached]
+scip,ex4_1_9,optimal,0.05,-5.50801353379047,-5.50801353379047,37.0,problem is solved [optimal solution found]
+scip,ex8_1_1,optimal,0.01,-2.02180681437277,-2.02196457059917,1.0,solving was interrupted [gap limit reached]
+jaxglobal,kall_circlesrectangles_c1r13,time_limit,66.34498279169202,nan,0.0,1,time_limit
+scip,ex8_1_4,optimal,0.73,-2.04279544507204e-07,-2.04279544507204e-07,21652.0,problem is solved [optimal solution found]
+scip,ex8_1_5,optimal,7.06,-1.03162944132579,-1.03162944132579,147808.0,problem is solved [optimal solution found]
+scip,ex8_1_6,optimal,0.04,-10.0860022634921,-10.0860022634921,21.0,problem is solved [optimal solution found]
+scip,filter,optimal,0.0,8685.27706897356,8684.93120746136,1.0,solving was interrupted [gap limit reached]
+scip,kriging_peaks-red010,optimal,25.62,0.291119836589397,0.291090729884966,48841.0,solving was interrupted [gap limit reached]
+scip,ex8_1_3,time_limit,60.0,600.0,-1e+20,156.0,solving was interrupted [time limit reached]
+scip,kriging_peaks-red030,optimal,51.12,-1.58658792830596,-1.58674554793792,4925.0,solving was interrupted [gap limit reached]
+scip,kriging_peaks-red020,time_limit,60.0,0.37242764728757,0.372376814628409,86383.0,solving was interrupted [time limit reached]
+jaxglobal,polygon25,time_limit,60.0,,,,killed
+jaxglobal,pricing050,time_limit,60.0,,,,killed
+scip,kriging_peaks-red050,time_limit,60.0,-1.15658992098952,-1.15689255794443,2989.0,solving was interrupted [time limit reached]
+scip,mathopt1,optimal,0.04,-3.0586760146889e-07,-3.0586760146889e-07,23.0,problem is solved [optimal solution found]
+scip,mathopt2,optimal,0.0,0.0,0.0,0.0,problem is solved [optimal solution found]
+scip,mathopt4,optimal,0.08,0.0,0.0,35.0,problem is solved [optimal solution found]
+scip,mathopt6,optimal,0.07,-3.30686723510079,-3.30688787098609,91.0,solving was interrupted [gap limit reached]
+scip,prob06,optimal,0.0,1.17712427137707,1.17712070965168,1.0,solving was interrupted [gap limit reached]
+scip,rbrock,optimal,0.54,-9.57528882850056e-07,-9.57528882850056e-07,3162.0,problem is solved [optimal solution found]
+scip,st_e01,optimal,0.0,-6.6666667266467,-6.6666667266467,1.0,problem is solved [optimal solution found]
+scip,st_e08,optimal,0.01,0.741781954583511,0.741765788767006,1.0,solving was interrupted [gap limit reached]
+scip,st_e09,optimal,0.01,-0.500000017475218,-0.500000017475218,1.0,problem is solved [optimal solution found]
+scip,st_e18,optimal,0.0,-2.82842713892459,-2.82859971666517,1.0,solving was interrupted [gap limit reached]
+scip,st_e19,optimal,0.05,-118.704859853957,-118.71487139608,31.0,solving was interrupted [gap limit reached]
+scip,st_e22,optimal,0.0,-85.00000170997,-85.0019204605288,1.0,solving was interrupted [gap limit reached]
+scip,st_e23,optimal,0.01,-1.08333334822051,-1.08335350597344,1.0,solving was interrupted [gap limit reached]
+scip,st_e24,optimal,0.0,2.99999983004969,2.99996040257827,1.0,solving was interrupted [gap limit reached]
+scip,st_e26,optimal,0.01,-185.779203369981,-185.779330244749,1.0,solving was interrupted [gap limit reached]
+scip,st_ht,optimal,0.02,-1.60000012597,-1.60003669734538,1.0,solving was interrupted [gap limit reached]
+scip,st_ph10,optimal,0.0,-10.5,-10.5,0.0,problem is solved [optimal solution found]
+scip,st_phex,optimal,0.0,-85.00000170997,-85.00242902771,1.0,solving was interrupted [gap limit reached]
+scip,st_qpc-m0,optimal,0.01,-5.00000004975854,-5.00000004975854,1.0,problem is solved [optimal solution found]
+scip,st_qpk1,optimal,0.03,-3.00000021995,-3.00000021995,5.0,problem is solved [optimal solution found]
+scip,trigx,optimal,0.08,0.0956313775098294,0.0956310731099769,15.0,solving was interrupted [gap limit reached]
+scip,ex14_1_1,optimal,0.0,-9.76002900157703e-09,-9.76002900157703e-09,1.0,problem is solved [optimal solution found]
+scip,ex14_1_3,optimal,0.0,-9.95419310787299e-09,-9.95419310787299e-09,1.0,problem is solved [optimal solution found]
+scip,ex14_1_4,optimal,0.0,-7.68229880132226e-09,-7.68229880132226e-09,1.0,problem is solved [optimal solution found]
+scip,ex14_1_8,optimal,0.04,-9.94992567604076e-09,-9.94992567604076e-09,1.0,problem is solved [optimal solution found]
+scip,ex3_1_4,optimal,0.03,-4.00000007754566,-4.00000007754566,21.0,problem is solved [optimal solution found]
+scip,kriging_peaks-red100,time_limit,60.0,-2.63751239151452,-5.78389590571651,740.0,solving was interrupted [time limit reached]
+scip,ex6_2_6,optimal,3.16,-3.51174156225094e-06,-3.51174156225094e-06,12364.0,problem is solved [optimal solution found]
+scip,ex6_2_8,optimal,2.43,-0.0270072906055772,-0.0270072906055772,7068.0,problem is solved [optimal solution found]
+scip,hs62,optimal,0.52,-26273.9078798689,-26276.469141518,1021.0,solving was interrupted [gap limit reached]
+scip,kriging_peaks-red200,time_limit,60.0,-3.89019881357807,-52.963013356591,129.0,solving was interrupted [time limit reached]
+scip,kriging_peaks-red500,time_limit,60.0,-2.33332360113548,-1550.90318489033,3.0,solving was interrupted [time limit reached]
+scip,st_bsj2,optimal,0.03,0.999999970511553,0.999999970511553,9.0,problem is solved [optimal solution found]
+scip,st_e02,optimal,0.0,201.159334059814,201.159334059814,1.0,problem is solved [optimal solution found]
+scip,st_e06,optimal,0.0,0.0,0.0,1.0,problem is solved [optimal solution found]
+scip,prob09,optimal,0.37,-9.18262458071695e-07,-1.85532900331964e-06,1875.0,solving was interrupted [gap limit reached]
+scip,st_pan1,optimal,0.03,-5.28370939910682,-5.28370939910682,2.0,problem is solved [optimal solution found]
+scip,st_e11,optimal,0.08,189.311740137834,189.311629520221,1.0,solving was interrupted [gap limit reached]
+scip,st_ph12,optimal,0.01,-22.625,-22.6250000022625,1.0,solving was interrupted [gap limit reached]
+scip,st_ph11,optimal,0.01,-11.28125,-11.28125,1.0,problem is solved [optimal solution found]
+scip,st_ph13,optimal,0.01,-11.281250353085,-11.281250353085,1.0,problem is solved [optimal solution found]
+scip,st_ph14,optimal,0.0,-229.722225476627,-229.725070203292,1.0,solving was interrupted [gap limit reached]
+scip,st_ph20,optimal,0.0,-158.000004189818,-158.000954175071,1.0,solving was interrupted [gap limit reached]
+scip,st_z,optimal,0.03,-2.71001865343647e-08,-2.71001865343647e-08,9.0,problem is solved [optimal solution found]
+scip,chance,optimal,0.0,29.8943780415086,29.8943720425892,1.0,solving was interrupted [gap limit reached]
+scip,dispatch,optimal,0.0,3155.28791417142,3155.12864289869,1.0,solving was interrupted [gap limit reached]
+scip,ex14_2_2,optimal,0.0,-9.9709660707528e-09,-9.9709660707528e-09,1.0,problem is solved [optimal solution found]
+scip,ex14_2_5,optimal,0.01,-9.91851470229723e-09,-9.91851470229723e-09,1.0,problem is solved [optimal solution found]
+scip,ex14_2_8,optimal,0.01,-9.93149933670833e-09,-9.93149933670833e-09,1.0,problem is solved [optimal solution found]
+scip,ex14_2_9,optimal,0.01,-9.69295932022158e-09,-9.69295932022158e-09,1.0,problem is solved [optimal solution found]
+scip,ex6_1_2,optimal,0.21,-0.0324645161142297,-0.0324676609404589,383.0,solving was interrupted [gap limit reached]
+scip,ex6_2_14,optimal,16.29,-0.695358189427466,-0.695425457613791,23581.0,solving was interrupted [gap limit reached]
+scip,ex6_2_11,time_limit,60.0,-3.64643362421591e-06,-0.00016000112971426,235256.0,solving was interrupted [time limit reached]
+scip,ex7_3_1,optimal,0.01,0.341739540825287,0.341739540825287,1.0,problem is solved [optimal solution found]
+scip,ex7_3_2,optimal,0.01,1.08986390895872,1.08986387783002,1.0,solving was interrupted [gap limit reached]
+scip,st_bpk1,optimal,0.0,-13.0000003169002,-13.0000003169002,1.0,problem is solved [optimal solution found]
+scip,st_bpv1,optimal,0.0,10.0,10.0,0.0,problem is solved [optimal solution found]
+scip,st_bpv2,optimal,0.0,-8.0,-8.0,0.0,problem is solved [optimal solution found]
+scip,st_e04,optimal,0.1,5194.86625301838,5194.8662441985,11.0,solving was interrupted [gap limit reached]
+scip,st_e12,optimal,0.0,-4.51420165136193,-4.51420165136193,1.0,problem is solved [optimal solution found]
+scip,st_e25,optimal,0.02,0.890192676490487,0.890192676490487,17.0,problem is solved [optimal solution found]
+scip,st_e37,optimal,0.3,0.00104098236485688,0.0010400873265117,361.0,solving was interrupted [gap limit reached]
+scip,st_e41,optimal,0.48,641.82355508969,641.775460302733,290.0,solving was interrupted [gap limit reached]
+scip,st_glmp_fp1,optimal,0.0,9.99999945002883,9.99961734394918,1.0,solving was interrupted [gap limit reached]
+scip,st_glmp_fp2,optimal,0.01,7.34454507096669,7.34454507096669,1.0,problem is solved [optimal solution found]
+scip,st_glmp_fp3,optimal,0.0,-12.0000002499431,-12.0002132313157,1.0,solving was interrupted [gap limit reached]
+scip,st_glmp_kk92,optimal,0.0,-12.0000002499601,-12.0002132312987,1.0,solving was interrupted [gap limit reached]
+scip,st_ph15,optimal,0.01,-392.703703703704,-392.705915333324,1.0,solving was interrupted [gap limit reached]
+scip,ex14_2_1,optimal,0.01,-9.17356567007657e-09,-9.17356567007657e-09,1.0,problem is solved [optimal solution found]
+scip,ex14_2_4,optimal,0.01,-9.71699492592695e-09,-9.71699492592695e-09,1.0,problem is solved [optimal solution found]
+scip,ex14_2_6,optimal,0.01,-9.983068857461e-09,-9.983068857461e-09,1.0,problem is solved [optimal solution found]
+scip,ex2_1_1,optimal,0.02,-17.0000026036129,-17.0000026036129,2.0,problem is solved [optimal solution found]
+scip,ex3_1_2,optimal,0.01,-30665.5388363152,-30665.77294799,1.0,solving was interrupted [gap limit reached]
+scip,ex7_3_3,optimal,0.04,0.817529018102618,0.817528988644705,1.0,solving was interrupted [gap limit reached]
+scip,ex8_1_7,optimal,0.11,0.0293102760738998,0.0293102760738998,117.0,problem is solved [optimal solution found]
+scip,ex8_5_3,optimal,3.83,-0.00414083126585174,-0.00414173978492016,56119.0,solving was interrupted [gap limit reached]
+scip,ex8_5_4,optimal,0.21,-0.000427551064151821,-0.000427551064151821,409.0,problem is solved [optimal solution found]
+scip,least,time_limit,60.0,15545.7631272004,-1e+20,623.0,solving was interrupted [time limit reached]
+scip,mhw4d,optimal,0.52,0.0293099517405052,0.0293099517405052,3582.0,problem is solved [optimal solution found]
+scip,nemhaus,optimal,0.0,31.0,31.0,0.0,problem is solved [optimal solution found]
+scip,pointpack02,optimal,0.0,2.00000008995,2.00000008995,1.0,problem is solved [optimal solution found]
+scip,st_e05,optimal,0.02,7049.24927247599,7049.00075650756,25.0,solving was interrupted [gap limit reached]
+scip,st_glmp_kk90,optimal,0.0,2.99999983029465,2.99988941866328,1.0,solving was interrupted [gap limit reached]
+scip,st_glmp_ss1,optimal,0.03,-24.5714296011171,-24.571447689071,21.0,solving was interrupted [gap limit reached]
+scip,st_glmp_ss2,optimal,0.0,2.99999951003,2.99999951003,1.0,problem is solved [optimal solution found]
+scip,st_qpc-m1,optimal,0.11,-473.77779445053,-473.797313741027,9.0,solving was interrupted [gap limit reached]
+scip,ex14_1_2,optimal,0.01,-9.90999253571374e-09,-9.90999253571374e-09,1.0,problem is solved [optimal solution found]
+scip,ex14_1_5,optimal,0.0,-7.61355802995925e-09,-7.61355802995925e-09,1.0,problem is solved [optimal solution found]
+scip,ex14_2_3,optimal,0.01,-7.95084844998747e-09,-7.95084844998747e-09,1.0,problem is solved [optimal solution found]
+scip,ex14_2_7,optimal,0.01,-9.70486895777795e-09,-9.70486895777795e-09,1.0,problem is solved [optimal solution found]
+scip,ex2_1_2,optimal,0.0,-213.0,-213.0001143719,1.0,solving was interrupted [gap limit reached]
+scip,ex2_1_4,optimal,0.0,-11.0,-11.000000001,1.0,solving was interrupted [gap limit reached]
+scip,ex3_1_3,optimal,0.0,-310.0,-310.000103963545,1.0,solving was interrupted [gap limit reached]
+scip,ex6_1_4,optimal,0.08,-0.294546675937217,-0.294546675937217,51.0,problem is solved [optimal solution found]
+scip,ex6_2_12,time_limit,60.0,0.289194042997432,0.283172384749925,101435.0,solving was interrupted [time limit reached]
+scip,ex6_2_9,time_limit,60.0,-0.0340662603422885,-0.09938105504704,53655.0,solving was interrupted [time limit reached]
+scip,ex7_2_2,optimal,0.09,-0.388811437307738,-0.388814104800747,121.0,solving was interrupted [gap limit reached]
+scip,ex8_5_1,optimal,0.52,-5.84227759237166e-06,-5.84227759237166e-06,1862.0,problem is solved [optimal solution found]
+scip,ex8_5_2,optimal,1.99,-1.74678480028279e-05,-1.74678480028279e-05,7941.0,problem is solved [optimal solution found]
+scip,ex8_5_6,optimal,7.27,-0.00117034097977226,-0.00117034097977226,17796.0,problem is solved [optimal solution found]
+scip,ex9_2_8,optimal,0.0,1.5,1.5,0.0,problem is solved [optimal solution found]
+scip,mathopt3,optimal,0.0,0.0,0.0,1.0,problem is solved [optimal solution found]
+scip,st_bsj3,optimal,0.0,-86768.55,-86768.55,1.0,problem is solved [optimal solution found]
+scip,st_bsj4,optimal,0.02,-70262.0510560699,-70262.0510560699,2.0,problem is solved [optimal solution found]
+scip,st_e21,optimal,0.05,-13.4019037160067,-13.4019037160067,2.0,problem is solved [optimal solution found]
+scip,st_e34,optimal,0.0,0.0156195252423938,0.0156195252423938,1.0,problem is solved [optimal solution found]
+scip,st_ph1,optimal,0.01,-230.117288869971,-230.117288869971,1.0,problem is solved [optimal solution found]
+scip,st_ph2,optimal,0.01,-1028.11728485058,-1028.11728485058,1.0,problem is solved [optimal solution found]
+scip,st_ph3,optimal,0.01,-420.234829622433,-420.235264007471,1.0,solving was interrupted [gap limit reached]
+scip,st_qpk2,optimal,0.06,-12.25000032496,-12.25000032496,27.0,problem is solved [optimal solution found]
+scip,wallfix,optimal,0.03,1.00000465658538,1.00000465658538,5.0,problem is solved [optimal solution found]
+scip,ex5_2_4,optimal,0.06,-450.00000442993,-450.00000442993,189.0,problem is solved [optimal solution found]
+scip,ex8_5_5,time_limit,60.0,-0.0107542427293466,-0.0169088212464257,500950.0,solving was interrupted [time limit reached]
+scip,st_e42,optimal,0.0,18.7841992046956,18.7841992046956,1.0,problem is solved [optimal solution found]
+scip,st_glmp_kky,optimal,0.0,-2.50000053497,-2.50000053497,1.0,problem is solved [optimal solution found]
+scip,ex3_1_1,optimal,0.05,7049.24800879696,7048.78641888241,231.0,solving was interrupted [gap limit reached]
+scip,ex5_4_2,optimal,0.03,7512.23013378827,7511.9898257176,31.0,solving was interrupted [gap limit reached]
+scip,ex6_2_10,time_limit,60.0,-3.05197615053319,-14.8498760955123,23451.0,solving was interrupted [time limit reached]
+scip,ex6_2_13,time_limit,60.0,-0.21620944687138,-1.63597098752922,40248.0,solving was interrupted [time limit reached]
+scip,ex7_2_4,optimal,0.4,3.91801002525845,3.91762463985854,1101.0,solving was interrupted [gap limit reached]
+scip,ex9_2_4,optimal,0.01,0.49999996001,0.49999996001,1.0,problem is solved [optimal solution found]
+scip,ex9_2_5,optimal,0.02,4.99999987001,4.99971274830831,1.0,solving was interrupted [gap limit reached]
+scip,house,optimal,0.11,-4500.00000168629,-4500.35086959182,191.0,solving was interrupted [gap limit reached]
+scip,inscribedsquare01,optimal,0.19,0.990077727589208,0.990077727589208,285.0,problem is solved [optimal solution found]
+scip,inscribedsquare02,optimal,0.63,0.968016831306819,0.968016831306819,1769.0,problem is solved [optimal solution found]
+scip,inscribedsquare03,optimal,1.63,23.8494025745224,23.8494025745224,3450.0,problem is solved [optimal solution found]
+scip,st_iqpbk1,optimal,0.13,-621.487836962166,-621.487836962166,55.0,problem is solved [optimal solution found]
+scip,st_iqpbk2,optimal,0.11,-1195.22567343692,-1195.22567343692,27.0,problem is solved [optimal solution found]
+scip,st_robot,optimal,0.01,0.0,0.0,1.0,problem is solved [optimal solution found]
+scip,ex14_1_6,optimal,0.01,-9.85000077138285e-09,-9.85000077138285e-09,1.0,problem is solved [optimal solution found]
+scip,ex5_2_2_case1,optimal,0.03,-400.000001939866,-400.000001939866,19.0,problem is solved [optimal solution found]
+scip,ex5_2_2_case2,optimal,0.03,-600.000001119238,-600.000001119238,31.0,problem is solved [optimal solution found]
+scip,ex5_2_2_case3,optimal,0.02,-750.00000343112,-750.00000343112,5.0,problem is solved [optimal solution found]
+scip,ex7_2_1,time_limit,60.0,1227.22570044402,1166.8118558059,600098.0,solving was interrupted [time limit reached]
+scip,ex6_1_1,time_limit,60.0,-0.0201983216956923,-0.386124887684477,95717.0,solving was interrupted [time limit reached]
+scip,himmel11,optimal,0.01,-30665.539349796,-30666.1794005072,1.0,solving was interrupted [gap limit reached]
+scip,ex7_2_3,time_limit,60.0,7049.24768965755,2100.0,670749.0,solving was interrupted [time limit reached]
+scip,pointpack04,optimal,0.08,1.00000004214327,1.00000004214327,5.0,problem is solved [optimal solution found]
+scip,st_e28,optimal,0.01,-30665.539349796,-30666.1794005072,1.0,solving was interrupted [gap limit reached]
+scip,st_e33,optimal,0.0,-400.000007299841,-400.000007299841,1.0,problem is solved [optimal solution found]
+scip,ex6_2_5,time_limit,60.0,-70.7520778434423,-3577.82368928033,80883.0,solving was interrupted [time limit reached]
+scip,ex14_1_7,optimal,0.28,-5.71517166841176e-11,-5.71517166841176e-11,1.0,problem is solved [optimal solution found]
+scip,ex2_1_5,optimal,0.0,-268.014638647708,-268.029191299247,1.0,solving was interrupted [gap limit reached]
+scip,ex2_1_6,optimal,0.03,-39.0000052697891,-39.0000052697891,2.0,problem is solved [optimal solution found]
+scip,ex2_1_9,optimal,0.65,-0.375000929175017,-0.375035066844519,4051.0,solving was interrupted [gap limit reached]
+scip,ex9_1_2,optimal,0.01,-16.0,-16.0,1.0,problem is solved [optimal solution found]
+scip,ex9_1_4,optimal,0.0,-37.0,-37.0,1.0,problem is solved [optimal solution found]
+scip,ex9_2_2,optimal,0.01,99.9999989666867,99.9999989666867,1.0,problem is solved [optimal solution found]
+scip,ex9_2_7,optimal,0.01,16.99999974001,16.9988424279952,1.0,solving was interrupted [gap limit reached]
+scip,kall_congruentcircles_c31,optimal,0.12,0.643805400920525,0.643795226872978,94.0,solving was interrupted [gap limit reached]
+scip,kall_congruentcircles_c32,optimal,0.1,1.37585551520403,1.37585551520403,135.0,problem is solved [optimal solution found]
+scip,pooling_haverly1pq,optimal,0.01,-400.000001932813,-400.000001932813,1.0,problem is solved [optimal solution found]
+scip,pooling_haverly1tp,optimal,0.01,-400.000001931844,-400.000001931844,1.0,problem is solved [optimal solution found]
+scip,pooling_haverly2pq,optimal,0.03,-600.000001113722,-600.000001113722,2.0,problem is solved [optimal solution found]
+scip,pooling_haverly2tp,optimal,0.02,-600.00000111994,-600.00000111994,3.0,problem is solved [optimal solution found]
+scip,pooling_haverly3pq,optimal,0.01,-750.000003428283,-750.000003428283,1.0,problem is solved [optimal solution found]
+scip,pooling_haverly3tp,optimal,0.02,-750.000003434074,-750.000003434074,2.0,problem is solved [optimal solution found]
+scip,process,optimal,2.69,-1161.33680324762,-1161.45205161885,21331.0,solving was interrupted [gap limit reached]
+scip,ex6_2_7,time_limit,60.0,-0.160847625467138,-3.11693720660237,38554.0,solving was interrupted [time limit reached]
+scip,st_bpaf1a,optimal,0.01,-45.3797110606911,-45.3828867240658,1.0,solving was interrupted [gap limit reached]
+scip,st_bpaf1b,optimal,0.01,-42.9625585595154,-42.9627757229446,1.0,solving was interrupted [gap limit reached]
+scip,st_e03,optimal,0.31,-1161.33660281151,-1161.44526797827,2211.0,solving was interrupted [gap limit reached]
+scip,st_e07,optimal,0.01,-400.000001938211,-400.000001938211,2.0,problem is solved [optimal solution found]
+scip,st_jcbpaf2,optimal,0.04,-794.855922132256,-794.907402024392,9.0,solving was interrupted [gap limit reached]
+scip,st_qpc-m3a,optimal,0.09,-382.695018233,-382.717529818487,71.0,solving was interrupted [gap limit reached]
+scip,st_qpc-m3b,optimal,0.1,-1.00777449488929e-06,-1.00777449488929e-06,5.0,problem is solved [optimal solution found]
+scip,st_qpc-m3c,optimal,0.0,0.0,0.0,0.0,problem is solved [optimal solution found]
+scip,st_qpc-m4,optimal,0.0,0.0,0.0,0.0,problem is solved [optimal solution found]
+scip,st_rv1,optimal,0.06,-59.9439170435788,-59.9439731660657,96.0,solving was interrupted [gap limit reached]
+scip,like,time_limit,60.0,1138.35483058994,-1e+20,64914.0,solving was interrupted [time limit reached]
+scip,st_qpk3,optimal,0.1,-36.0000008493719,-36.0000008493719,133.0,problem is solved [optimal solution found]
+scip,ann_fermentation_exp,optimal,0.26,-99.9366329453107,-99.9446635515892,1111.0,solving was interrupted [gap limit reached]
+scip,ann_fermentation_tanh,error,nan,nan,nan,nan,initialization
+scip,alkylation,time_limit,60.0,1768.80713110733,1772.31635275852,420254.0,solving was interrupted [time limit reached]
+scip,ex7_3_4,optimal,0.23,6.27463423345766,6.27462250197966,241.0,solving was interrupted [gap limit reached]
+scip,haverly,optimal,0.0,-400.000001939949,-400.000001939949,1.0,problem is solved [optimal solution found]
+scip,kall_congruentcircles_c41,optimal,0.08,0.858407303078091,0.858400523725106,25.0,solving was interrupted [gap limit reached]
+scip,kall_congruentcircles_c42,optimal,0.14,0.858407200432008,0.858407200432008,123.0,problem is solved [optimal solution found]
+scip,st_e16,optimal,0.04,12292.467255055,12291.6276489731,21.0,solving was interrupted [gap limit reached]
+scip,ex2_1_3,optimal,0.0,-15.000000001,-15.000000001,0.0,problem is solved [optimal solution found]
+scip,ex7_3_5,optimal,2.84,1.20539563101109,1.20539563101109,13231.0,problem is solved [optimal solution found]
+scip,ex9_1_1,optimal,0.0,-13.0,-13.0,1.0,problem is solved [optimal solution found]
+scip,ex9_1_5,optimal,0.01,-1.00000005012578,-1.00000005012578,1.0,problem is solved [optimal solution found]
+scip,pointpack06,optimal,0.8,0.361111695871668,0.361111695871668,2010.0,problem is solved [optimal solution found]
+scip,pooling_bental4pq,optimal,0.05,-450.000002432757,-450.000002432757,3.0,problem is solved [optimal solution found]
+scip,pooling_bental4tp,optimal,0.03,-450.000002469918,-450.000002469918,2.0,problem is solved [optimal solution found]
+scip,alkyl,optimal,0.11,-1.76499997894177,-1.76512500227929,92.0,solving was interrupted [gap limit reached]
+scip,shiporig,time_limit,60.0,5.54091465190415,-9.99999998087055e+19,201196.0,solving was interrupted [time limit reached]
+scip,ex9_1_8,optimal,0.0,-3.25,-3.25,1.0,problem is solved [optimal solution found]
+scip,kall_congruentcircles_c51,optimal,1.65,1.07300830601011,1.07300830601011,4995.0,problem is solved [optimal solution found]
+scip,kall_congruentcircles_c52,optimal,0.34,1.53711013910834,1.53711013910834,857.0,problem is solved [optimal solution found]
+scip,kall_diffcircles_5a,optimal,0.4,5.11617828854103,5.11617828854103,1216.0,problem is solved [optimal solution found]
+scip,kall_diffcircles_5b,optimal,1.44,5.11617850578439,5.11617850578439,5642.0,problem is solved [optimal solution found]
+scip,pooling_haverly1stp,optimal,0.03,-400.000001939931,-400.000001939931,1.0,problem is solved [optimal solution found]
+scip,pooling_haverly2stp,optimal,0.07,-600.00000111993,-600.00000111993,5.0,problem is solved [optimal solution found]
+scip,pooling_haverly3stp,optimal,0.03,-750.000003433729,-750.000003433729,1.0,problem is solved [optimal solution found]
+scip,st_e30,optimal,0.1,-1.58113961146501,-1.58113961146501,61.0,problem is solved [optimal solution found]
+scip,ex8_4_5,optimal,10.56,0.000306740938134953,0.000305767343280333,27071.0,solving was interrupted [gap limit reached]
+scip,prob07,optimal,2.16,154990.228766976,154974.807633827,7071.0,solving was interrupted [gap limit reached]
+scip,chem,time_limit,60.0,-47.7065148445553,-47.7541266582904,324022.0,solving was interrupted [time limit reached]
+scip,ex5_4_3,optimal,0.06,4845.4619905833,4845.45244312762,11.0,solving was interrupted [gap limit reached]
+scip,ex9_2_3,optimal,0.07,-3.99799944261758e-08,-3.99799944261758e-08,27.0,problem is solved [optimal solution found]
+scip,ex9_2_6,optimal,0.02,-1.00000001497503,-1.00000020982608,1.0,solving was interrupted [gap limit reached]
+scip,ex6_1_3,time_limit,60.0,-0.352497811191934,-1.61580496274482,71155.0,solving was interrupted [time limit reached]
+scip,kall_congruentcircles_c62,optimal,0.98,1.287609406604,1.287609406604,2642.0,problem is solved [optimal solution found]
+scip,kall_congruentcircles_c63,optimal,0.51,1.28760947048881,1.28760947048881,1135.0,problem is solved [optimal solution found]
+scip,kall_diffcircles_6,optimal,0.78,7.78789202059919,7.78789202059919,2383.0,problem is solved [optimal solution found]
+scip,ex7_3_6,infeasible,0.0,1e+20,1e+20,0.0,problem is solved [infeasible]
+scip,ex8_4_4,optimal,0.31,0.212459106699606,0.212437902437985,583.0,solving was interrupted [gap limit reached]
+scip,kall_congruentcircles_c61,optimal,9.44,1.28760833704092,1.2875655437334,30675.0,solving was interrupted [gap limit reached]
+scip,himmel16,optimal,1.13,-0.866026238984266,-0.866026238984266,2315.0,problem is solved [optimal solution found]
+scip,ex8_4_6,time_limit,60.0,0.00110489812900389,-3194785340.09095,158815.0,solving was interrupted [time limit reached]
+scip,pointpack08,optimal,13.65,0.267949618732242,0.267949618732242,30988.0,problem is solved [optimal solution found]
+scip,kall_circles_c6b,optimal,38.41,1.97359755833814,1.97359755833814,98436.0,problem is solved [optimal solution found]
+scip,eq6_1,time_limit,60.0,851.713479176683,-1.1e-09,13.0,solving was interrupted [time limit reached]
+scip,kall_diffcircles_7,optimal,3.86,7.15312991587967,7.15298292755189,12073.0,solving was interrupted [gap limit reached]
+scip,pooling_bental4stp,optimal,0.03,-450.000002435933,-450.000002435933,1.0,problem is solved [optimal solution found]
+scip,wastewater02m1,optimal,0.05,130.702543727703,130.698474783725,31.0,solving was interrupted [gap limit reached]
+scip,ex2_1_10,optimal,0.02,49318.0156974494,49316.5271726733,5.0,solving was interrupted [gap limit reached]
+scip,kall_congruentcircles_c72,optimal,4.45,1.96631224716261,1.96631224716261,11991.0,problem is solved [optimal solution found]
+scip,ex2_1_7,optimal,0.18,-4150.41025909064,-4150.41025909064,953.0,problem is solved [optimal solution found]
