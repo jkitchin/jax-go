@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.venv/
+# solver scratch files
+couenne.opt
+*.lst
+*.gdx
+# downloaded by benchmarks/minlplib/fetch.py
+benchmarks/minlplib/nl/
+benchmarks/minlplib/gms/
+benchmarks/minlplib/instancedata.csv
+# benchmark runs in progress; commit finished results deliberately
+benchmarks/results/*.log

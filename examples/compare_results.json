@@ -1,0 +1,799 @@
+[
+ {
+  "name": "gramacy_lee",
+  "n": 1,
+  "fstar": -0.8690111349895,
+  "constrained": false,
+  "manual": false,
+  "jaxglobal": {
+   "status": "optimal",
+   "fun": -0.8690111349894998,
+   "lb": -0.8690115246666166,
+   "time": 0.37694766698405147,
+   "nodes": 27
+  },
+  "scip": {
+   "status": "optimal",
+   "fun": -0.8690110662160974,
+   "time": 0.11291166627779603,
+   "solver_time": null
+  },
+  "couenne": {
+   "status": "optimal",
+   "fun": -0.8690111349894999,
+   "time": 0.12842304212972522,
+   "solver_time": null
+  },
+  "baron": {
+   "status": "noSolution",
+   "fun": null,
+   "time": 0.7578113749623299,
+   "solver_time": 0.015000044368207455
+  },
+  "lindoglobal": {
+   "status": "optimal",
+   "fun": -0.8690111349894998,
+   "time": 0.9790280829183757,
+   "solver_time": 0.16300014685839415
+  }
+ },
+ {
+  "name": "six_hump_camel",
+  "n": 2,
+  "fstar": -1.031628453489877,
+  "constrained": false,
+  "manual": false,
+  "jaxglobal": {
+   "status": "optimal",
+   "fun": -1.031628453489873,
+   "lb": -1.0316290388582503,
+   "time": 0.41496887523680925,
+   "nodes": 467
+  },
+  "scip": {
+   "status": "other",
+   "fun": -1.0316284465905907,
+   "time": 0.127276916988194,
+   "solver_time": null
+  },
+  "couenne": {
+   "status": "optimal",
+   "fun": -1.0316284534898774,
+   "time": 0.252749833278358,
+   "solver_time": null
+  },
+  "baron": {
+   "status": "optimal",
+   "fun": -1.0316284534898774,
+   "time": 0.9297502082772553,
+   "solver_time": 0.11899955570697784
+  },
+  "lindoglobal": {
+   "status": "locallyOptimal",
+   "fun": -1.0316284534898774,
+   "time": 1.0871918750926852,
+   "solver_time": 0.3339997725561261
+  }
+ },
+ {
+  "name": "mccormick",
+  "n": 2,
+  "fstar": -1.913222954981037,
+  "constrained": false,
+  "manual": false,
+  "jaxglobal": {
+   "status": "optimal",
+   "fun": -1.9132229549710567,
+   "lb": -1.9132234567315674,
+   "time": 0.18880304228514433,
+   "nodes": 47
+  },
+  "scip": {
+   "status": "other",
+   "fun": -1.9132229549810362,
+   "time": 0.04682241613045335,
+   "solver_time": null
+  },
+  "couenne": {
+   "status": "optimal",
+   "fun": -1.9132229549810362,
+   "time": 0.1397824170999229,
+   "solver_time": null
+  },
+  "baron": {
+   "status": "noSolution",
+   "fun": null,
+   "time": 0.9020688747987151,
+   "solver_time": 0.026999576948583126
+  },
+  "lindoglobal": {
+   "status": "locallyOptimal",
+   "fun": -1.9132229549810356,
+   "time": 0.932954290881753,
+   "solver_time": 0.19699966069310904
+  }
+ },
+ {
+  "name": "goldstein_price",
+  "n": 2,
+  "fstar": 3.0,
+  "constrained": false,
+  "manual": false,
+  "jaxglobal": {
+   "status": "optimal",
+   "fun": 2.9999999999999685,
+   "lb": 2.9999971983285176,
+   "time": 0.6177822919562459,
+   "nodes": 8969
+  },
+  "scip": {
+   "status": "maxTimeLimit",
+   "fun": 3.0000000000000355,
+   "time": 60.14964620908722,
+   "solver_time": null
+  },
+  "couenne": {
+   "status": "optimal",
+   "fun": 2.9999999999999574,
+   "time": 4.814541750121862,
+   "solver_time": null
+  },
+  "baron": {
+   "status": "optimal",
+   "fun": 2.9999999999999503,
+   "time": 1.205416084267199,
+   "solver_time": 0.44100042432546616
+  },
+  "lindoglobal": {
+   "status": "locallyOptimal",
+   "fun": 3.000000000000007,
+   "time": 5.204522083047777,
+   "solver_time": 4.365999880246818
+  }
+ },
+ {
+  "name": "shubert",
+  "n": 2,
+  "fstar": -186.7309088310239,
+  "constrained": false,
+  "manual": false,
+  "jaxglobal": {
+   "status": "optimal",
+   "fun": -186.73090883102384,
+   "lb": -186.73108403804085,
+   "time": 0.5681522502563894,
+   "nodes": 2399
+  },
+  "scip": {
+   "status": "optimal",
+   "fun": -186.73090883001078,
+   "time": 0.4215450002811849,
+   "solver_time": null
+  },
+  "couenne": {
+   "status": "optimal",
+   "fun": -186.73090746113203,
+   "time": 1.2552343751303852,
+   "solver_time": null
+  },
+  "baron": {
+   "status": "noSolution",
+   "fun": null,
+   "time": 0.8374438751488924,
+   "solver_time": 0.018000556156039238
+  },
+  "lindoglobal": {
+   "status": "locallyOptimal",
+   "fun": -186.7309088310239,
+   "time": 2.2054781252518296,
+   "solver_time": 1.3349995482712984
+  }
+ },
+ {
+  "name": "michalewicz_2d",
+  "n": 2,
+  "fstar": -1.801303410098554,
+  "constrained": false,
+  "manual": false,
+  "jaxglobal": {
+   "status": "optimal",
+   "fun": -1.8013034100985519,
+   "lb": -1.8013051772760817,
+   "time": 0.5227457913570106,
+   "nodes": 67
+  },
+  "scip": {
+   "status": "optimal",
+   "fun": -1.8013031788871592,
+   "time": 0.08408137504011393,
+   "solver_time": null
+  },
+  "couenne": {
+   "status": "optimal",
+   "fun": -1.8013034100985532,
+   "time": 0.38829416688531637,
+   "solver_time": null
+  },
+  "baron": {
+   "status": "noSolution",
+   "fun": null,
+   "time": 0.7791938330046833,
+   "solver_time": 0.0129997031763196
+  },
+  "lindoglobal": {
+   "status": "locallyOptimal",
+   "fun": -1.8013034100985534,
+   "time": 1.0935713751241565,
+   "solver_time": 0.22200015373528004
+  }
+ },
+ {
+  "name": "holder_table",
+  "n": 2,
+  "fstar": -19.20850256788675,
+  "constrained": false,
+  "manual": false,
+  "jaxglobal": {
+   "status": "optimal",
+   "fun": -19.20850256788667,
+   "lb": -19.20850879357026,
+   "time": 0.7363005839288235,
+   "nodes": 415
+  },
+  "scip": {
+   "status": "other",
+   "fun": -19.20850245536677,
+   "time": 10.522244291845709,
+   "solver_time": null
+  },
+  "couenne": {
+   "status": "error",
+   "msg": "Solver (asl) did not exit normally",
+   "time": 0.13729704217985272
+  },
+  "baron": {
+   "status": "noSolution",
+   "fun": null,
+   "time": 0.8159187915734947,
+   "solver_time": 0.015000044368207455
+  },
+  "lindoglobal": {
+   "status": "locallyOptimal",
+   "fun": -19.208502567886747,
+   "time": 1.826637915801257,
+   "solver_time": 0.951000046916306
+  }
+ },
+ {
+  "name": "eggholder",
+  "n": 2,
+  "fstar": -959.6406627106155,
+  "constrained": false,
+  "manual": false,
+  "jaxglobal": {
+   "status": "optimal",
+   "fun": -959.6406627208507,
+   "lb": -959.6414384434917,
+   "time": 0.5797203336842358,
+   "nodes": 153
+  },
+  "scip": {
+   "status": "other",
+   "fun": -959.6405005873427,
+   "time": 0.10219262493774295,
+   "solver_time": null
+  },
+  "couenne": {
+   "status": "optimal",
+   "fun": -959.6406625328638,
+   "time": 0.21723816683515906,
+   "solver_time": null
+  },
+  "baron": {
+   "status": "noSolution",
+   "fun": null,
+   "time": 0.7643479579128325,
+   "solver_time": 0.0129997031763196
+  },
+  "lindoglobal": {
+   "status": "locallyOptimal",
+   "fun": -959.6406627208507,
+   "time": 1.0418978342786431,
+   "solver_time": 0.21299987565726042
+  }
+ },
+ {
+  "name": "hartmann3",
+  "n": 3,
+  "fstar": -3.862782147819745,
+  "constrained": false,
+  "manual": false,
+  "jaxglobal": {
+   "status": "optimal",
+   "fun": -3.8627797873211036,
+   "lb": -3.862783637517226,
+   "time": 0.3268252080306411,
+   "nodes": 2025
+  },
+  "scip": {
+   "status": "optimal",
+   "fun": -3.8627797532833315,
+   "time": 0.24373291712254286,
+   "solver_time": null
+  },
+  "couenne": {
+   "status": "optimal",
+   "fun": -3.862779787332663,
+   "time": 0.42703162459656596,
+   "solver_time": null
+  },
+  "baron": {
+   "status": "optimal",
+   "fun": -3.862779787332663,
+   "time": 1.2305838339962065,
+   "solver_time": 0.3040003124624491
+  },
+  "lindoglobal": {
+   "status": "locallyOptimal",
+   "fun": -3.862779787332663,
+   "time": 2.6810060827992857,
+   "solver_time": 1.8319994676858187
+  }
+ },
+ {
+  "name": "styblinski_tang_3d",
+  "n": 3,
+  "fstar": -117.49849711131426,
+  "constrained": false,
+  "manual": false,
+  "jaxglobal": {
+   "status": "optimal",
+   "fun": -117.49849711131424,
+   "lb": -117.49860515921338,
+   "time": 0.25657825032249093,
+   "nodes": 451
+  },
+  "scip": {
+   "status": "optimal",
+   "fun": -117.4984971093752,
+   "time": 0.13799470802769065,
+   "solver_time": null
+  },
+  "couenne": {
+   "status": "maxIterations",
+   "fun": -117.49849711131426,
+   "time": 63.08864620793611,
+   "solver_time": null
+  },
+  "baron": {
+   "status": "optimal",
+   "fun": -117.49849711131424,
+   "time": 1.1188577921129763,
+   "solver_time": 0.15399986878037453
+  },
+  "lindoglobal": {
+   "status": "optimal",
+   "fun": -117.49849711131426,
+   "time": 1.0624394998885691,
+   "solver_time": 0.21699992939829826
+  }
+ },
+ {
+  "name": "shekel10_4d",
+  "n": 4,
+  "fstar": -10.53644315348353,
+  "constrained": false,
+  "manual": false,
+  "jaxglobal": {
+   "status": "optimal",
+   "fun": -10.536443153483475,
+   "lb": -10.536452497320337,
+   "time": 0.5285286251455545,
+   "nodes": 133
+  },
+  "scip": {
+   "status": "other",
+   "fun": -10.536442721159903,
+   "time": 0.14215245796367526,
+   "solver_time": null
+  },
+  "couenne": {
+   "status": "optimal",
+   "fun": -10.536443153483528,
+   "time": 0.7492986246943474,
+   "solver_time": null
+  },
+  "baron": {
+   "status": "optimal",
+   "fun": -10.536443153483527,
+   "time": 0.9916410832665861,
+   "solver_time": 0.19699966069310904
+  },
+  "lindoglobal": {
+   "status": "locallyOptimal",
+   "fun": -10.536443153483527,
+   "time": 1.1872525000944734,
+   "solver_time": 0.30799973756074905
+  }
+ },
+ {
+  "name": "hartmann6",
+  "n": 6,
+  "fstar": -3.322368011391339,
+  "constrained": false,
+  "manual": false,
+  "jaxglobal": {
+   "status": "optimal",
+   "fun": -3.3223680114074052,
+   "lb": -3.322371324822979,
+   "time": 0.3815085832029581,
+   "nodes": 7047
+  },
+  "scip": {
+   "status": "other",
+   "fun": -3.3223679648854643,
+   "time": 4.734635000117123,
+   "solver_time": null
+  },
+  "couenne": {
+   "status": "optimal",
+   "fun": -3.3223680114155147,
+   "time": 0.8989432500675321,
+   "solver_time": null
+  },
+  "baron": {
+   "status": "optimal",
+   "fun": -3.3223680114155147,
+   "time": 6.019396834075451,
+   "solver_time": 5.154000408947468
+  },
+  "lindoglobal": {
+   "status": "locallyOptimal",
+   "fun": -3.3223680114155143,
+   "time": 60.85347258299589,
+   "solver_time": 60.017999494448304
+  }
+ },
+ {
+  "name": "piecewise_2d",
+  "n": 2,
+  "fstar": null,
+  "constrained": false,
+  "manual": true,
+  "jaxglobal": {
+   "status": "optimal",
+   "fun": -0.8231987212918062,
+   "lb": -0.8231989847764044,
+   "time": 0.5381397502496839,
+   "nodes": 99
+  },
+  "scip": {
+   "status": "optimal",
+   "fun": -0.8231984804876755,
+   "time": 0.08346283296123147,
+   "solver_time": null
+  },
+  "couenne": {
+   "status": "optimal",
+   "fun": -0.8231987212918176,
+   "time": 8.780682750046253,
+   "solver_time": null
+  },
+  "baron": {
+   "status": "noSolution",
+   "fun": null,
+   "time": 0.7740706671029329,
+   "solver_time": 0.015000044368207455
+  },
+  "lindoglobal": {
+   "status": "optimal",
+   "fun": -0.8231987212918177,
+   "time": 1.079149791970849,
+   "solver_time": 0.2639997750520706
+  }
+ },
+ {
+  "name": "tanh_net_2d",
+  "n": 2,
+  "fstar": null,
+  "constrained": false,
+  "manual": true,
+  "jaxglobal": {
+   "status": "optimal",
+   "fun": -0.5531019845697657,
+   "lb": -0.5531029404511669,
+   "time": 0.3961383327841759,
+   "nodes": 411
+  },
+  "scip": {
+   "status": "other",
+   "fun": -0.5531019811698203,
+   "time": 14.306849583983421,
+   "solver_time": null
+  },
+  "couenne": {
+   "status": "optimal",
+   "fun": -0.5531019845712969,
+   "time": 4.277073374949396,
+   "solver_time": null
+  },
+  "baron": {
+   "status": "optimal",
+   "fun": -0.5531019845712969,
+   "time": 1.3123058751225471,
+   "solver_time": 0.616000103764236
+  },
+  "lindoglobal": {
+   "status": "locallyOptimal",
+   "fun": -0.5531019845712969,
+   "time": 2.375271499622613,
+   "solver_time": 1.5240003587678075
+  }
+ },
+ {
+  "name": "G06",
+  "n": 2,
+  "fstar": -6961.81387558015,
+  "constrained": true,
+  "manual": false,
+  "jaxglobal": {
+   "status": "optimal",
+   "fun": -6961.813877229862,
+   "lb": -6961.819969615588,
+   "time": 2.148293749894947,
+   "nodes": 61
+  },
+  "scip": {
+   "status": "optimal",
+   "fun": -6961.814692302679,
+   "time": 0.045844666659832,
+   "solver_time": null
+  },
+  "couenne": {
+   "status": "optimal",
+   "fun": -6961.983632047527,
+   "time": 0.18200612487271428,
+   "solver_time": null
+  },
+  "baron": {
+   "status": "locallyOptimal",
+   "fun": -6961.8138941042125,
+   "time": 0.8605105830356479,
+   "solver_time": 0.09300014935433865
+  },
+  "lindoglobal": {
+   "status": "optimal",
+   "fun": -6961.813875580151,
+   "time": 1.0622348748147488,
+   "solver_time": 0.1780001912266016
+  }
+ },
+ {
+  "name": "G11",
+  "n": 2,
+  "fstar": 0.75,
+  "constrained": true,
+  "manual": false,
+  "jaxglobal": {
+   "status": "optimal",
+   "fun": 0.7499995925668718,
+   "lb": 0.7499989193314535,
+   "time": 1.379070166964084,
+   "nodes": 127
+  },
+  "scip": {
+   "status": "optimal",
+   "fun": 0.75,
+   "time": 0.053971665911376476,
+   "solver_time": null
+  },
+  "couenne": {
+   "status": "optimal",
+   "fun": 0.75,
+   "time": 0.15222520800307393,
+   "solver_time": null
+  },
+  "baron": {
+   "status": "optimal",
+   "fun": 0.7499999999525654,
+   "time": 0.888980207964778,
+   "solver_time": 0.1019997987896204
+  },
+  "lindoglobal": {
+   "status": "optimal",
+   "fun": 0.75,
+   "time": 0.879190624691546,
+   "solver_time": 0.20400022622197866
+  }
+ },
+ {
+  "name": "G24",
+  "n": 2,
+  "fstar": -5.50801327159536,
+  "constrained": true,
+  "manual": false,
+  "jaxglobal": {
+   "status": "optimal",
+   "fun": -5.508013271595285,
+   "lb": -5.508016185139533,
+   "time": 1.8374821250326931,
+   "nodes": 43
+  },
+  "scip": {
+   "status": "optimal",
+   "fun": -5.50801353379047,
+   "time": 0.1125572919845581,
+   "solver_time": null
+  },
+  "couenne": {
+   "status": "optimal",
+   "fun": -5.5082390664964755,
+   "time": 0.3322433331049979,
+   "solver_time": null
+  },
+  "baron": {
+   "status": "optimal",
+   "fun": -5.508013274197496,
+   "time": 0.8267123340629041,
+   "solver_time": 0.09999945759773254
+  },
+  "lindoglobal": {
+   "status": "optimal",
+   "fun": -5.508013271595287,
+   "time": 1.0137992920354009,
+   "solver_time": 0.17599985003471375
+  }
+ },
+ {
+  "name": "G04",
+  "n": 5,
+  "fstar": -30665.53867178332,
+  "constrained": true,
+  "manual": false,
+  "jaxglobal": {
+   "status": "optimal",
+   "fun": -30665.53931926076,
+   "lb": -30665.55209345181,
+   "time": 5.745820167008787,
+   "nodes": 67
+  },
+  "scip": {
+   "status": "other",
+   "fun": -30665.538835413678,
+   "time": 0.06301895808428526,
+   "solver_time": null
+  },
+  "couenne": {
+   "status": "optimal",
+   "fun": -30665.540619386935,
+   "time": 0.167325584217906,
+   "solver_time": null
+  },
+  "baron": {
+   "status": "optimal",
+   "fun": -30665.538673651077,
+   "time": 0.8341864999383688,
+   "solver_time": 0.08799992501735687
+  },
+  "lindoglobal": {
+   "status": "locallyOptimal",
+   "fun": -30665.546424825883,
+   "time": 0.9376552500762045,
+   "solver_time": 0.06000017747282982
+  }
+ },
+ {
+  "name": "haverly",
+  "n": 9,
+  "fstar": -400.0,
+  "constrained": true,
+  "manual": false,
+  "jaxglobal": {
+   "status": "optimal",
+   "fun": -400.0000000000015,
+   "lb": -400.0003871257479,
+   "time": 19.155425707809627,
+   "nodes": 157
+  },
+  "scip": {
+   "status": "optimal",
+   "fun": -400.00000193821097,
+   "time": 0.08270049979910254,
+   "solver_time": null
+  },
+  "couenne": {
+   "status": "optimal",
+   "fun": -400.0000000000041,
+   "time": 0.4348739171400666,
+   "solver_time": null
+  },
+  "baron": {
+   "status": "optimal",
+   "fun": -400.0000000002117,
+   "time": 0.9707124168053269,
+   "solver_time": 0.09000026620924473
+  },
+  "lindoglobal": {
+   "status": "optimal",
+   "fun": -400.00000000000034,
+   "time": 0.9997010831721127,
+   "solver_time": 0.2620000625029206
+  }
+ },
+ {
+  "name": "reactor",
+  "n": 6,
+  "fstar": -0.388811,
+  "constrained": true,
+  "manual": false,
+  "jaxglobal": {
+   "status": "optimal",
+   "fun": -0.3888114342917882,
+   "lb": -0.3888124244218696,
+   "time": 12.616537333000451,
+   "nodes": 1935
+  },
+  "scip": {
+   "status": "other",
+   "fun": -0.38881218501507386,
+   "time": 0.15490862494334579,
+   "solver_time": null
+  },
+  "couenne": {
+   "status": "optimal",
+   "fun": -0.3888114376581381,
+   "time": 0.4751540827564895,
+   "solver_time": null
+  },
+  "baron": {
+   "status": "optimal",
+   "fun": -0.3888124342990933,
+   "time": 1.1427471246570349,
+   "solver_time": 0.1909998944029212
+  },
+  "lindoglobal": {
+   "status": "locallyOptimal",
+   "fun": -0.3888114342917267,
+   "time": 1.1630330830812454,
+   "solver_time": 0.3270004643127322
+  }
+ },
+ {
+  "name": "G08",
+  "n": 2,
+  "fstar": -0.0958250414180359,
+  "constrained": true,
+  "manual": false,
+  "jaxglobal": {
+   "status": "optimal",
+   "fun": -0.09582504141803583,
+   "lb": -0.0958256762686837,
+   "time": 4.168362459167838,
+   "nodes": 99
+  },
+  "scip": {
+   "status": "optimal",
+   "fun": -0.09582490342939821,
+   "time": 0.1929558329284191,
+   "solver_time": null
+  },
+  "couenne": {
+   "status": "optimal",
+   "fun": -0.0958250414180358,
+   "time": 0.35617474978789687,
+   "solver_time": null
+  },
+  "baron": {
+   "status": "noSolution",
+   "fun": null,
+   "time": 0.8639506250619888,
+   "solver_time": 0.015000044368207455
+  },
+  "lindoglobal": {
+   "status": "locallyOptimal",
+   "fun": -0.0958250414180358,
+   "time": 1.014870791696012,
+   "solver_time": 0.18999972380697727
+  }
+ }
+]

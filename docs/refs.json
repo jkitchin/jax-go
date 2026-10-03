@@ -1,0 +1,669 @@
+[
+ {
+  "key": "gottlieb2024automatic",
+  "doi": "10.1080/10556788.2024.2396297",
+  "title": "Automatic source code generation for deterministic global optimization with parallel architectures"
+ },
+ {
+  "key": "gottlieb2026automatic",
+  "doi": "10.1007/s12532-026-00339-w",
+  "title": "Automatic generation of GPU kernels for evaluators of McCormick-based relaxations and subgradients"
+ },
+ {
+  "key": "barkalov2016parallel",
+  "doi": "10.1007/s10898-016-0411-y",
+  "title": "Parallel global optimization on GPU"
+ },
+ {
+  "key": "bagoczki2017parallel",
+  "doi": "10.14232/actacyb.23.2.2017.4",
+  "title": "A Parallel Interval Arithmetic-based Reliable Computing Method on a GPU"
+ },
+ {
+  "key": "gillner2024gpuaccelerated",
+  "doi": "10.14232/actacyb.306774",
+  "title": "GPU-Accelerated, Interval-Based Parameter Identification Methods Illustrated Using the Two-Compartment Problem"
+ },
+ {
+  "key": "gendron1994parallel",
+  "doi": "10.1287/opre.42.6.1042",
+  "title": "Parallel Branch-and-Bound Algorithms: Survey and Synthesis"
+ },
+ {
+  "key": "crainic2006parallel",
+  "doi": "10.1002/9780470053928.ch1",
+  "title": "Parallel Branch-and-Bound Algorithms"
+ },
+ {
+  "key": "gmys2016gpubased",
+  "doi": "10.1016/j.parco.2016.01.008",
+  "title": "A GPU-based Branch-and-Bound algorithm using Integer-Vector-Matrix data structure"
+ },
+ {
+  "key": "neumaier2004complete",
+  "doi": "10.1017/S0962492904000194",
+  "title": "Complete search in continuous global optimization and constraint satisfaction"
+ },
+ {
+  "key": "kearfott1996rigorous",
+  "doi": "10.1007/978-1-4757-2495-0",
+  "title": "Rigorous Global Search: Continuous Problems"
+ },
+ {
+  "key": "applegate2026pdlp",
+  "doi": "10.1007/s12532-026-00309-2",
+  "title": "PDLP: a practical first-order method for large-scale linear programming"
+ },
+ {
+  "key": "applegate2023faster",
+  "doi": "10.1007/s10107-022-01901-9",
+  "title": "Faster first-order primal-dual methods for linear programming using restarts and sharpness"
+ },
+ {
+  "key": "applegate2024infeasibility",
+  "doi": "10.1137/22M1510467",
+  "title": "Infeasibility Detection with Primal-Dual Hybrid Gradient for Large-Scale Linear Programming"
+ },
+ {
+  "key": "lu2025cupdlpjl",
+  "doi": "10.1287/opre.2024.1069",
+  "title": "cuPDLP.jl: A GPU Implementation of Restarted Primal-Dual Hybrid Gradient for Linear Programming in Julia"
+ },
+ {
+  "key": "lu2025practical",
+  "doi": "10.1007/s10107-025-02241-0",
+  "title": "A Practical and Optimal First-Order Method for Large-Scale Convex Quadratic Programming"
+ },
+ {
+  "key": "neumaier2004safe",
+  "doi": "10.1007/s10107-003-0433-3",
+  "title": "Safe bounds in linear and mixed-integer linear programming"
+ },
+ {
+  "key": "jansson2004rigorous",
+  "doi": "10.1137/S1052623402416839",
+  "title": "Rigorous Lower and Upper Bounds in Linear Programming"
+ },
+ {
+  "key": "keil2006computational",
+  "doi": "10.1007/s11155-006-9004-7",
+  "title": "Computational Experience with Rigorous Error Bounds for the Netlib Linear Programming Library"
+ },
+ {
+  "key": "mehrotra1992implementation",
+  "doi": "10.1137/0802028",
+  "title": "On the Implementation of a Primal-Dual Interior Point Method"
+ },
+ {
+  "key": "wright1997primaldual",
+  "doi": "10.1137/1.9781611971453",
+  "title": "Primal-Dual Interior-Point Methods"
+ },
+ {
+  "key": "falk1969algorithm",
+  "doi": "10.1287/mnsc.15.9.550",
+  "title": "An Algorithm for Separable Nonconvex Programming Problems"
+ },
+ {
+  "key": "horst1990global",
+  "doi": "10.1007/978-3-662-02598-7",
+  "title": "Global Optimization: Deterministic Approaches"
+ },
+ {
+  "key": "smith1999symbolic",
+  "doi": "10.1016/S0098-1354(98)00286-5",
+  "title": "A symbolic reformulation/spatial branch-and-bound algorithm for the global optimisation of nonconvex MINLPs"
+ },
+ {
+  "key": "mccormick1976computability",
+  "doi": "10.1007/BF01580665",
+  "title": "Computability of global solutions to factorable nonconvex programs: Part I - Convex underestimating problems"
+ },
+ {
+  "key": "kelley1960cuttingplane",
+  "doi": "10.1137/0108053",
+  "title": "The Cutting-Plane Method for Solving Convex Programs"
+ },
+ {
+  "key": "frank1956algorithm",
+  "doi": "10.1002/nav.3800030109",
+  "title": "An algorithm for quadratic programming"
+ },
+ {
+  "key": "achterberg2005branching",
+  "doi": "10.1016/j.orl.2004.04.002",
+  "title": "Branching rules revisited"
+ },
+ {
+  "key": "belotti2009branching",
+  "doi": "10.1080/10556780903087124",
+  "title": "Branching and bounds tightening techniques for non-convex MINLP"
+ },
+ {
+  "key": "belotti2010feasibilitybased",
+  "doi": "10.1007/978-3-642-17458-2_7",
+  "title": "Feasibility-Based Bounds Tightening via Fixed Points"
+ },
+ {
+  "key": "puranik2017domain",
+  "doi": "10.1007/s10601-016-9267-5",
+  "title": "Domain reduction techniques for global NLP and MINLP optimization"
+ },
+ {
+  "key": "ryoo1996branchandreduce",
+  "doi": "10.1007/BF00138689",
+  "title": "A branch-and-reduce approach to global optimization"
+ },
+ {
+  "key": "tawarmalani2005polyhedral",
+  "doi": "10.1007/s10107-005-0581-8",
+  "title": "A polyhedral branch-and-cut approach to global optimization"
+ },
+ {
+  "key": "misener2014antigone",
+  "doi": "10.1007/s10898-014-0166-2",
+  "title": "ANTIGONE: Algorithms for coNTinuous / Integer Global Optimization of Nonlinear Equations"
+ },
+ {
+  "key": "kannan2018convergenceorder",
+  "doi": "10.1007/s10898-017-0532-y",
+  "title": "Convergence-order analysis of branch-and-bound algorithms for constrained problems"
+ },
+ {
+  "key": "mitsos2009mccormick",
+  "doi": "10.1137/080717341",
+  "title": "McCormick-Based Relaxations of Algorithms"
+ },
+ {
+  "key": "scott2011generalized",
+  "doi": "10.1007/s10898-011-9664-7",
+  "title": "Generalized McCormick relaxations"
+ },
+ {
+  "key": "tsoukalas2014multivariate",
+  "doi": "10.1007/s10898-014-0176-0",
+  "title": "Multivariate McCormick relaxations"
+ },
+ {
+  "key": "bompadre2012convergence",
+  "doi": "10.1007/s10898-011-9685-2",
+  "title": "Convergence rate of McCormick relaxations"
+ },
+ {
+  "key": "najman2016convergence",
+  "doi": "10.1007/s10898-016-0408-6",
+  "title": "Convergence analysis of multivariate McCormick relaxations"
+ },
+ {
+  "key": "bompadre2013convergence",
+  "doi": "10.1007/s10898-012-9998-9",
+  "title": "Convergence analysis of Taylor models and McCormick-Taylor models"
+ },
+ {
+  "key": "najman2019tighter",
+  "doi": "10.1007/s10898-019-00791-0",
+  "title": "Tighter McCormick relaxations through subgradient propagation"
+ },
+ {
+  "key": "khan2017differentiable",
+  "doi": "10.1007/s10898-016-0440-6",
+  "title": "Differentiable McCormick relaxations"
+ },
+ {
+  "key": "wechsung2015reverse",
+  "doi": "10.1007/s10898-015-0303-6",
+  "title": "Reverse propagation of McCormick relaxations"
+ },
+ {
+  "key": "najman2021linearization",
+  "doi": "10.1007/s10898-020-00977-x",
+  "title": "Linearization of McCormick relaxations and hybridization with the auxiliary variable method"
+ },
+ {
+  "key": "stuber2015convex",
+  "doi": "10.1080/10556788.2014.924514",
+  "title": "Convex and concave relaxations of implicit functions"
+ },
+ {
+  "key": "epperly1997reduced",
+  "doi": "10.1023/A:1008212418949",
+  "title": "A Reduced Space Branch and Bound Algorithm for Global Optimization"
+ },
+ {
+  "key": "bongartz2017deterministic",
+  "doi": "10.1007/s10898-017-0547-4",
+  "title": "Deterministic global optimization of process flowsheets in a reduced space using McCormick relaxations"
+ },
+ {
+  "key": "chachuat2015settheoretic",
+  "doi": "10.1016/j.ifacol.2015.09.097",
+  "title": "Set-Theoretic Approaches in Analysis, Estimation and Control of Nonlinear Systems"
+ },
+ {
+  "key": "wilhelm2022eagojl",
+  "doi": "10.1080/10556788.2020.1786566",
+  "title": "EAGO.jl: easy advanced global optimization in Julia"
+ },
+ {
+  "key": "wilhelm2023convex",
+  "doi": "10.1007/s10898-022-01228-x",
+  "title": "Convex and concave envelopes of artificial neural network activation functions for deterministic global optimization"
+ },
+ {
+  "key": "androulakis1995alphabb",
+  "doi": "10.1007/BF01099647",
+  "title": "alphaBB: A global optimization method for general constrained nonconvex problems"
+ },
+ {
+  "key": "adjiman1996rigorous",
+  "doi": "10.1007/BF00121749",
+  "title": "Rigorous convex underestimators for general twice-differentiable problems"
+ },
+ {
+  "key": "adjiman1998global",
+  "doi": "10.1016/S0098-1354(98)00027-1",
+  "title": "A global optimization method, alphaBB, for general twice-differentiable constrained NLPs - I. Theoretical advances"
+ },
+ {
+  "key": "adjiman1998globalii",
+  "doi": "10.1016/S0098-1354(98)00218-X",
+  "title": "A global optimization method, alphaBB, for general twice-differentiable constrained NLPs - II. Implementation and computational results"
+ },
+ {
+  "key": "monnigmann2008efficient",
+  "doi": "10.1137/070704186",
+  "title": "Efficient Calculation of Bounds on Spectra of Hessian Matrices"
+ },
+ {
+  "key": "schulzedarup2014efficient",
+  "doi": "10.1007/s10898-013-0099-1",
+  "title": "Efficient computation of spectral bounds for Hessian matrices on hyperrectangles for global optimization"
+ },
+ {
+  "key": "schulzedarup2016improved",
+  "doi": "10.1137/15M1025773",
+  "title": "Improved Automatic Computation of Hessian Matrix Spectral Bounds"
+ },
+ {
+  "key": "hladik2015efficient",
+  "doi": "10.1007/s10898-014-0161-7",
+  "title": "On the efficient Gerschgorin inclusion usage in the global optimization alphaBB method"
+ },
+ {
+  "key": "hladik2017effect",
+  "doi": "10.1007/978-3-319-67168-0_6",
+  "title": "The Effect of Hessian Evaluations in the Global Optimization alphaBB Method"
+ },
+ {
+  "key": "skjal2012generalization",
+  "doi": "10.1007/s10957-012-0033-6",
+  "title": "A Generalization of the Classical alphaBB Convex Underestimation via Diagonal and Nondiagonal Quadratic Terms"
+ },
+ {
+  "key": "nerantzis2019tighter",
+  "doi": "10.1007/s10898-018-0718-y",
+  "title": "Tighter alphaBB relaxations through a refinement scheme for the scaled Gerschgorin theorem"
+ },
+ {
+  "key": "kazazakis2018arbitrarily",
+  "doi": "10.1007/s10898-018-0632-3",
+  "title": "Arbitrarily tight alphaBB underestimators of general non-linear functions over sub-optimal domains"
+ },
+ {
+  "key": "gounaris2008tight",
+  "doi": "10.1007/s10898-008-9287-9",
+  "title": "Tight convex underestimators for C2-continuous problems: I. univariate functions"
+ },
+ {
+  "key": "meyer2005convex",
+  "doi": "10.1007/s10898-004-2704-9",
+  "title": "Convex underestimation of twice continuously differentiable functions by piecewise quadratic perturbation: spline alphaBB underestimators"
+ },
+ {
+  "key": "sahlodin2011convex",
+  "doi": "10.1016/j.compchemeng.2011.01.031",
+  "title": "Convex/concave relaxations of parametric ODEs using Taylor models"
+ },
+ {
+  "key": "schichl2005interval",
+  "doi": "10.1007/s10898-005-0937-x",
+  "title": "Interval Analysis on Directed Acyclic Graphs for Global Optimization"
+ },
+ {
+  "key": "khajavirad2018hybrid",
+  "doi": "10.1007/s12532-018-0138-5",
+  "title": "A hybrid LP/NLP paradigm for global optimization relaxations"
+ },
+ {
+  "key": "vigerske2018scip",
+  "doi": "10.1080/10556788.2017.1335312",
+  "title": "SCIP: global optimization of mixed-integer nonlinear programs in a branch-and-cut framework"
+ },
+ {
+  "key": "bestuzheva2025global",
+  "doi": "10.1007/s10898-023-01345-1",
+  "title": "Global optimization of mixed-integer nonlinear programs with SCIP 8"
+ },
+ {
+  "key": "lin2009global",
+  "doi": "10.1080/10556780902753221",
+  "title": "The global solver in the LINDO API"
+ },
+ {
+  "key": "wachter2006implementation",
+  "doi": "10.1007/s10107-004-0559-y",
+  "title": "On the implementation of an interior-point filter line-search algorithm for large-scale nonlinear programming"
+ },
+ {
+  "key": "hart2011pyomo",
+  "doi": "10.1007/s12532-011-0026-8",
+  "title": "Pyomo: modeling and solving mathematical programs in Python"
+ },
+ {
+  "key": "bynum2021pyomo",
+  "doi": "10.1007/978-3-030-68928-5",
+  "title": "Pyomo - Optimization Modeling in Python"
+ },
+ {
+  "key": "brooke1988gams",
+  "doi": "10.1145/58859.58863",
+  "title": "GAMS, a user's guide"
+ },
+ {
+  "key": "byrd1995limited",
+  "doi": "10.1137/0916069",
+  "title": "A limited memory algorithm for bound constrained optimization"
+ },
+ {
+  "key": "liu1989limited",
+  "doi": "10.1007/BF01589116",
+  "title": "On the limited memory BFGS method for large scale optimization"
+ },
+ {
+  "key": "hestenes1969multiplier",
+  "doi": "10.1007/BF00927673",
+  "title": "Multiplier and gradient methods"
+ },
+ {
+  "key": "virtanen2020scipy",
+  "doi": "10.1038/s41592-019-0686-2",
+  "title": "SciPy 1.0: fundamental algorithms for scientific computing in Python"
+ },
+ {
+  "key": "bolte2021conservative",
+  "doi": "10.1007/s10107-020-01501-5",
+  "title": "Conservative set valued fields, automatic differentiation, stochastic gradient methods and deep learning"
+ },
+ {
+  "key": "griewank2013stable",
+  "doi": "10.1080/10556788.2013.796683",
+  "title": "On stable piecewise linearization and generalized algorithmic differentiation"
+ },
+ {
+  "key": "griewank2015solving",
+  "doi": "10.1016/j.laa.2014.12.017",
+  "title": "Solving piecewise linear systems in abs-normal form"
+ },
+ {
+  "key": "khan2013evaluating",
+  "doi": "10.1145/2491491.2491493",
+  "title": "Evaluating an element of the Clarke generalized Jacobian of a composite piecewise differentiable function"
+ },
+ {
+  "key": "khan2015vector",
+  "doi": "10.1080/10556788.2015.1025400",
+  "title": "A vector forward mode of automatic differentiation for generalized derivative evaluation"
+ },
+ {
+  "key": "nesterov2005lexicographic",
+  "doi": "10.1007/s10107-005-0633-0",
+  "title": "Lexicographic differentiation of nonsmooth functions"
+ },
+ {
+  "key": "griewank2008evaluating",
+  "doi": "10.1137/1.9780898717761",
+  "title": "Evaluating Derivatives: Principles and Techniques of Algorithmic Differentiation"
+ },
+ {
+  "key": "michalewicz1996evolutionary",
+  "doi": "10.1162/evco.1996.4.1.1",
+  "title": "Evolutionary algorithms for constrained parameter optimization problems"
+ },
+ {
+  "key": "haverly1978studies",
+  "doi": "10.1145/1111237.1111238",
+  "title": "Studies of the behavior of recursion for the pooling problem"
+ },
+ {
+  "key": "floudas1999handbook",
+  "doi": "10.1007/978-1-4757-3040-1",
+  "title": "Handbook of Test Problems in Local and Global Optimization"
+ },
+ {
+  "key": "ryoo1995global",
+  "doi": "10.1016/0098-1354(94)00097-2",
+  "title": "Global optimization of nonconvex NLPs and MINLPs with applications in process design"
+ },
+ {
+  "key": "jamil2013literature",
+  "doi": "10.1504/IJMMNO.2013.055204",
+  "title": "A literature survey of benchmark functions for global optimisation problems"
+ },
+ {
+  "key": "bussieck2003minlplib",
+  "doi": "10.1287/ijoc.15.1.114.15159",
+  "title": "MINLPLib - A collection of test models for mixed-integer nonlinear programming"
+ },
+ {
+  "key": "neumaier2005comparison",
+  "doi": "10.1007/s10107-005-0585-4",
+  "title": "A comparison of complete global optimization solvers"
+ },
+ {
+  "key": "schweidtmann2019deterministic",
+  "doi": "10.1007/s10957-018-1396-0",
+  "title": "Deterministic global optimization with artificial neural networks embedded"
+ },
+ {
+  "key": "schweidtmann2021deterministic",
+  "doi": "10.1007/s12532-021-00204-y",
+  "title": "Deterministic global optimization with Gaussian processes embedded"
+ },
+ {
+  "key": "kronqvist2025psplit",
+  "doi": "10.1007/s10107-025-02232-1",
+  "title": "P-split formulations: a class of intermediate formulations between big-M and convex hull for disjunctive constraints"
+ },
+ {
+  "key": "anderson2020strong",
+  "doi": "10.1007/s10107-020-01474-5",
+  "title": "Strong mixed-integer programming formulations for trained neural networks"
+ },
+ {
+  "key": "fischetti2018deep",
+  "doi": "10.1007/s10601-018-9285-6",
+  "title": "Deep neural networks and mixed integer linear optimization"
+ },
+ {
+  "key": "grimstad2019relu",
+  "doi": "10.1016/j.compchemeng.2019.106580",
+  "title": "ReLU networks as surrogate models in mixed-integer linear programs"
+ },
+ {
+  "key": "bolte2024differentiating",
+  "doi": "10.1137/22M1541630",
+  "title": "Differentiating nonsmooth solutions to parametric monotone inclusion problems"
+ },
+ {
+  "key": "hansen2004global",
+  "doi": "10.1201/9780203026922",
+  "title": "Global Optimization Using Interval Analysis"
+ },
+ {
+  "key": "harapanahalli2024immrax",
+  "doi": "10.1016/j.ifacol.2024.07.428",
+  "title": "immrax: A Parallelizable and Differentiable Toolbox for Interval Analysis and Mixed Monotone Reachability in JAX"
+ },
+ {
+  "key": "singh2019abstract",
+  "doi": "10.1145/3290354",
+  "title": "An Abstract Domain for Certifying Neural Networks"
+ },
+ {
+  "key": "shi2025neural",
+  "doi": "10.1007/978-3-031-90643-5_17",
+  "title": "Neural Network Verification with Branch-and-Bound for General Nonlinearities"
+ },
+ {
+  "key": "applegate2021practical",
+  "bibtex": "@inproceedings{applegate2021practical,\n  author = {Applegate, David and D{\\'i}az, Mateo and Hinder, Oliver and Lu, Haihao and Lubin, Miles and O'Donoghue, Brendan and Schudy, Warren},\n  title = {Practical Large-Scale Linear Programming using Primal-Dual Hybrid Gradient},\n  booktitle = {Advances in Neural Information Processing Systems},\n  volume = {34},\n  year = {2021},\n  url = {https://proceedings.neurips.cc/paper/2021/hash/a8fbbd3b11424ce032ba813493d95ad7-Abstract.html}\n}"
+ },
+ {
+  "key": "lu2024mpax",
+  "bibtex": "@misc{lu2024mpax,\n  author = {Lu, Haihao and Peng, Zedong and Yang, Jinwen},\n  title = {{MPAX}: Mathematical Programming in {JAX}},\n  year = {2024},\n  eprint = {2412.09734},\n  archivePrefix = {arXiv},\n  primaryClass = {math.OC},\n  doi = {10.48550/arXiv.2412.09734},\n  url = {https://arxiv.org/abs/2412.09734}\n}"
+ },
+ {
+  "key": "amos2017optnet",
+  "bibtex": "@inproceedings{amos2017optnet,\n  author = {Amos, Brandon and Kolter, J. Zico},\n  title = {{OptNet}: Differentiable Optimization as a Layer in Neural Networks},\n  booktitle = {Proceedings of the 34th International Conference on Machine Learning},\n  series = {Proceedings of Machine Learning Research},\n  volume = {70},\n  pages = {136--145},\n  year = {2017},\n  url = {https://proceedings.mlr.press/v70/amos17a.html}\n}"
+ },
+ {
+  "key": "agrawal2019differentiable",
+  "bibtex": "@inproceedings{agrawal2019differentiable,\n  author = {Agrawal, Akshay and Amos, Brandon and Barratt, Shane and Boyd, Stephen and Diamond, Steven and Kolter, J. Zico},\n  title = {Differentiable Convex Optimization Layers},\n  booktitle = {Advances in Neural Information Processing Systems},\n  volume = {32},\n  year = {2019},\n  url = {https://proceedings.neurips.cc/paper/2019/hash/9ce3c52fc54362e22053399d3181c638-Abstract.html}\n}"
+ },
+ {
+  "key": "jaggi2013revisiting",
+  "bibtex": "@inproceedings{jaggi2013revisiting,\n  author = {Jaggi, Martin},\n  title = {Revisiting {Frank-Wolfe}: Projection-Free Sparse Convex Optimization},\n  booktitle = {Proceedings of the 30th International Conference on Machine Learning},\n  series = {Proceedings of Machine Learning Research},\n  volume = {28},\n  number = {1},\n  pages = {427--435},\n  year = {2013},\n  url = {https://proceedings.mlr.press/v28/jaggi13.html}\n}"
+ },
+ {
+  "key": "chachuatmcpp",
+  "bibtex": "@misc{chachuatmcpp,\n  author = {Chachuat, Beno{\\^i}t and others},\n  title = {{MC++}: Toolkit for Construction, Manipulation and Bounding of Factorable Functions},\n  howpublished = {Software, \\url{https://github.com/omega-icl/mcpp}},\n  note = {Mirror at \\url{https://github.com/coin-or/MCpp}; see also chachuat2015settheoretic}\n}"
+ },
+ {
+  "key": "bongartz2018maingo",
+  "bibtex": "@techreport{bongartz2018maingo,\n  author = {Bongartz, Dominik and Najman, Jaromi{\\l} and Sass, Susanne and Mitsos, Alexander},\n  title = {{MAiNGO} -- {McCormick}-based Algorithm for mixed-integer Nonlinear Global Optimization},\n  institution = {Process Systems Engineering (AVT.SVT), RWTH Aachen University},\n  year = {2018},\n  url = {http://permalink.avt.rwth-aachen.de/?id=729717}\n}"
+ },
+ {
+  "key": "makino2003taylor",
+  "bibtex": "@article{makino2003taylor,\n  author = {Makino, Kyoko and Berz, Martin},\n  title = {Taylor models and other validated functional inclusion methods},\n  journal = {International Journal of Pure and Applied Mathematics},\n  volume = {4},\n  number = {4},\n  pages = {379--456},\n  year = {2003}\n}"
+ },
+ {
+  "key": "hojny2025scip",
+  "bibtex": "@misc{hojny2025scip,\n  author = {Hojny, Christopher and Besan{\\c{c}}on, Mathieu and Bestuzheva, Ksenia and Borst, Sander and Dion{\\'i}sio, Jo{\\~a}o and others},\n  title = {The {SCIP} Optimization Suite 10.0},\n  year = {2025},\n  eprint = {2511.18580},\n  archivePrefix = {arXiv},\n  primaryClass = {math.OC},\n  url = {https://arxiv.org/abs/2511.18580}\n}"
+ },
+ {
+  "key": "bolusani2024scip",
+  "bibtex": "@misc{bolusani2024scip,\n  author = {Bolusani, Suresh and Besan{\\c{c}}on, Mathieu and Bestuzheva, Ksenia and Chmiela, Antonia and Dion{\\'i}sio, Jo{\\~a}o and others},\n  title = {The {SCIP} Optimization Suite 9.0},\n  year = {2024},\n  eprint = {2402.17702},\n  archivePrefix = {arXiv},\n  primaryClass = {math.OC},\n  url = {https://arxiv.org/abs/2402.17702}\n}"
+ },
+ {
+  "key": "kraft1988software",
+  "bibtex": "@techreport{kraft1988software,\n  author = {Kraft, Dieter},\n  title = {A software package for sequential quadratic programming},\n  institution = {DLR German Aerospace Center, K{\\\"o}ln},\n  type = {Technical Report},\n  number = {DFVLR-FB 88-28},\n  year = {1988}\n}"
+ },
+ {
+  "key": "powell1969method",
+  "bibtex": "@incollection{powell1969method,\n  author = {Powell, M. J. D.},\n  title = {A method for nonlinear constraints in minimization problems},\n  booktitle = {Optimization},\n  editor = {Fletcher, R.},\n  pages = {283--298},\n  publisher = {Academic Press},\n  address = {London},\n  year = {1969}\n}"
+ },
+ {
+  "key": "kakade2018provably",
+  "bibtex": "@inproceedings{kakade2018provably,\n  author = {Kakade, Sham M. and Lee, Jason D.},\n  title = {Provably correct automatic sub-differentiation for qualified programs},\n  booktitle = {Advances in Neural Information Processing Systems},\n  volume = {31},\n  year = {2018}\n}"
+ },
+ {
+  "key": "lee2020correctness",
+  "bibtex": "@inproceedings{lee2020correctness,\n  author = {Lee, Wonyeol and Yu, Hangyeol and Rival, Xavier and Yang, Hongseok},\n  title = {On correctness of automatic differentiation for non-differentiable functions},\n  booktitle = {Advances in Neural Information Processing Systems},\n  volume = {33},\n  year = {2020}\n}"
+ },
+ {
+  "key": "bolte2020mathematical",
+  "bibtex": "@inproceedings{bolte2020mathematical,\n  author = {Bolte, J{\\'e}r{\\^o}me and Pauwels, Edouard},\n  title = {A mathematical model for automatic differentiation in machine learning},\n  booktitle = {Advances in Neural Information Processing Systems},\n  volume = {33},\n  year = {2020}\n}"
+ },
+ {
+  "key": "liang2006problem",
+  "bibtex": "@techreport{liang2006problem,\n  author = {Liang, J. J. and Runarsson, T. P. and Mezura-Montes, E. and Clerc, M. and Suganthan, P. N. and Coello Coello, C. A. and Deb, K.},\n  title = {Problem definitions and evaluation criteria for the {CEC} 2006 special session on constrained real-parameter optimization},\n  institution = {Nanyang Technological University},\n  address = {Singapore},\n  year = {2006}\n}"
+ },
+ {
+  "key": "surjanovic2013virtual",
+  "bibtex": "@misc{surjanovic2013virtual,\n  author = {Surjanovic, Sonja and Bingham, Derek},\n  title = {Virtual Library of Simulation Experiments: Test Functions and Datasets},\n  year = {2013},\n  howpublished = {\\url{https://www.sfu.ca/~ssurjano/}}\n}"
+ },
+ {
+  "key": "ceccon2022omlt",
+  "bibtex": "@article{ceccon2022omlt,\n  author = {Ceccon, Francesco and Jalving, Jordan and Haddad, Joshua and Thebelt, Alexander and Tsay, Calvin and Laird, Carl D. and Misener, Ruth},\n  title = {{OMLT}: Optimization \\& Machine Learning Toolkit},\n  journal = {Journal of Machine Learning Research},\n  volume = {23},\n  number = {349},\n  pages = {1--8},\n  year = {2022},\n  url = {https://jmlr.org/papers/v23/22-0277.html}\n}"
+ },
+ {
+  "key": "tsay2021partition",
+  "bibtex": "@inproceedings{tsay2021partition,\n  author = {Tsay, Calvin and Kronqvist, Jan and Thebelt, Alexander and Misener, Ruth},\n  title = {Partition-based formulations for mixed-integer optimization of trained {ReLU} neural networks},\n  booktitle = {Advances in Neural Information Processing Systems},\n  volume = {34},\n  year = {2021}\n}"
+ },
+ {
+  "key": "stanforth2020jaxverify",
+  "bibtex": "@misc{stanforth2020jaxverify,\n  author = {Stanforth, Robert and Dvijotham, Krishnamurthy and Gowal, Sven and others},\n  title = {jax\\_verify: Neural network verification in {JAX}},\n  year = {2020},\n  howpublished = {Software, \\url{https://github.com/google-deepmind/jax_verify}}\n}"
+ },
+ {
+  "key": "streeter2022automatically",
+  "bibtex": "@misc{streeter2022automatically,\n  author = {Streeter, Matthew and Dillon, Joshua V.},\n  title = {Automatically Bounding the {Taylor} Remainder Series: Tighter Bounds and New Applications},\n  year = {2022},\n  eprint = {2212.11429},\n  archivePrefix = {arXiv},\n  url = {https://arxiv.org/abs/2212.11429},\n  note = {Code: \\url{https://github.com/google/autobound}}\n}"
+ },
+ {
+  "key": "streeter2023sharp",
+  "bibtex": "@misc{streeter2023sharp,\n  author = {Streeter, Matthew and Dillon, Joshua V.},\n  title = {Sharp {Taylor} Polynomial Enclosures in One Dimension},\n  year = {2023},\n  eprint = {2308.00679},\n  archivePrefix = {arXiv},\n  url = {https://arxiv.org/abs/2308.00679}\n}"
+ },
+ {
+  "key": "dvijotham2018dual",
+  "bibtex": "@inproceedings{dvijotham2018dual,\n  author = {Dvijotham, Krishnamurthy and Stanforth, Robert and Gowal, Sven and Mann, Timothy and Kohli, Pushmeet},\n  title = {A Dual Approach to Scalable Verification of Deep Networks},\n  booktitle = {Proceedings of the Thirty-Fourth Conference on Uncertainty in Artificial Intelligence (UAI)},\n  pages = {550--559},\n  year = {2018},\n  eprint = {1803.06567},\n  archivePrefix = {arXiv}\n}"
+ },
+ {
+  "key": "dvijotham2020efficient",
+  "bibtex": "@inproceedings{dvijotham2020efficient,\n  author = {Dvijotham, Krishnamurthy and Stanforth, Robert and Gowal, Sven and Qin, Chongli and De, Soham and Kohli, Pushmeet},\n  title = {Efficient Neural Network Verification with Exactness Characterization},\n  booktitle = {Proceedings of the 35th Uncertainty in Artificial Intelligence Conference},\n  series = {Proceedings of Machine Learning Research},\n  volume = {115},\n  pages = {497--507},\n  year = {2020},\n  url = {https://proceedings.mlr.press/v115/dvijotham20a.html}\n}"
+ },
+ {
+  "key": "bunel2020lagrangian",
+  "bibtex": "@inproceedings{bunel2020lagrangian,\n  author = {Bunel, Rudy and De Palma, Alessandro and Desmaison, Alban and Dvijotham, Krishnamurthy and Kohli, Pushmeet and Torr, Philip H. S. and Kumar, M. Pawan},\n  title = {Lagrangian Decomposition for Neural Network Verification},\n  booktitle = {Proceedings of the 36th Conference on Uncertainty in Artificial Intelligence (UAI)},\n  series = {Proceedings of Machine Learning Research},\n  volume = {124},\n  pages = {370--379},\n  year = {2020},\n  eprint = {2002.10410},\n  archivePrefix = {arXiv}\n}"
+ },
+ {
+  "key": "tjandraatmadja2020convex",
+  "bibtex": "@inproceedings{tjandraatmadja2020convex,\n  author = {Tjandraatmadja, Christian and Anderson, Ross and Huchette, Joey and Ma, Will and Patel, Krunal Kishor and Vielma, Juan Pablo},\n  title = {The Convex Relaxation Barrier, Revisited: Tightened Single-Neuron Relaxations for Neural Network Verification},\n  booktitle = {Advances in Neural Information Processing Systems},\n  volume = {33},\n  pages = {21675--21686},\n  year = {2020},\n  eprint = {2006.14076},\n  archivePrefix = {arXiv}\n}"
+ },
+ {
+  "key": "salman2019convex",
+  "bibtex": "@inproceedings{salman2019convex,\n  author = {Salman, Hadi and Yang, Greg and Zhang, Huan and Hsieh, Cho-Jui and Zhang, Pengchuan},\n  title = {A Convex Relaxation Barrier to Tight Robustness Verification of Neural Networks},\n  booktitle = {Advances in Neural Information Processing Systems},\n  volume = {32},\n  pages = {9835--9846},\n  year = {2019},\n  eprint = {1902.08722},\n  archivePrefix = {arXiv}\n}"
+ },
+ {
+  "key": "gowal2018effectiveness",
+  "bibtex": "@misc{gowal2018effectiveness,\n  author = {Gowal, Sven and Dvijotham, Krishnamurthy and Stanforth, Robert and Bunel, Rudy and Qin, Chongli and Uesato, Jonathan and Arandjelovic, Relja and Mann, Timothy and Kohli, Pushmeet},\n  title = {On the Effectiveness of Interval Bound Propagation for Training Verifiably Robust Models},\n  year = {2018},\n  eprint = {1810.12715},\n  archivePrefix = {arXiv},\n  url = {https://arxiv.org/abs/1810.12715}\n}"
+ },
+ {
+  "key": "zhang2018efficient",
+  "bibtex": "@inproceedings{zhang2018efficient,\n  author = {Zhang, Huan and Weng, Tsui-Wei and Chen, Pin-Yu and Hsieh, Cho-Jui and Daniel, Luca},\n  title = {Efficient Neural Network Robustness Certification with General Activation Functions},\n  booktitle = {Advances in Neural Information Processing Systems},\n  volume = {31},\n  year = {2018},\n  eprint = {1811.00866},\n  archivePrefix = {arXiv}\n}"
+ },
+ {
+  "key": "xu2020automatic",
+  "bibtex": "@inproceedings{xu2020automatic,\n  author = {Xu, Kaidi and Shi, Zhouxing and Zhang, Huan and Wang, Yihan and Chang, Kai-Wei and Huang, Minlie and Kailkhura, Bhavya and Lin, Xue and Hsieh, Cho-Jui},\n  title = {Automatic Perturbation Analysis for Scalable Certified Robustness and Beyond},\n  booktitle = {Advances in Neural Information Processing Systems},\n  volume = {33},\n  pages = {1129--1141},\n  year = {2020},\n  eprint = {2002.12920},\n  archivePrefix = {arXiv}\n}"
+ },
+ {
+  "key": "xu2021fast",
+  "bibtex": "@inproceedings{xu2021fast,\n  author = {Xu, Kaidi and Zhang, Huan and Wang, Shiqi and Wang, Yihan and Jana, Suman and Lin, Xue and Hsieh, Cho-Jui},\n  title = {Fast and Complete: Enabling Complete Neural Network Verification with Rapid and Massively Parallel Incomplete Verifiers},\n  booktitle = {International Conference on Learning Representations (ICLR)},\n  year = {2021},\n  eprint = {2011.13824},\n  archivePrefix = {arXiv}\n}"
+ },
+ {
+  "key": "wang2021beta",
+  "bibtex": "@inproceedings{wang2021beta,\n  author = {Wang, Shiqi and Zhang, Huan and Xu, Kaidi and Lin, Xue and Jana, Suman and Hsieh, Cho-Jui and Kolter, J. Zico},\n  title = {Beta-{CROWN}: Efficient Bound Propagation with Per-neuron Split Constraints for Neural Network Robustness Verification},\n  booktitle = {Advances in Neural Information Processing Systems},\n  volume = {34},\n  year = {2021},\n  eprint = {2103.06624},\n  archivePrefix = {arXiv}\n}"
+ },
+ {
+  "key": "bunel2020branch",
+  "bibtex": "@article{bunel2020branch,\n  author = {Bunel, Rudy and Lu, Jingyue and Turkaslan, Ilker and Torr, Philip H. S. and Kohli, Pushmeet and Kumar, M. Pawan},\n  title = {Branch and Bound for Piecewise Linear Neural Network Verification},\n  journal = {Journal of Machine Learning Research},\n  volume = {21},\n  number = {42},\n  pages = {1--39},\n  year = {2020}\n}"
+ },
+ {
+  "key": "zhang2025accelerating",
+  "bibtex": "@misc{zhang2025accelerating,\n  author = {Zhang, Hongzhen and Kerkenhoff, Tim and Kichler, Neil and Dahmen, Manuel and Mitsos, Alexander and Naumann, Uwe and Bongartz, Dominik},\n  title = {Accelerating Deterministic Global Optimization via {GPU}-parallel Interval Arithmetic},\n  year = {2025},\n  eprint = {2507.20769},\n  archivePrefix = {arXiv},\n  doi = {10.48550/arXiv.2507.20769},\n  url = {https://arxiv.org/abs/2507.20769}\n}"
+ },
+ {
+  "key": "bradbury2018jax",
+  "bibtex": "@misc{bradbury2018jax,\n  author = {Bradbury, James and Frostig, Roy and Hawkins, Peter and Johnson, Matthew James and Leary, Chris and Maclaurin, Dougal and Necula, George and Paszke, Adam and VanderPlas, Jake and Wanderman-Milne, Skye and Zhang, Qiao},\n  title = {{JAX}: composable transformations of {Python}+{NumPy} programs},\n  year = {2018},\n  howpublished = {Software, \\url{http://github.com/jax-ml/jax}}\n}"
+ },
+ {
+  "key": "frostig2018compiling",
+  "bibtex": "@inproceedings{frostig2018compiling,\n  author = {Frostig, Roy and Johnson, Matthew James and Leary, Chris},\n  title = {Compiling machine learning programs via high-level tracing},\n  booktitle = {SysML Conference},\n  address = {Stanford, CA},\n  year = {2018},\n  url = {https://research.google/pubs/compiling-machine-learning-programs-via-high-level-tracing/}\n}"
+ },
+ {
+  "key": "deepmind2020deepmind",
+  "bibtex": "@misc{deepmind2020deepmind,\n  author = {{DeepMind} and Babuschkin, Igor and others},\n  title = {The {DeepMind} {JAX} Ecosystem},\n  year = {2020},\n  howpublished = {\\url{http://github.com/google-deepmind}}\n}"
+ },
+ {
+  "key": "kitchin2026discopt",
+  "bibtex": "@misc{kitchin2026discopt,\n  author = {Kitchin, John R.},\n  title = {discopt: a hybrid {MINLP} solver combining {Rust}, {JAX}, and {Python}},\n  year = {2026},\n  version = {v0.3.0},\n  publisher = {Zenodo},\n  doi = {10.5281/zenodo.19762815},\n  url = {https://github.com/jkitchin/discopt}\n}"
+ }
+]

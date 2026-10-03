@@ -1,0 +1,16 @@
+[project]
+name = "jaxglobal"
+version = "0.0.1"
+description = "Proof-of-concept deterministic global optimization of plain JAX functions via jaxpr-derived relaxations"
+requires-python = ">=3.10"
+dependencies = ["jax>=0.4.30", "numpy", "scipy"]
+
+[project.optional-dependencies]
+dev = ["pytest", "matplotlib"]
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["jaxglobal"]

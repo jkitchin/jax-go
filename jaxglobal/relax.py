@@ -1,0 +1,722 @@
+"""McCormick relaxations of arbitrary JAX functions via jaxpr interpretation.
+
+The user writes an ordinary Python function ``f(x)`` with ``jax.numpy``.  We
+trace it to a jaxpr and re-interpret every primitive on ``MC`` objects:
+
+    MC(lo, hi, cv, cc)
+
+where, for every point ``p`` in the box ``[lo_box, hi_box]`` (the "box" of the
+original variables):
+
+    lo <= value(p) <= hi          (interval bounds, constant on the box)
+    cv(p) <= value(p) <= cc(p)    (cv convex in p, cc concave in p)
+
+The input variable is seeded as ``MC(lo_box, hi_box, p, p)``.  Because every
+rule is written with ``jax.numpy``, the relaxation itself is a JAX function:
+it can be ``jit``-ed, ``vmap``-ed over many boxes, and differentiated with
+``jax.grad`` to get subgradients of the convex relaxation (used for cuts).
+
+Rules come in four kinds:
+
+* structural / positive-linear primitives (slice, reshape, add, reduce_sum,
+  ...) are applied component-wise to (lo, hi, cv, cc);
+* signed linear primitives (neg, sub, mul/dot by a constant) swap components
+  by sign;
+* bilinear ``mul`` uses the McCormick product rule;
+* univariate primitives use the McCormick composition theorem with either a
+  hand-written convex/concave envelope (exp, log, sqrt, x**2, |x|, 1/x, ...)
+  or an *automatically derived* alphaBB relaxation (sin, cos, tanh, erf, ...)
+  whose alpha comes from interval bounds on f'' obtained by tracing
+  ``jax.grad(jax.grad(primitive))`` and interpreting *that* jaxpr in interval
+  mode.
+
+This is a proof of concept: arithmetic is ordinary floating point, not
+outward-rounded, so the bounds are not rigorous in the verified-computing
+sense.
+"""
+
+from __future__ import annotations
+
+from typing import Callable, NamedTuple
+
+import jax
+import jax.numpy as jnp
+from jax import lax
+from jax.extend import core as jcore
+
+INF = jnp.inf
+
+
+class MC(NamedTuple):
+    """McCormick object: interval [lo, hi] plus convex/concave relaxations."""
+
+    lo: jax.Array
+    hi: jax.Array
+    cv: jax.Array
+    cc: jax.Array
+
+
+class Unknown(NamedTuple):
+    """A boolean that depends on the variables; we only know where it is decided."""
+
+    sure_true: jax.Array
+    sure_false: jax.Array
+
+
+class Ctx(NamedTuple):
+    interval_only: bool = False
+
+
+def is_mc(v):
+    return isinstance(v, MC)
+
+
+def const_mc(c):
+    c = jnp.asarray(c)
+    return MC(c, c, c, c)
+
+
+def as_mc(v):
+    return v if is_mc(v) else const_mc(v)
+
+
+def tighten(m: MC) -> MC:
+    return MC(m.lo, m.hi, jnp.maximum(m.cv, m.lo), jnp.minimum(m.cc, m.hi))
+
+
+def select_mc(cond, a: MC, b: MC) -> MC:
+    return MC(*(jnp.where(cond, u, v) for u, v in zip(a, b)))
+
+
+def unbounded_like(x: MC) -> MC:
+    z = jnp.zeros_like(x.lo)
+    return MC(z - INF, z + INF, z - INF, z + INF)
+
+
+def safe_mc(x: MC, ok, lo_fill, hi_fill) -> MC:
+    """Replace x by a harmless dummy box where ``ok`` is False (avoids NaN grads)."""
+    mid = 0.5 * (lo_fill + hi_fill)
+    return MC(
+        jnp.where(ok, x.lo, lo_fill),
+        jnp.where(ok, x.hi, hi_fill),
+        jnp.where(ok, x.cv, mid),
+        jnp.where(ok, x.cc, mid),
+    )
+
+
+def _mid(z, a, b):
+    """Median of (z, a, b) assuming a <= b.
+
+    Written with ``where`` rather than min/max: JAX splits gradients 50/50 at
+    ties, and at a == b that would blend the gradient of the concave
+    relaxation into a subgradient of the convex one (invalid cuts).
+    """
+    return jnp.where(z < a, a, jnp.where(z > b, b, z))
+
+
+def _secant(f, lo, hi, z):
+    flo, fhi = f(lo), f(hi)
+    w = hi - lo
+    pos = w > 0
+    slope = jnp.where(pos, (fhi - flo) / jnp.where(pos, w, 1.0), 0.0)
+    return flo + slope * (z - lo)
+
+
+# ---------------------------------------------------------------------------
+# Generic univariate composition rules
+# ---------------------------------------------------------------------------
+
+
+def convex_rule(f, x: MC, xmin) -> MC:
+    """f convex on [x.lo, x.hi] with box minimizer ``xmin``."""
+    flo, fhi = f(x.lo), f(x.hi)
+    lo = f(xmin)
+    hi = jnp.maximum(flo, fhi)
+    cv = f(_mid(xmin, x.cv, x.cc))
+    xmax = jnp.where(fhi >= flo, x.hi, x.lo)
+    cc = _secant(f, x.lo, x.hi, _mid(xmax, x.cv, x.cc))
+    return tighten(MC(lo, hi, cv, cc))
+
+
+def concave_rule(f, x: MC, xmax) -> MC:
+    """f concave on [x.lo, x.hi] with box maximizer ``xmax``."""
+    r = convex_rule(lambda z: -f(z), x, xmax)
+    return MC(-r.hi, -r.lo, -r.cc, -r.cv)
+
+
+def _argmin_convex(dg, lo, hi, iters=60):
+    """Minimizer of a convex function on [lo, hi] by bisection on its derivative."""
+    lo, hi = lax.stop_gradient(lo), lax.stop_gradient(hi)
+
+    def body(_, s):
+        a, b = s
+        m = 0.5 * (a + b)
+        neg = dg(m) < 0
+        return jnp.where(neg, m, a), jnp.where(neg, b, m)
+
+    a, b = lax.fori_loop(0, iters, body, (lo, hi))
+    return lax.stop_gradient(0.5 * (a + b))
+
+
+def alphabb_rule(ctx: Ctx, f, x: MC, rng, d2rng) -> MC:
+    """Relaxation of a smooth univariate f from bounds on f''.
+
+    ucv(z) = f(z) + a/2 (z-lo)(z-hi)  is convex and <= f on [lo, hi] when
+    a >= max(0, -min f''); symmetrically for the concave overestimator.
+    These are then composed with x's relaxations via McCormick's theorem.
+    """
+    flo, fhi = rng
+    if ctx.interval_only:
+        return MC(flo, fhi, flo, fhi)
+    d2lo, d2hi = d2rng
+    a = jnp.maximum(0.0, -d2lo)
+    b = jnp.maximum(0.0, d2hi)
+    ok_a, ok_b = jnp.isfinite(a), jnp.isfinite(b)
+    a = jnp.where(ok_a, a, 0.0)
+    b = jnp.where(ok_b, b, 0.0)
+    L, U = x.lo, x.hi
+    m = 0.5 * (L + U)
+    fp = jnp.vectorize(jax.grad(f))
+
+    def ucv(z):
+        return f(z) + 0.5 * a * (z - L) * (z - U)
+
+    def ucc(z):
+        return f(z) - 0.5 * b * (z - L) * (z - U)
+
+    zmin = _argmin_convex(lambda z: fp(z) + a * (z - m), L, U)
+    zmax = _argmin_convex(lambda z: -(fp(z) - b * (z - m)), L, U)
+    cv = jnp.where(ok_a, ucv(_mid(zmin, x.cv, x.cc)), flo)
+    cc = jnp.where(ok_b, ucc(_mid(zmax, x.cv, x.cc)), fhi)
+    return tighten(MC(flo, fhi, cv, cc))
+
+
+def d2_interval(prim, params, x: MC):
+    """Interval bounds of f'' over x's box, for f = the elementwise primitive.
+
+    f'' is obtained by autodiff, traced to a jaxpr, and evaluated with this
+    same interpreter in interval-only mode.
+    """
+
+    def fs(z):
+        return prim.bind(z, **params)
+
+    d2 = jax.vmap(jax.grad(jax.grad(fs)))
+    shape = jnp.shape(x.lo)
+    closed = jax.make_jaxpr(d2)(jnp.zeros(max(1, x.lo.size), x.lo.dtype))
+    flat = MC(*(jnp.reshape(c, (-1,)) for c in (x.lo, x.hi, x.lo, x.hi)))
+    (out,) = eval_jaxpr_mc(closed.jaxpr, closed.consts, [flat], Ctx(True))
+    out = as_mc(out)
+    return jnp.reshape(out.lo, shape), jnp.reshape(out.hi, shape)
+
+
+# ---------------------------------------------------------------------------
+# Elementary operations on MC objects
+# ---------------------------------------------------------------------------
+
+
+def mc_neg(x: MC) -> MC:
+    return MC(-x.hi, -x.lo, -x.cc, -x.cv)
+
+
+def mc_add(a, b) -> MC:
+    a, b = as_mc(a), as_mc(b)
+    return MC(a.lo + b.lo, a.hi + b.hi, a.cv + b.cv, a.cc + b.cc)
+
+
+def mc_sub(a, b) -> MC:
+    a, b = as_mc(a), as_mc(b)
+    return MC(a.lo - b.hi, a.hi - b.lo, a.cv - b.cc, a.cc - b.cv)
+
+
+def mc_scale(x: MC, c) -> MC:
+    c = jnp.asarray(c)
+    p = c >= 0
+    return MC(
+        jnp.where(p, c * x.lo, c * x.hi),
+        jnp.where(p, c * x.hi, c * x.lo),
+        jnp.where(p, c * x.cv, c * x.cc),
+        jnp.where(p, c * x.cc, c * x.cv),
+    )
+
+
+def mc_square(x: MC) -> MC:
+    return convex_rule(jnp.square, x, jnp.clip(0.0, x.lo, x.hi))
+
+
+def mc_mul(a: MC, b: MC) -> MC:
+    """McCormick product rule (Mitsos, Chachuat & Barton 2009)."""
+    xL, xU, yL, yU = a.lo, a.hi, b.lo, b.hi
+    prods = jnp.stack([xL * yL, xL * yU, xU * yL, xU * yU])
+    lo, hi = prods.min(0), prods.max(0)
+
+    # min/max over {c*cv, c*cc} is decided by the sign of c alone; selecting
+    # by sign keeps autodiff on the convex branch at ties (cv == cc).
+    def mn(c, m):
+        return jnp.where(c >= 0, c * m.cv, c * m.cc)
+
+    def mx(c, m):
+        return jnp.where(c >= 0, c * m.cc, c * m.cv)
+
+    cv = jnp.maximum(
+        mn(yL, a) + mn(xL, b) - xL * yL,
+        mn(yU, a) + mn(xU, b) - xU * yU,
+    )
+    cc = jnp.minimum(
+        mx(yL, a) + mx(xU, b) - xU * yL,
+        mx(yU, a) + mx(xL, b) - xL * yU,
+    )
+    return tighten(MC(lo, hi, cv, cc))
+
+
+def mc_recip(x: MC) -> MC:
+    pos, neg = x.lo > 0, x.hi < 0
+    xp = safe_mc(x, pos, 1.0, 2.0)
+    rpos = convex_rule(lambda z: 1.0 / z, xp, xp.hi)
+    xn = safe_mc(x, neg, -2.0, -1.0)
+    rneg = concave_rule(lambda z: 1.0 / z, xn, xn.lo)
+    return select_mc(pos, rpos, select_mc(neg, rneg, unbounded_like(x)))
+
+
+def mc_exp(x: MC) -> MC:
+    return convex_rule(jnp.exp, x, x.lo)
+
+
+def mc_log(x: MC) -> MC:
+    ok = x.lo > 0
+    xs = safe_mc(x, ok, 1.0, 2.0)
+    return select_mc(ok, concave_rule(jnp.log, xs, xs.hi), unbounded_like(x))
+
+
+def mc_abs(x: MC) -> MC:
+    return convex_rule(jnp.abs, x, jnp.clip(0.0, x.lo, x.hi))
+
+
+def mc_max(a, b) -> MC:
+    a, b = as_mc(a), as_mc(b)
+    lo, hi = jnp.maximum(a.lo, b.lo), jnp.maximum(a.hi, b.hi)
+    cv = jnp.maximum(a.cv, b.cv)
+    # max(a, b) = (a + b + |a - b|) / 2 gives a concave overestimator
+    cc = 0.5 * (a.cc + b.cc + mc_abs(mc_sub(a, b)).cc)
+    cc = jnp.where(a.hi <= b.lo, b.cc, jnp.where(b.hi <= a.lo, a.cc, cc))
+    return tighten(MC(lo, hi, cv, cc))
+
+
+def mc_min(a, b) -> MC:
+    return mc_neg(mc_max(mc_neg(as_mc(a)), mc_neg(as_mc(b))))
+
+
+def mc_pow_const(x: MC, p) -> MC:
+    """x**p for a constant (possibly non-integer) exponent, on x >= 0."""
+    p = jnp.asarray(p, x.lo.dtype)
+    ok = jnp.where(p > 0, x.lo >= 0, x.lo > 0)
+    xs = safe_mc(x, ok, 1.0, 2.0)
+    tiny = jnp.finfo(x.lo.dtype).tiny
+
+    def f(z):
+        return jnp.power(jnp.maximum(z, tiny), p)
+
+    conv = convex_rule(f, xs, jnp.where(p > 0, xs.lo, xs.hi))
+    conc = concave_rule(f, xs, xs.hi)
+    r = select_mc((p >= 1) | (p < 0), conv, conc)
+    r = select_mc(p == 0, const_mc(jnp.ones_like(x.lo)), r)
+    return select_mc(ok, r, unbounded_like(x))
+
+
+# ---------------------------------------------------------------------------
+# Interval ranges for univariate primitives
+# ---------------------------------------------------------------------------
+
+
+def sin_range(lo, hi):
+    tp = 2 * jnp.pi
+    has_max = jnp.pi / 2 + tp * jnp.ceil((lo - jnp.pi / 2) / tp) <= hi
+    has_min = -jnp.pi / 2 + tp * jnp.ceil((lo + jnp.pi / 2) / tp) <= hi
+    wide = ~(hi - lo < tp)  # also catches inf / nan
+    s1, s2 = jnp.sin(lo), jnp.sin(hi)
+    rlo = jnp.where(has_min | wide, -1.0, jnp.minimum(s1, s2))
+    rhi = jnp.where(has_max | wide, 1.0, jnp.maximum(s1, s2))
+    return rlo, rhi
+
+
+def cos_range(lo, hi):
+    return sin_range(lo + jnp.pi / 2, hi + jnp.pi / 2)
+
+
+def increasing_range(f):
+    return lambda lo, hi: (f(lo), f(hi))
+
+
+# ---------------------------------------------------------------------------
+# Primitive rule table
+# ---------------------------------------------------------------------------
+
+RULES: dict[str, Callable] = {}
+
+
+def rule(*names):
+    def deco(fn):
+        for n in names:
+            RULES[n] = fn
+        return fn
+
+    return deco
+
+
+def _bind_fields(eqn, invals):
+    outs = []
+    for k in range(4):
+        args = [v[k] if is_mc(v) else v for v in invals]
+        outs.append(eqn.primitive.bind(*args, **eqn.params))
+    if eqn.primitive.multiple_results:  # e.g. unstack, split
+        return [MC(*fields) for fields in zip(*outs)]
+    return MC(*outs)
+
+
+# Primitives that are monotone non-decreasing and affine (or pure data
+# movement) in every argument can be applied component-wise.
+STRUCTURAL = [
+    "slice", "squeeze", "reshape", "broadcast_in_dim", "transpose",
+    "concatenate", "pad", "dynamic_slice", "dynamic_update_slice", "gather",
+    "rev", "convert_element_type", "copy", "copy_p", "reduce_sum", "cumsum",
+    "add", "add_any", "expand_dims", "reduce_precision", "stack",
+    "unstack", "split",
+]  # fmt: skip
+for _n in STRUCTURAL:
+    RULES[_n] = lambda ctx, eqn, *inv: _bind_fields(eqn, inv)
+
+
+@rule("neg")
+def _neg(ctx, eqn, x):
+    return mc_neg(x)
+
+
+@rule("sub")
+def _sub(ctx, eqn, a, b):
+    return mc_sub(a, b)
+
+
+def _same_var(eqn, i, j):
+    u, v = eqn.invars[i], eqn.invars[j]
+    return not isinstance(u, jcore.Literal) and u is v
+
+
+@rule("mul")
+def _mul(ctx, eqn, a, b):
+    if not is_mc(a):
+        return mc_scale(b, a)
+    if not is_mc(b):
+        return mc_scale(a, b)
+    if _same_var(eqn, 0, 1):
+        return mc_square(a)
+    return mc_mul(a, b)
+
+
+@rule("div")
+def _div(ctx, eqn, a, b):
+    if not is_mc(b):
+        return mc_scale(a, 1.0 / b)
+    r = mc_recip(b)
+    return mc_scale(r, a) if not is_mc(a) else mc_mul(a, r)
+
+
+@rule("dot_general")
+def _dot(ctx, eqn, a, b):
+    def dg(u, v):
+        return eqn.primitive.bind(u, v, **eqn.params)
+
+    if is_mc(a) and is_mc(b):
+        (ca, cb), (ba, bb) = eqn.params["dimension_numbers"]
+        if a.lo.ndim == 1 and b.lo.ndim == 1 and not ba and not bb:
+            p = mc_square(a) if _same_var(eqn, 0, 1) else mc_mul(a, b)
+            return MC(*(jnp.sum(c) for c in p))
+        raise NotImplementedError(
+            "dot_general between two variable-dependent arrays is only "
+            "supported for 1-D inner products; write it as (a * b).sum()."
+        )
+    if is_mc(b):
+        ap, an = jnp.maximum(a, 0), jnp.minimum(a, 0)
+        return MC(
+            dg(ap, b.lo) + dg(an, b.hi),
+            dg(ap, b.hi) + dg(an, b.lo),
+            dg(ap, b.cv) + dg(an, b.cc),
+            dg(ap, b.cc) + dg(an, b.cv),
+        )
+    bp, bn = jnp.maximum(b, 0), jnp.minimum(b, 0)
+    return MC(
+        dg(a.lo, bp) + dg(a.hi, bn),
+        dg(a.hi, bp) + dg(a.lo, bn),
+        dg(a.cv, bp) + dg(a.cc, bn),
+        dg(a.cc, bp) + dg(a.cv, bn),
+    )
+
+
+@rule("integer_pow")
+def _ipow(ctx, eqn, x):
+    n = eqn.params["y"]
+    if n == 0:
+        return const_mc(jnp.ones_like(x.lo))
+    if n < 0:
+        x, n = mc_recip(x), -n
+    if n == 1:
+        return x
+    if n % 2 == 0:
+        return convex_rule(lambda z: z**n, x, jnp.clip(0.0, x.lo, x.hi))
+
+    def f(z):
+        return z**n
+
+    conv = convex_rule(f, x, x.lo)
+    conc = concave_rule(f, x, x.hi)
+    d2 = (n * (n - 1) * x.lo ** (n - 2), n * (n - 1) * x.hi ** (n - 2))
+    mixed = alphabb_rule(ctx, f, x, (x.lo**n, x.hi**n), d2)
+    return select_mc(x.lo >= 0, conv, select_mc(x.hi <= 0, conc, mixed))
+
+
+@rule("square")
+def _sq(ctx, eqn, x):
+    return mc_square(x)
+
+
+@rule("pow")
+def _pow(ctx, eqn, a, b):
+    if not is_mc(b):
+        return mc_pow_const(a, b)
+    # a**b = exp(b * log a)
+    la = mc_log(as_mc(a)) if is_mc(a) else const_mc(jnp.log(a))
+    return mc_exp(mc_mul(b, la))
+
+
+@rule("exp")
+def _exp(ctx, eqn, x):
+    return mc_exp(x)
+
+
+@rule("exp2")
+def _exp2(ctx, eqn, x):
+    return convex_rule(jnp.exp2, x, x.lo)
+
+
+@rule("expm1")
+def _expm1(ctx, eqn, x):
+    return convex_rule(jnp.expm1, x, x.lo)
+
+
+@rule("log")
+def _log(ctx, eqn, x):
+    return mc_log(x)
+
+
+@rule("log1p")
+def _log1p(ctx, eqn, x):
+    ok = x.lo > -1
+    xs = safe_mc(x, ok, 0.0, 1.0)
+    return select_mc(ok, concave_rule(jnp.log1p, xs, xs.hi), unbounded_like(x))
+
+
+@rule("sqrt")
+def _sqrt(ctx, eqn, x):
+    return mc_pow_const(x, 0.5)
+
+
+@rule("rsqrt")
+def _rsqrt(ctx, eqn, x):
+    return mc_pow_const(x, -0.5)
+
+
+@rule("cosh")
+def _cosh(ctx, eqn, x):
+    return convex_rule(jnp.cosh, x, jnp.clip(0.0, x.lo, x.hi))
+
+
+@rule("abs")
+def _abs(ctx, eqn, x):
+    return mc_abs(x)
+
+
+@rule("max")
+def _max(ctx, eqn, a, b):
+    return mc_max(a, b)
+
+
+@rule("min")
+def _min(ctx, eqn, a, b):
+    return mc_min(a, b)
+
+
+def _reduce_fold(x: MC, axes, op):
+    for ax in sorted(axes, reverse=True):
+        parts = [
+            MC(*(lax.index_in_dim(c, i, ax, keepdims=False) for c in x))
+            for i in range(x.lo.shape[ax])
+        ]
+        acc = parts[0]
+        for p in parts[1:]:
+            acc = op(acc, p)
+        x = acc
+    return x
+
+
+@rule("reduce_max")
+def _reduce_max(ctx, eqn, x):
+    return _reduce_fold(x, eqn.params["axes"], mc_max)
+
+
+@rule("reduce_min")
+def _reduce_min(ctx, eqn, x):
+    return _reduce_fold(x, eqn.params["axes"], mc_min)
+
+
+# Smooth univariate primitives relaxed automatically with alphaBB.
+AUTO_UNIVARIATE = {
+    "sin": sin_range,
+    "cos": cos_range,
+    "tanh": increasing_range(jnp.tanh),
+    "logistic": increasing_range(jax.nn.sigmoid),
+    "atan": increasing_range(jnp.arctan),
+    "asinh": increasing_range(jnp.arcsinh),
+    "sinh": increasing_range(jnp.sinh),
+    "erf": increasing_range(jax.scipy.special.erf),
+}
+
+
+def _auto_rule(ctx, eqn, x):
+    rng = AUTO_UNIVARIATE[eqn.primitive.name](x.lo, x.hi)
+    d2 = (None, None) if ctx.interval_only else d2_interval(eqn.primitive, eqn.params, x)
+
+    def f(z):
+        return eqn.primitive.bind(z, **eqn.params)
+
+    return alphabb_rule(ctx, f, x, rng, d2)
+
+
+for _n in AUTO_UNIVARIATE:
+    RULES[_n] = _auto_rule
+
+
+# --- booleans, comparisons and select -------------------------------------
+
+
+def _as_unknown(v):
+    if isinstance(v, Unknown):
+        return v
+    v = jnp.asarray(v, bool)
+    return Unknown(v, ~v)
+
+
+@rule("gt", "ge", "lt", "le", "eq", "ne")
+def _cmp(ctx, eqn, a, b):
+    name = eqn.primitive.name
+    if _same_var(eqn, 0, 1):  # e.g. ``x != x`` NaN checks
+        val = name in ("ge", "le", "eq")
+        return jnp.full(jnp.shape(as_mc(a).lo), val)
+    a, b = as_mc(a), as_mc(b)
+    if name in ("lt", "le"):
+        a, b, name = b, a, {"lt": "gt", "le": "ge"}[name]
+    if name == "gt":
+        return Unknown(a.lo > b.hi, a.hi <= b.lo)
+    if name == "ge":
+        return Unknown(a.lo >= b.hi, a.hi < b.lo)
+    point = (a.lo == a.hi) & (b.lo == b.hi) & (a.lo == b.lo)
+    apart = (a.hi < b.lo) | (b.hi < a.lo)
+    return Unknown(point, apart) if name == "eq" else Unknown(apart, point)
+
+
+@rule("and")
+def _and(ctx, eqn, a, b):
+    a, b = _as_unknown(a), _as_unknown(b)
+    return Unknown(a.sure_true & b.sure_true, a.sure_false | b.sure_false)
+
+
+@rule("or")
+def _or(ctx, eqn, a, b):
+    a, b = _as_unknown(a), _as_unknown(b)
+    return Unknown(a.sure_true | b.sure_true, a.sure_false & b.sure_false)
+
+
+@rule("not")
+def _not(ctx, eqn, a):
+    a = _as_unknown(a)
+    return Unknown(a.sure_false, a.sure_true)
+
+
+@rule("select_n")
+def _select(ctx, eqn, pred, *cases):
+    if not isinstance(pred, Unknown):
+        return _bind_fields(eqn, (pred, *cases))
+    if len(cases) != 2:
+        raise NotImplementedError("select_n with variable predicate and >2 cases")
+    c0, c1 = as_mc(cases[0]), as_mc(cases[1])
+    lo, hi = jnp.minimum(c0.lo, c1.lo), jnp.maximum(c0.hi, c1.hi)
+    hull = MC(lo, hi, lo, hi)
+
+    def pick(k):
+        return jnp.where(pred.sure_true, c1[k], jnp.where(pred.sure_false, c0[k], hull[k]))
+
+    return MC(*(pick(k) for k in range(4)))
+
+
+# ---------------------------------------------------------------------------
+# The interpreter
+# ---------------------------------------------------------------------------
+
+SUBJAXPR_PARAMS = ("jaxpr", "call_jaxpr", "fun_jaxpr")
+
+
+def _relaxable(v):
+    return isinstance(v, (MC, Unknown))
+
+
+def eval_jaxpr_mc(jaxpr, consts, args, ctx: Ctx = Ctx()):
+    env = {}
+
+    def read(v):
+        return v.val if isinstance(v, jcore.Literal) else env[v]
+
+    for v, c in zip(jaxpr.constvars, consts):
+        env[v] = c
+    for v, a in zip(jaxpr.invars, args):
+        env[v] = a
+
+    for eqn in jaxpr.eqns:
+        invals = [read(v) for v in eqn.invars]
+        name = eqn.primitive.name
+        if not any(_relaxable(v) for v in invals):
+            outs = eqn.primitive.bind(*invals, **eqn.params)
+        elif name in RULES:
+            outs = RULES[name](ctx, eqn, *invals)
+        else:
+            sub = next((eqn.params[p] for p in SUBJAXPR_PARAMS if p in eqn.params), None)
+            if sub is None:
+                raise NotImplementedError(f"no relaxation rule for primitive '{name}'")
+            outs = eval_jaxpr_mc(
+                getattr(sub, "jaxpr", sub), getattr(sub, "consts", ()), invals, ctx
+            )
+        if eqn.primitive.multiple_results:
+            for v, o in zip(eqn.outvars, outs):
+                env[v] = o
+        else:
+            env[eqn.outvars[0]] = outs
+    return [read(v) for v in jaxpr.outvars]
+
+
+def relax(f):
+    """Return ``rf(x, lo, hi) -> MC``: relaxations of ``f`` on the box [lo, hi] at x."""
+
+    def rf(x, lo, hi):
+        closed = jax.make_jaxpr(f)(x)
+        (out,) = eval_jaxpr_mc(closed.jaxpr, closed.consts, [MC(lo, hi, x, x)])
+        return as_mc(out)
+
+    return rf
+
+
+def interval(f):
+    """Return ``fi(lo, hi) -> (lo, hi)``: natural interval extension of ``f``."""
+    rf = relax(f)
+
+    def fi(lo, hi):
+        out = rf(0.5 * (lo + hi), lo, hi)
+        return out.lo, out.hi
+
+    return fi

@@ -1,0 +1,257 @@
+"""Run global solvers on the MINLPLib continuous set and record the results.
+
+Every (solver, instance) pair runs in its own subprocess with a wall-clock
+limit, and its result is appended to ``benchmarks/results/<tag>.csv`` as soon
+as it finishes, so an interrupted run resumes where it stopped.
+
+All solvers get the same termination criteria: relative gap 1e-4, absolute
+gap 1e-6, feasibility tolerance 1e-6, and the time limit.
+
+Solvers:
+  jaxglobal  this package, on the model read by jaxglobal.nl
+  scip       SCIP command line, reading the .nl file
+  couenne    Couenne (AMPL build), reading the .nl file
+  baron      BARON through GAMS, on the MINLPLib .gms file
+
+Usage:
+  python benchmarks/run.py --solvers jaxglobal,scip,couenne,baron --time-limit 60
+  python benchmarks/run.py --max-vars 10 --jobs 4 --tag small
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import os
+import pathlib
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor
+
+HERE = pathlib.Path(__file__).resolve().parent
+LIB = HERE / "minlplib"
+REL_GAP, ABS_GAP, FEAS_TOL = 1e-4, 1e-6, 1e-6
+FIELDS = ["solver", "name", "status", "time", "primal", "dual", "nodes", "message"]
+TAG = "JAXGLOBAL-RESULT "  # marks the worker's result line among solver log output
+COUENNE = shutil.which("couenne") or "/Applications/AMPL/couenne"
+
+
+# ---------------------------------------------------------------- solvers
+# Each returns a dict with status in {optimal, time_limit, infeasible,
+# unsupported, error}, time (s), and primal / dual bounds in the model's own
+# objective sense (NaN when unknown).
+
+
+def run_jaxglobal(name, tl):
+    """Runs in a child Python process (see worker()), so a crash or hang is contained."""
+    cmd = [sys.executable, __file__, "--worker", name, "--time-limit", str(tl)]
+    out = _run(cmd, tl)
+    if isinstance(out, dict):
+        return out
+    try:
+        return json.loads(next(ln for ln in out.splitlines() if ln.startswith(TAG))[len(TAG):])
+    except Exception:
+        return dict(status="error", message=out.strip()[-200:])
+
+
+def worker(name, tl):
+    import jax
+
+    jax.config.update("jax_enable_x64", True)
+    import numpy as np
+
+    sys.path.insert(0, str(HERE.parent))
+    from jaxglobal import minimize
+    from jaxglobal.nl import NLError, read_nl
+
+    try:
+        M = read_nl(LIB / "nl" / f"{name}.nl")
+    except NLError as e:
+        return dict(status="unsupported", message=str(e))
+    if not M.bounded:
+        return dict(status="unsupported", message="unbounded variables")
+    t0 = time.perf_counter()
+    r = minimize(M.f, M.lo, M.hi, ineq=M.ineq, eq=M.eq, abs_tol=ABS_GAP, rel_tol=REL_GAP,
+                 feas_tol=FEAS_TOL, time_limit=tl)  # fmt: skip
+    p, d = M.sense * r.fun, M.sense * r.lower_bound  # back to the model's objective sense
+    status = {"optimal": "optimal", "infeasible": "infeasible", "time_limit": "time_limit"}.get(r.status, "error")
+    return dict(status=status, time=time.perf_counter() - t0, primal=_num(p), dual=_num(d),
+                nodes=r.nodes, message=r.status)  # fmt: skip
+
+
+def run_scip(name, tl):
+    with tempfile.TemporaryDirectory() as tmp:
+        cmds = (f"set limits time {tl} set limits gap {REL_GAP} set limits absgap {ABS_GAP} "
+                f"set numerics feastol {FEAS_TOL} read {LIB / 'nl' / name}.nl opt "
+                f"display statistics quit")  # fmt: skip
+        out = _run(["scip", "-c", cmds], tl, cwd=tmp)
+    if isinstance(out, dict):
+        return out
+    st = _grab(r"SCIP Status\s*:\s*(.*)", out) or ""
+    status = ("optimal" if "optimal solution found" in st or "gap limit" in st else "infeasible" if "infeasible" in st
+              else "time_limit" if "time limit" in st else "error")  # fmt: skip
+    return dict(status=status, time=_float(_grab(r"Solving Time \(sec\)\s*:\s*(\S+)", out)),
+                primal=_float(_grab(r"Primal Bound\s*:\s*(\S+)", out)),
+                dual=_float(_grab(r"Dual Bound\s*:\s*(\S+)", out)),
+                nodes=_float(_grab(r"Solving Nodes\s*:\s*(\d+)", out)), message=st.strip())  # fmt: skip
+
+
+def run_couenne(name, tl, sense):
+    with tempfile.TemporaryDirectory() as tmp:
+        pathlib.Path(tmp, "couenne.opt").write_text(
+            f"time_limit {tl}\nallowable_fraction_gap {REL_GAP}\nallowable_gap {ABS_GAP}\nfeas_tolerance {FEAS_TOL}\n"
+        )
+        t0 = time.perf_counter()
+        out = _run([COUENNE, str(LIB / "nl" / f"{name}.nl"), "-AMPL"], tl, cwd=tmp)
+        wall = time.perf_counter() - t0
+    if isinstance(out, dict):
+        return out
+    # Couenne prints bounds of the minimization form (a max objective is negated)
+    lb, ub = _float(_grab(r"Lower bound:\s*(\S+)", out)), _float(_grab(r"Upper bound:\s*(\S+)", out))
+    t = _float(_grab(r"Total solve time:\s*([\d.e+-]+)s", out))
+    t = wall if t != t else t
+    if "infeasible" in out.lower() and ub != ub:
+        status = "infeasible"
+    elif ub == ub and lb == lb and ub - lb <= max(ABS_GAP, REL_GAP * abs(ub)) + 1e-12:
+        status = "optimal"
+    elif t >= tl * 0.99:
+        status = "time_limit"
+    else:
+        status = "error" if ub != ub and lb != lb else "time_limit"
+    return dict(status=status, time=t, primal=_num(sense * ub), dual=_num(sense * lb),
+                nodes=_float(_grab(r"Branch-and-bound nodes:\s*(\d+)", out)), message="")  # fmt: skip
+
+
+def run_gams(name, tl, solver="baron"):
+    with tempfile.TemporaryDirectory() as tmp:
+        trc = pathlib.Path(tmp, "t.trc")
+        cmd = ["gams", str(LIB / "gms" / f"{name}.gms"), f"solver={solver}", f"reslim={tl}",
+               f"optcr={REL_GAP}", f"optca={ABS_GAP}", f"trace={trc}", "traceopt=3", "lo=3",
+               f"curdir={tmp}", "solvelink=5"]  # fmt: skip
+        out = _run(cmd, tl, cwd=tmp)
+        if isinstance(out, dict):
+            return out
+        bad = _grab(r"\*\*\* (Cannot handle .*)", out + _read(pathlib.Path(tmp, f"{name}.lst")))
+        if bad:
+            return dict(status="unsupported", message=bad)
+        if not trc.exists():
+            return dict(status="error", message=out.strip()[-200:])
+        rows = [ln for ln in trc.read_text().splitlines() if ln and not ln.startswith("*")]
+    # trace columns (traceopt=3): see GAMS "Solve trace" documentation
+    f = next(csv.reader(rows[-1:]))
+    cols = ["file", "type", "solver", "nlp", "mip", "juliantoday", "dir", "eq", "var", "dvar", "nz",
+            "nlnz", "dnz", "mstat", "sstat", "obj", "objest", "res", "iter", "dom", "nodes", "user1"]  # fmt: skip
+    r = dict(zip(cols, f))
+    mstat, sstat = int(float(r["mstat"])), int(float(r["sstat"]))
+    status = ("optimal" if mstat == 1 and sstat == 1 else "infeasible" if mstat in (4, 19)
+              else "time_limit" if sstat == 3 else "error")  # fmt: skip
+    return dict(status=status, time=_float(r["res"]), primal=_float(r["obj"]), dual=_float(r["objest"]),
+                nodes=_float(r["nodes"]), message=f"model {mstat} solver {sstat}")  # fmt: skip
+
+
+# ---------------------------------------------------------------- helpers
+
+
+def _run(cmd, tl, cwd=None):
+    """stdout+stderr as text, or a result dict if the process hung or failed to start."""
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=tl * 1.5 + 60, cwd=cwd,
+                           env={**os.environ, "PYTHONWARNINGS": "ignore"})  # fmt: skip
+    except subprocess.TimeoutExpired:
+        return dict(status="time_limit", time=tl, message="killed")
+    except OSError as e:
+        return dict(status="error", message=str(e))
+    return p.stdout + p.stderr
+
+
+def _read(path):
+    return path.read_text(errors="replace") if path.exists() else ""
+
+
+def _grab(pat, text):
+    m = re.search(pat, text)
+    return m.group(1) if m else None
+
+
+def _float(s):
+    try:
+        return float(s)
+    except (TypeError, ValueError):
+        return float("nan")
+
+
+def _num(v):
+    v = float(v)
+    return v if abs(v) < 1e19 else float("nan")
+
+
+def instances(max_vars, names=None):
+    rows = list(csv.DictReader(open(LIB / "instances.csv")))
+    rows = [r for r in rows if int(r["nvars"]) <= max_vars]
+    return [r for r in rows if r["name"] in names] if names else rows
+
+
+def solve(solver, inst, tl):
+    name, sense = inst["name"], (-1 if inst["objsense"] == "max" else 1)
+    t0 = time.perf_counter()
+    try:
+        if solver == "jaxglobal":
+            r = run_jaxglobal(name, tl)
+        elif solver == "scip":
+            r = run_scip(name, tl)
+        elif solver == "couenne":
+            r = run_couenne(name, tl, sense)
+        elif solver in ("baron", "antigone", "lindoglobal", "scip-gams"):
+            r = run_gams(name, tl, solver.replace("-gams", ""))
+        else:
+            raise ValueError(solver)
+    except Exception as e:  # a crashing adapter must not stop the run
+        r = dict(status="error", message=repr(e)[:200])
+    r.setdefault("time", time.perf_counter() - t0)
+    return {k: r.get(k, "") for k in FIELDS} | dict(solver=solver, name=name)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--solvers", default="jaxglobal,scip,couenne,baron")
+    ap.add_argument("--time-limit", type=float, default=60.0)
+    ap.add_argument("--max-vars", type=int, default=50)
+    ap.add_argument("--names", default="", help="comma-separated instance names")
+    ap.add_argument("--jobs", type=int, default=4, help="instances run concurrently")
+    ap.add_argument("--tag", default="baseline")
+    ap.add_argument("--worker", help=argparse.SUPPRESS)
+    a = ap.parse_args()
+    if a.worker:
+        print(TAG + json.dumps(worker(a.worker, a.time_limit)))
+        return
+
+    out = HERE / "results" / f"{a.tag}.csv"
+    out.parent.mkdir(exist_ok=True)
+    done = set()
+    if out.exists():
+        done = {(r["solver"], r["name"]) for r in csv.DictReader(open(out))}
+    else:
+        with open(out, "w", newline="") as fh:
+            csv.DictWriter(fh, FIELDS).writeheader()
+    insts = instances(a.max_vars, set(a.names.split(",")) if a.names else None)
+    todo = [(s, i) for s in a.solvers.split(",") for i in insts if (s, i["name"]) not in done]
+    print(f"{len(todo)} runs ({len(done)} already in {out.name}), time limit {a.time_limit:g}s, {a.jobs} jobs")
+
+    def go(job):
+        r = solve(job[0], job[1], a.time_limit)
+        with open(out, "a", newline="") as fh:
+            csv.DictWriter(fh, FIELDS).writerow(r)
+        print(f"{r['solver']:10s} {r['name']:28s} {r['status']:11s} {float(r['time'] or 0):8.2f}s "
+              f"primal {r['primal']} dual {r['dual']}", flush=True)  # fmt: skip
+
+    with ThreadPoolExecutor(a.jobs) as ex:
+        list(ex.map(go, todo))
+
+
+if __name__ == "__main__":
+    main()
