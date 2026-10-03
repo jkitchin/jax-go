@@ -771,3 +771,519 @@ couenne,ex6_1_4,optimal,0.626279,-0.294542,-0.29456,301.0,
 couenne,ex8_5_5,optimal,19.2264,-0.0107533,-0.0107533,42036.0,
 couenne,ex7_2_2,optimal,0.180018,-0.388811,-0.388811,6.0,
 couenne,least,time_limit,67.7299,14085.1,0.0,57801.0,
+couenne,ex6_2_10,time_limit,60.1234,-3.05198,-59.5636,11041.0,
+couenne,ex6_2_13,time_limit,60.1664,-0.216209,-4.25842,14778.0,
+couenne,ex9_2_8,optimal,0.049515,1.5,1.5,0.0,
+couenne,mathopt3,optimal,0.001537,4.54182e-11,4.54182e-11,0.0,
+couenne,st_bsj3,optimal,0.00112,-86768.6,-86768.6,0.0,
+couenne,st_bsj4,optimal,0.027284,-70262.1,-70262.1,0.0,
+couenne,st_e21,error,0.04887158377096057,nan,nan,nan,
+couenne,st_e34,optimal,0.001154,0.0156196,0.0156196,0.0,
+couenne,st_ph1,optimal,0.02682,-230.117,-230.117,0.0,
+couenne,st_ph2,optimal,0.024942,-1028.12,-1028.12,0.0,
+couenne,st_ph3,optimal,0.031299,-420.235,-420.235,0.0,
+couenne,st_qpk2,optimal,0.305527,-12.25,-12.25,20.0,
+couenne,wallfix,optimal,0.096657,1.0,1.0,1.0,
+couenne,ex5_2_4,optimal,0.102325,-450.0,-450.0,16.0,
+couenne,ex8_5_1,time_limit,64.534,-4.07179e-07,-1.06435,49087.0,
+couenne,st_e42,optimal,0.001034,18.7842,18.7842,0.0,
+couenne,st_glmp_kky,optimal,0.020039,-2.5,-2.5,0.0,
+couenne,ex3_1_1,optimal,1.29597,7049.25,7049.25,1340.0,
+couenne,ex5_4_2,optimal,0.658206,7512.23,7512.23,336.0,
+couenne,ex8_5_2,time_limit,65.8049,-1.15484e-08,-3.7233,52253.0,
+couenne,ex6_1_1,optimal,39.9365,-0.0201983,-0.0201983,42788.0,
+couenne,ex7_2_4,optimal,0.377812,3.91801,3.91801,14.0,
+couenne,ex9_2_4,optimal,0.024227,0.5,0.499967,0.0,
+couenne,ex9_2_5,optimal,0.019834,5.0,5.0,0.0,
+couenne,house,optimal,1.19957,-4500.0,-4500.02,1171.0,
+couenne,inscribedsquare01,optimal,1.2386,0.990077,0.990077,192.0,
+couenne,inscribedsquare02,optimal,4.12868,0.968016,0.968016,1724.0,
+couenne,ex8_5_6,time_limit,60.2678,-0.00116737,-0.00126093,41111.0,
+couenne,st_iqpbk1,optimal,0.339106,-621.488,-621.488,8.0,
+couenne,st_iqpbk2,optimal,0.342365,-1195.23,-1195.23,8.0,
+couenne,st_robot,optimal,0.005651,0.0,0.0,0.0,
+couenne,ex14_1_6,optimal,0.021133,-9.86e-09,-9.86e-09,0.0,
+couenne,ex7_2_1,time_limit,60.2119,1227.23,1223.57,35485.0,
+couenne,ex5_2_2_case1,optimal,0.242781,-399.967,-400.0,81.0,
+couenne,ex5_2_2_case3,optimal,0.094399,-750.0,-750.0,4.0,
+couenne,ex5_2_2_case2,optimal,0.27944,-600.0,-600.0,32.0,
+couenne,ex7_2_3,time_limit,60.1153,7049.25,2335.55,89797.0,
+couenne,himmel11,optimal,0.032204,-30665.5,-30665.5,0.0,
+couenne,inscribedsquare03,optimal,24.5553,17.8291,17.8291,18722.0,
+couenne,pointpack04,optimal,0.104012,1.0,1.0,2.0,
+couenne,st_e28,optimal,0.031725,-30665.5,-30665.5,0.0,
+couenne,st_e33,optimal,0.173349,-400.0,-400.0,12.0,
+couenne,alkylation,optimal,0.815656,1742.49,1742.65,1001.0,
+couenne,ex14_1_7,optimal,0.328927,0.0,0.0,2.0,
+couenne,ex2_1_5,optimal,0.029988,-268.015,-268.015,0.0,
+couenne,ex2_1_6,optimal,0.047067,-39.0,-39.0,2.0,
+couenne,ex2_1_9,optimal,2.45428,-0.375,-0.375022,3201.0,
+couenne,ex9_1_2,optimal,0.028,-16.0,-16.0,0.0,
+couenne,ex9_1_4,optimal,0.001078,-37.0,-37.0,0.0,
+couenne,ex9_2_2,optimal,0.185681,99.9995,99.9995,8.0,
+couenne,ex9_2_7,optimal,0.001213,17.0,17.0,0.0,
+couenne,kall_congruentcircles_c31,optimal,0.253581,0.643805,0.643805,10.0,
+couenne,kall_congruentcircles_c32,optimal,0.126305,1.37586,1.37586,4.0,
+couenne,pooling_haverly1pq,optimal,0.022257,-400.0,-400.0,0.0,
+couenne,pooling_haverly1tp,optimal,0.035327,-400.0,-400.0,0.0,
+couenne,pooling_haverly2pq,optimal,0.056755,-600.0,-600.0,2.0,
+couenne,pooling_haverly2tp,optimal,0.039009,-600.0,-600.0,2.0,
+couenne,pooling_haverly3pq,optimal,0.022118,-750.0,-750.0,0.0,
+couenne,pooling_haverly3tp,optimal,0.018887,-750.0,-750.0,0.0,
+couenne,process,optimal,5.07606,-1133.4,-1133.45,12312.0,
+couenne,shiporig,error,0.06647287495434284,nan,nan,nan,
+couenne,st_bpaf1a,optimal,0.016925,-45.3797,-45.3797,0.0,
+couenne,st_bpaf1b,optimal,0.017224,-42.9626,-42.9626,2.0,
+couenne,st_e03,optimal,0.343997,-1071.34,-1071.35,267.0,
+couenne,st_e07,optimal,0.135163,-400.0,-400.0,12.0,
+couenne,st_jcbpaf2,optimal,0.07136,-794.856,-794.856,2.0,
+couenne,st_qpc-m3a,optimal,0.728748,-382.695,-382.731,201.0,
+couenne,st_qpc-m3b,optimal,0.106302,0.0,0.0,2.0,
+couenne,st_qpc-m3c,optimal,0.002542,0.0,0.0,0.0,
+couenne,st_qpc-m4,optimal,0.001764,0.0,0.0,0.0,
+couenne,st_rv1,optimal,0.102022,-59.9439,-59.9439,49.0,
+couenne,ex6_2_5,time_limit,60.1645,-70.7521,-1805.0,13084.0,
+couenne,ex6_2_7,time_limit,60.2212,-0.160848,-25.8314,14629.0,
+couenne,ann_fermentation_exp,optimal,0.246062,-99.9366,-99.9395,101.0,
+couenne,st_qpk3,optimal,1.38035,-36.0,-36.0,112.0,
+couenne,ann_fermentation_tanh,optimal,1.34962,-99.9366,-99.9456,2001.0,
+couenne,ex7_3_4,optimal,2.01827,6.27463,6.27463,466.0,
+couenne,haverly,optimal,0.246472,-400.0,-400.0,26.0,
+couenne,kall_congruentcircles_c41,optimal,0.000944,0.858407,0.858407,0.0,
+couenne,kall_congruentcircles_c42,optimal,0.300145,0.858407,0.858407,6.0,
+couenne,st_e16,optimal,0.098715,12292.5,12292.5,2.0,
+couenne,ex2_1_3,optimal,0.001354,-15.0,-15.0,0.0,
+couenne,like,time_limit,60.3118,1138.41,-41699.7,12053.0,
+couenne,ex9_1_1,optimal,0.001019,-13.0,-13.0,0.0,
+couenne,ex9_1_5,optimal,0.00103,-1.0,-1.0,0.0,
+couenne,pointpack06,optimal,13.3352,0.361111,0.361145,6401.0,
+couenne,pooling_bental4pq,optimal,0.070688,-450.0,-450.0,0.0,
+couenne,pooling_bental4tp,optimal,0.060232,-450.0,-450.0,2.0,
+couenne,alkyl,optimal,0.188589,-1.76501,-1.76501,48.0,
+couenne,ex7_3_5,optimal,15.3528,1.20587,1.20587,10970.0,
+couenne,ex9_1_8,optimal,0.007631,-3.25,-3.25,0.0,
+couenne,kall_congruentcircles_c51,optimal,2.25953,1.07301,1.07301,572.0,
+couenne,kall_congruentcircles_c52,optimal,0.460309,1.53711,1.53711,4.0,
+couenne,chem,time_limit,60.0516,-47.7065,-49.06,47224.0,
+couenne,kall_diffcircles_5b,optimal,1.7271,5.11618,5.11613,301.0,
+couenne,pooling_haverly1stp,optimal,0.131498,-400.0,-400.0,0.0,
+couenne,pooling_haverly2stp,optimal,0.42692,-600.0,-600.0,4.0,
+couenne,pooling_haverly3stp,optimal,0.267709,-750.0,-750.0,0.0,
+couenne,st_e30,optimal,0.69038,-1.58114,-1.58114,8.0,
+couenne,ex8_4_5,optimal,2.9282,0.000307486,0.000307486,476.0,
+couenne,ex6_1_3,time_limit,60.0183,-0.352498,-0.372264,27751.0,
+couenne,eq6_1,error,0.06388245802372694,nan,nan,nan,
+couenne,ex5_4_3,optimal,0.328152,4845.46,4845.46,10.0,
+couenne,ex9_2_3,optimal,0.03617,-1.999e-08,-1.999e-08,0.0,
+couenne,ex9_2_6,optimal,0.149012,-1.0,-1.0,0.0,
+couenne,prob07,optimal,24.7841,154990.0,154976.0,12301.0,
+couenne,kall_congruentcircles_c62,optimal,1.45148,1.28761,1.28761,14.0,
+couenne,kall_congruentcircles_c63,optimal,0.19176,1.28761,1.28761,2.0,
+couenne,kall_diffcircles_6,optimal,2.33754,7.78789,7.78789,90.0,
+couenne,ex7_3_6,optimal,0.071832,nan,nan,0.0,
+couenne,ex8_4_4,optimal,0.877046,0.21246,0.21246,26.0,
+couenne,ex8_4_6,time_limit,59.8899,0.00110498,0.0,11634.0,
+couenne,kall_diffcircles_5a,optimal,61.1842,5.11617,5.11603,85448.0,
+couenne,himmel16,optimal,16.2221,-0.866025,-0.866025,3112.0,
+couenne,kall_congruentcircles_c61,time_limit,59.7563,1.28761,0.536499,33726.0,
+couenne,pointpack08,time_limit,59.8904,0.258741,0.491405,15372.0,
+couenne,kall_congruentcircles_c72,optimal,10.1544,1.96631,1.96631,3324.0,
+couenne,kall_diffcircles_7,optimal,4.3971,7.15313,7.15261,501.0,
+couenne,pooling_bental4stp,optimal,0.476809,-450.0,-450.0,3.0,
+couenne,wastewater02m1,optimal,0.109335,130.703,130.703,6.0,
+couenne,ex2_1_10,optimal,0.055227,49318.0,49318.0,0.0,
+couenne,ex2_1_7,optimal,1.83619,-4150.41,-4150.41,901.0,
+couenne,kall_circles_c6a,time_limit,59.611,2.11172,0.0,21030.0,
+couenne,kall_circles_c6b,time_limit,59.4674,1.9736,0.0,21317.0,
+couenne,kall_circles_c7a,optimal,9.2126,2.66281,2.66281,1426.0,
+couenne,prolog,optimal,0.001357,-3.79999e-08,-3.79999e-08,0.0,
+couenne,st_fp7a,optimal,0.373877,-354.751,-354.751,176.0,
+couenne,st_fp7b,optimal,0.498919,-634.751,-634.751,194.0,
+couenne,st_fp7c,optimal,0.422979,-8695.01,-8695.01,201.0,
+couenne,st_fp7d,optimal,0.417153,-114.751,-114.751,158.0,
+couenne,st_fp7e,optimal,1.57887,-3730.41,-3730.41,1301.0,
+couenne,st_m1,optimal,0.167682,-461357.0,-461357.0,40.0,
+couenne,st_rv2,optimal,0.623801,-64.4807,-64.4807,187.0,
+couenne,kall_diffcircles_8,optimal,7.96585,14.4813,14.4813,1359.0,
+couenne,st_rv3,optimal,0.619053,-35.7607,-35.7607,230.0,
+couenne,ex5_3_2,optimal,0.49731,1.86416,1.86416,44.0,
+couenne,kall_congruentcircles_c71,time_limit,59.7036,1.50221,0.0,24322.0,
+couenne,ex8_4_1,time_limit,31.9362,0.618573,0.618511,22001.0,
+couenne,kall_circles_c6c,time_limit,59.5532,2.96108,0.0,12473.0,
+couenne,wastewater04m1,optimal,1.89567,90.9587,90.9587,933.0,
+couenne,ex2_1_8,optimal,0.651493,15639.0,15639.0,101.0,
+couenne,kall_diffcircles_9,optimal,18.8293,13.3503,13.3503,4819.0,
+couenne,pointpack10,time_limit,59.8717,0.175037,0.5,8919.0,
+couenne,st_fp8,optimal,0.292725,15639.0,15639.0,12.0,
+couenne,kall_circles_c8a,time_limit,58.9346,2.54092,0.0,9085.0,
+couenne,ex8_4_2,time_limit,60.088,0.485152,0.00428888,11339.0,
+couenne,kriging_peaks-full010,error,0.05521104112267494,nan,nan,nan,
+couenne,ex5_4_4,optimal,4.38299,10077.8,10077.8,1501.0,
+couenne,maxmin,error,0.23329554218798876,nan,nan,nan,
+couenne,kall_diffcircles_10,time_limit,60.3282,11.9355,11.9338,11734.0,
+couenne,hhfair,optimal,3.5872,-87.159,-87.1674,2501.0,
+couenne,orth_d3m6,time_limit,59.9101,0.707107,0.0,2596.0,
+couenne,st_m2,optimal,0.453331,-856649.0,-856649.0,22.0,
+couenne,st_rv7,optimal,0.966919,-138.187,-138.187,198.0,
+couenne,hydro,optimal,0.044037,4366940.0,4366940.0,0.0,
+couenne,pointpack12,time_limit,59.6797,0.151111,0.505921,5216.0,
+couenne,pooling_adhya1pq,time_limit,0.003069,-549.803,-840.271,0.0,
+couenne,pooling_adhya1tp,time_limit,0.00265,-509.783,-856.251,0.0,
+couenne,pooling_adhya2pq,optimal,0.00242,-549.803,-549.803,0.0,
+couenne,pooling_adhya2tp,time_limit,0.002805,-549.803,-574.783,0.0,
+couenne,ramsey,optimal,0.054483,-2.48747,-2.48747,0.0,
+couenne,pooling_rt2pq,optimal,2.39365,-4391.83,-4391.83,418.0,
+couenne,pooling_rt2tp,optimal,0.660061,-4391.83,-4391.83,22.0,
+couenne,pooling_foulds2pq,optimal,0.04321,-1100.0,-1100.0,0.0,
+couenne,pooling_foulds2tp,optimal,0.026827,-1100.0,-1100.0,0.0,
+couenne,pointpack14,time_limit,59.5514,0.117492,0.65,2850.0,
+couenne,ex8_6_2,time_limit,59.9177,-31.8886,-45.0,878.0,
+couenne,st_rv8,optimal,0.870443,-132.662,-132.662,114.0,
+couenne,ex5_2_5,time_limit,59.7268,-3482.58,-7101.73,28926.0,
+couenne,wastewater02m2,optimal,0.122095,130.703,130.703,2.0,
+couenne,knp3-12,time_limit,59.697,1.10557,11.3594,521.0,
+couenne,launch,time_limit,61.9481,2257.8,2208.2,27923.0,
+couenne,waterund01,time_limit,60.7843,86.8333,85.0015,27626.0,
+couenne,water,optimal,60.1394,nan,312.816,16408.0,
+couenne,chenery,optimal,5.00924,-1058.92,-1059.02,2601.0,
+couenne,kall_circlespolygons_c1p11,optimal,0.021729,0.199602,0.199602,0.0,
+couenne,ex8_4_8_bnd,time_limit,60.0077,3.32185,1.59691,3990.0,
+couenne,orth_d3m6_pl,optimal,59.9838,nan,0.0,5617.0,
+couenne,orth_d4m6_pl,time_limit,59.9847,0.649931,0.162292,5552.0,
+couenne,kriging_peaks-full020,error,0.179194750264287,nan,nan,nan,
+couenne,pooling_adhya1stp,time_limit,0.004447,-549.803,-840.271,0.0,
+couenne,pooling_adhya2stp,time_limit,0.003838,-56.6667,-574.783,0.0,
+couenne,kall_circlespolygons_c1p12,time_limit,60.0274,0.339602,0.0,43113.0,
+couenne,pooling_rt2stp,optimal,18.109,-4391.83,-4391.83,206.0,
+couenne,kall_circlespolygons_c1p13,time_limit,59.9977,0.339602,0.0,38841.0,
+couenne,kall_circlesrectangles_c1r11,optimal,0.002449,0.199602,0.199602,0.0,
+couenne,pooling_foulds2stp,optimal,9.78997,-1100.0,-1100.0,40.0,
+couenne,wastewater05m1,time_limit,59.9034,305.804,156.467,32607.0,
+couenne,wastewater15m1,time_limit,59.9294,2650.08,1558.64,25157.0,
+couenne,kall_circlesrectangles_c1r12,time_limit,59.9179,0.339602,0.0,41739.0,
+couenne,st_rv9,optimal,4.96147,-120.153,-120.153,1790.0,
+baron,ex4_1_1,optimal,0.21,-7.48731236490236,-7.48731236490236,5.0,model 1 solver 1
+baron,ex4_1_2,optimal,0.1,-663.5000966105,-663.5000966105,19.0,model 1 solver 1
+couenne,kall_circlesrectangles_c1r13,time_limit,59.9206,0.214602,0.0,31859.0,
+baron,ex4_1_3,optimal,0.04,-443.671704741124,-443.671704741125,5.0,model 1 solver 1
+baron,ex4_1_4,optimal,0.08,0.0,0.0,31.0,model 1 solver 1
+baron,ex4_1_6,optimal,0.11,6.9999999999999,6.9999999999998,27.0,model 1 solver 1
+baron,ex4_1_7,optimal,0.03,-7.5,-7.5,1.0,model 1 solver 1
+baron,ex8_1_2,unsupported,0.3429406671784818,,,,Cannot handle function 'cos'
+baron,mathopt5_1,unsupported,0.3804625840857625,,,,Cannot handle function 'sin'
+baron,mathopt5_2,unsupported,0.32906045811250806,,,,Cannot handle function 'cos'
+baron,mathopt5_3,unsupported,0.43117966735735536,,,,Cannot handle function 'cos'
+baron,mathopt5_4,optimal,0.02,0.0,0.0,0.0,model 1 solver 1
+baron,mathopt5_5,unsupported,0.3131772498600185,,,,Cannot handle function 'sin'
+baron,mathopt5_6,unsupported,0.36769854091107845,,,,Cannot handle function 'sin'
+baron,mathopt5_7,optimal,0.04,-4.43672833845145,-4.43672833845146,5.0,model 1 solver 1
+baron,mathopt5_8,optimal,0.05,-0.686072279810223,-0.686072279810225,13.0,model 1 solver 1
+baron,trig,unsupported,0.37415699986740947,,,,Cannot handle function 'cos'
+baron,ex14_1_9,optimal,0.02,-1.09218166901287e-25,-1.11022302462516e-16,0.0,model 1 solver 1
+baron,ex4_1_5,error,0.05,0.0,-1e+51,13.0,model 2 solver 1
+baron,ex4_1_8,optimal,0.03,-16.7388931843946,-16.7388931843946,1.0,model 1 solver 1
+baron,ex4_1_9,optimal,0.06,-5.50801327419748,-5.50801327419748,3.0,model 1 solver 1
+baron,ex8_1_1,unsupported,0.37649279180914164,,,,Cannot handle function 'cos'
+baron,ex8_1_3,error,0.04,0.0,0.0,1.0,model 3 solver 1
+baron,ex8_1_4,error,0.07,0.0,-1e+51,13.0,model 2 solver 1
+baron,ex8_1_5,error,0.07,-1.03162845348988,-1e+51,21.0,model 2 solver 1
+baron,ex8_1_6,optimal,0.03,-10.0860014962223,-10.0860014962223,1.0,model 1 solver 1
+baron,filter,optimal,0.01,8685.2770770525,8685.27707704603,0.0,model 1 solver 1
+baron,kriging_peaks-red010,optimal,1.08,0.291120782173534,0.291120782173534,749.0,model 1 solver 1
+baron,kriging_peaks-red020,optimal,2.08,0.372428536561283,0.372428536561283,469.0,model 1 solver 1
+baron,kriging_peaks-red030,optimal,2.74,-1.58658791830859,-1.58658791830859,461.0,model 1 solver 1
+baron,kriging_peaks-red050,optimal,7.83,-1.15658991000853,-1.15658991000853,727.0,model 1 solver 1
+baron,kriging_peaks-red100,optimal,20.49,-2.63751238152476,-2.63751238152477,717.0,model 1 solver 1
+couenne,polygon25,time_limit,59.5127,-0.773502,-6.06871,2.0,
+baron,mathopt1,optimal,0.02,1.84644579320799e-18,0.0,0.0,model 1 solver 1
+baron,mathopt2,optimal,0.01,0.0,0.0,0.0,model 1 solver 1
+baron,mathopt4,unsupported,0.4147683340124786,,,,Cannot handle function 'sin'
+baron,mathopt6,unsupported,0.4118680418469012,,,,Cannot handle function 'sin'
+baron,prob06,optimal,0.03,1.17712434390423,1.17712434390423,1.0,model 1 solver 1
+baron,rbrock,optimal,0.02,2.22863512993849e-22,0.0,0.0,model 1 solver 1
+baron,st_e01,optimal,0.03,-6.66666666677123,-6.66666666677123,1.0,model 1 solver 1
+baron,st_e08,optimal,0.01,0.741781958215536,0.741781958215536,0.0,model 1 solver 1
+baron,st_e09,optimal,0.03,-0.500000000000003,-0.500000000000003,1.0,model 1 solver 1
+baron,st_e18,optimal,0.03,-2.8284271248009,-2.8284271248009,1.0,model 1 solver 1
+baron,st_e19,optimal,0.09,-118.704859779653,-118.704859779653,7.0,model 1 solver 1
+baron,st_e22,optimal,0.02,-85.0,-85.0,0.0,model 1 solver 1
+baron,st_e23,optimal,0.05,-1.08333333333333,-1.08333333333333,3.0,model 1 solver 1
+baron,st_e24,optimal,0.02,3.0,3.0,0.0,model 1 solver 1
+baron,st_e26,optimal,0.01,-185.7792,-185.7792,0.0,model 1 solver 1
+baron,st_ht,optimal,0.05,-1.60000000114163,-1.60000000114163,1.0,model 1 solver 1
+baron,st_ph10,optimal,0.01,-10.5,-10.5,0.0,model 1 solver 1
+baron,st_phex,optimal,0.07,-85.0,-85.0,1.0,model 1 solver 1
+baron,st_qpc-m0,optimal,0.04,-5.0,-5.0,1.0,model 1 solver 1
+baron,st_qpk1,optimal,0.02,-3.0,-3.0,0.0,model 1 solver 1
+baron,trigx,unsupported,0.2993937497958541,,,,Cannot handle function 'cos'
+baron,ex14_1_1,optimal,0.02,1.83939714837145e-24,0.0,0.0,model 1 solver 1
+baron,ex14_1_3,optimal,0.02,-1.41890900742623e-27,0.0,0.0,model 1 solver 1
+baron,ex14_1_4,unsupported,0.36407295893877745,,,,Cannot handle function 'sin'
+baron,ex14_1_8,optimal,0.02,0.0,0.0,0.0,model 1 solver 1
+baron,ex3_1_4,optimal,0.1,-4.0,-4.0,9.0,model 1 solver 1
+couenne,pricing050,time_limit,60.0027,-1813.83,-1405.92,2482.0,
+baron,ex6_2_6,optimal,1.51,-2.60256739648464e-06,-2.60256739648464e-06,4031.0,model 1 solver 1
+baron,ex6_2_8,optimal,0.63,-0.0270063488448568,-0.0270063488448597,1413.0,model 1 solver 1
+baron,ex6_2_11,optimal,4.74,-2.67240778515316e-06,-2.67240779673121e-06,7117.0,model 1 solver 1
+baron,hs62,optimal,0.12,-26272.5786553879,-26272.5786553879,237.0,model 1 solver 1
+baron,prob09,optimal,0.02,-2.03014935125756e-13,0.0,0.0,model 1 solver 1
+baron,st_bsj2,optimal,0.05,1.0,1.0,7.0,model 1 solver 1
+baron,st_e02,optimal,0.02,201.159334057971,201.159334057971,0.0,model 1 solver 1
+baron,st_e06,optimal,0.02,0.0,0.0,0.0,model 1 solver 1
+baron,st_e11,optimal,0.02,189.311629686621,189.31162968662,0.0,model 1 solver 1
+baron,st_pan1,optimal,0.04,-5.28370918444916,-5.28370918444917,3.0,model 1 solver 1
+baron,st_ph11,optimal,0.04,-11.28125,-11.28125,1.0,model 1 solver 1
+baron,st_ph12,optimal,0.05,-22.625,-22.625,1.0,model 1 solver 1
+baron,st_ph13,optimal,0.05,-11.28125,-11.28125,1.0,model 1 solver 1
+baron,st_ph14,optimal,0.04,-229.722222222222,-229.722222222222,1.0,model 1 solver 1
+baron,st_ph20,optimal,0.04,-158.0,-158.0,1.0,model 1 solver 1
+baron,st_z,optimal,0.05,0.0,0.0,3.0,model 1 solver 1
+baron,chance,optimal,0.01,29.894378158181,29.894378158181,0.0,model 1 solver 1
+baron,dispatch,optimal,0.03,3155.2879268316,3155.2879268316,1.0,model 1 solver 1
+baron,ex14_2_2,optimal,0.01,0.0,0.0,0.0,model 1 solver 1
+baron,ex14_2_5,optimal,0.01,0.0,0.0,0.0,model 1 solver 1
+baron,ex14_2_8,optimal,0.02,0.0,0.0,0.0,model 1 solver 1
+baron,ex14_2_9,optimal,0.02,0.0,0.0,0.0,model 1 solver 1
+baron,ex6_1_2,optimal,0.08,-0.0324669885399837,-0.0324669885399837,13.0,model 1 solver 1
+baron,ex6_2_12,optimal,2.67,0.289194748470496,0.289194748470496,1767.0,model 1 solver 1
+baron,ex6_2_14,error,0.15,-1.24967744485893e+23,-1.24967744485893e+23,5.0,model 3 solver 1
+baron,kriging_peaks-red200,optimal,61.27,-3.89019880358808,-3.89019880358809,787.0,model 1 solver 1
+baron,ex7_3_1,optimal,0.03,0.341739553123723,0.341739553123723,1.0,model 1 solver 1
+baron,ex7_3_2,optimal,0.03,1.08986397063383,1.08986397063383,1.0,model 1 solver 1
+baron,st_bpk1,optimal,0.03,-13.0,-13.0,1.0,model 1 solver 1
+baron,st_bpv1,optimal,0.01,10.0,10.0,0.0,model 1 solver 1
+baron,st_bpv2,optimal,0.01,-8.0,-8.0,0.0,model 1 solver 1
+baron,st_e04,optimal,0.05,5194.86624420378,5194.86624420378,13.0,model 1 solver 1
+baron,st_e12,optimal,0.04,-4.51420165136193,-4.51420165136193,1.0,model 1 solver 1
+baron,st_e25,optimal,0.03,0.890193590714733,0.890193590714733,1.0,model 1 solver 1
+baron,st_e37,optimal,0.09,0.00104172024039709,0.00104172024039709,27.0,model 1 solver 1
+baron,st_e41,optimal,0.05,641.823562326132,641.823562374434,3.0,model 1 solver 1
+baron,st_glmp_fp1,optimal,0.04,10.0,10.0,1.0,model 1 solver 1
+baron,st_glmp_fp2,optimal,0.05,7.34454541810099,7.34454541810099,3.0,model 1 solver 1
+baron,st_glmp_fp3,optimal,0.06,-12.0,-12.0,1.0,model 1 solver 1
+baron,st_glmp_kk92,optimal,0.04,-12.0,-12.0,1.0,model 1 solver 1
+baron,st_ph15,optimal,0.06,-392.703703703704,-392.703703703704,1.0,model 1 solver 1
+baron,ex14_2_1,optimal,0.02,5.0484588561064e-23,0.0,0.0,model 1 solver 1
+baron,ex14_2_4,optimal,0.02,0.0,0.0,0.0,model 1 solver 1
+baron,ex14_2_6,optimal,0.01,2.31610571514848e-23,0.0,0.0,model 1 solver 1
+baron,ex2_1_1,optimal,0.04,-17.0000000173521,-17.0000000173521,5.0,model 1 solver 1
+baron,ex3_1_2,optimal,0.03,-30665.5386736518,-30665.5386719753,1.0,model 1 solver 1
+baron,ex7_3_3,optimal,0.05,0.817529048919011,0.817529048919011,1.0,model 1 solver 1
+baron,ex8_1_7,optimal,0.12,0.0293108307198193,0.0293108307198193,53.0,model 1 solver 1
+baron,ex8_5_3,optimal,0.23,-0.00413772113889958,-0.00413772113889958,255.0,model 1 solver 1
+baron,ex8_5_4,optimal,0.48,-0.000426251378383841,-0.000426251378383841,825.0,model 1 solver 1
+baron,ex8_5_5,error,0.38,-0.0107557741808681,-1e+51,365.0,model 2 solver 1
+baron,mhw4d,error,0.12,0.0293108307213773,-1e+51,57.0,model 2 solver 1
+baron,nemhaus,optimal,0.01,31.0,31.0,0.0,model 1 solver 1
+baron,kriging_peaks-red500,time_limit,60.32,-4.92797868595279,-893.462597694168,125.0,model 2 solver 3
+baron,pointpack02,optimal,0.02,2.0,2.0,0.0,model 1 solver 1
+baron,st_e05,optimal,0.09,7049.24927247599,7049.24927247599,7.0,model 1 solver 1
+baron,st_glmp_kk90,optimal,0.03,2.99999999957066,2.99999999957066,1.0,model 1 solver 1
+baron,st_glmp_ss1,optimal,0.05,-24.5714285757043,-24.5714285757043,1.0,model 1 solver 1
+baron,st_glmp_ss2,optimal,0.04,2.99999999999999,2.99999999999999,1.0,model 1 solver 1
+baron,st_qpc-m1,optimal,0.02,-473.777777777778,-473.777777777778,0.0,model 1 solver 1
+baron,ex14_1_2,optimal,0.02,-6.39863840652671e-19,0.0,0.0,model 1 solver 1
+baron,ex14_1_5,optimal,0.02,0.0,0.0,0.0,model 1 solver 1
+baron,ex14_2_3,optimal,0.02,7.47846229387505e-13,0.0,0.0,model 1 solver 1
+baron,ex14_2_7,optimal,0.02,0.0,0.0,0.0,model 1 solver 1
+baron,ex2_1_2,optimal,0.01,-213.0,-213.0,0.0,model 1 solver 1
+baron,ex3_1_3,optimal,0.03,-310.0,-310.0,1.0,model 1 solver 1
+baron,ex6_1_4,error,0.12,-0.294541287778504,-0.29454146796965,5.0,model 2 solver 1
+baron,ex2_1_4,error,0.01,-11.0,-11.5,0.0,model 7 solver 4
+baron,least,time_limit,60.25,14085.1398489284,0.0,283062.0,model 2 solver 3
+baron,ex7_2_2,optimal,0.11,-0.388811434291728,-0.38881143429173,45.0,model 1 solver 1
+baron,ex8_5_1,optimal,0.63,-5.23414935049704e-06,-5.23414935049704e-06,1191.0,model 1 solver 1
+baron,ex8_5_2,optimal,1.43,-1.48399104592523e-05,-1.48399104592523e-05,2895.0,model 1 solver 1
+baron,ex8_5_6,error,0.77,-0.000410227939956593,-1e+51,193.0,model 2 solver 1
+baron,ex9_2_8,optimal,0.01,1.5,1.5,0.0,model 1 solver 1
+baron,mathopt3,unsupported,0.3253429997712374,,,,Cannot handle function 'cos'
+baron,st_bsj3,optimal,0.01,-86768.55,-86768.55,0.0,model 1 solver 1
+baron,st_bsj4,optimal,0.03,-70262.05,-70262.05,1.0,model 1 solver 1
+baron,st_e21,optimal,0.02,-13.4019035550508,-13.4019035550508,0.0,model 1 solver 1
+baron,st_e34,optimal,0.02,0.0156195252423939,0.0156195252423938,0.0,model 1 solver 1
+baron,st_ph1,optimal,0.04,-230.117284009438,-230.117283950617,1.0,model 1 solver 1
+baron,st_ph2,optimal,0.03,-1028.11728395062,-1028.11728395062,1.0,model 1 solver 1
+baron,st_ph3,optimal,0.04,-420.234819853867,-420.234819853867,1.0,model 1 solver 1
+baron,st_qpk2,optimal,0.12,-12.25,-12.25,13.0,model 1 solver 1
+baron,wallfix,optimal,0.03,1.00000465759342,1.00000465759342,1.0,model 1 solver 1
+baron,ex5_2_4,optimal,0.04,-450.000000004719,-450.000000004719,1.0,model 1 solver 1
+baron,ex7_2_1,error,0.07,1227.22606932997,1227.22607480247,1.0,model 2 solver 1
+baron,st_e42,optimal,0.03,18.7842,18.7842,1.0,model 1 solver 1
+baron,st_glmp_kky,optimal,0.05,-2.50000000388,-2.50000000388001,1.0,model 1 solver 1
+baron,ex3_1_1,optimal,0.16,7049.24801928177,7049.24801928177,57.0,model 1 solver 1
+baron,ex5_4_2,optimal,0.08,7512.23014450072,7512.23014321825,15.0,model 1 solver 1
+baron,ex6_2_9,time_limit,60.38,-0.0340661823855542,-0.0358427717386234,168658.0,model 2 solver 3
+baron,ex7_2_3,error,0.16,7049.24801726378,7049.24713172175,325.0,model 2 solver 1
+baron,ex6_1_1,optimal,0.42,-0.020198311703058,-0.020198311827725,567.0,model 1 solver 1
+baron,ex9_2_4,optimal,0.02,0.5,0.5,0.0,model 1 solver 1
+baron,ex9_2_5,optimal,0.03,5.0,5.0,1.0,model 1 solver 1
+baron,ex7_2_4,error,0.79,3.91801022851007,3.91801006014832,81.0,model 2 solver 1
+baron,house,optimal,0.1,-4500.0000004533,-4500.00000045329,59.0,model 1 solver 1
+baron,inscribedsquare02,unsupported,0.2914569159038365,,,,Cannot handle function 'cos'
+baron,inscribedsquare01,unsupported,0.42204649979248643,,,,Cannot handle function 'cos'
+baron,inscribedsquare03,unsupported,0.38423325028270483,,,,Cannot handle function 'cos'
+baron,st_iqpbk2,error,0.02,nan,-1e+51,0.0,model 13 solver 13
+baron,st_robot,optimal,0.01,0.0,0.0,0.0,model 1 solver 1
+baron,ex14_1_6,optimal,0.02,2.19719850209398e-24,0.0,0.0,model 1 solver 1
+baron,ex5_2_2_case1,optimal,0.05,-400.0,-400.0,1.0,model 1 solver 1
+baron,ex5_2_2_case2,optimal,0.07,-600.0,-600.0,11.0,model 1 solver 1
+baron,ex5_2_2_case3,optimal,0.04,-750.0,-750.0,1.0,model 1 solver 1
+baron,st_iqpbk1,error,0.01,-621.487825,-1631.25,0.0,model 7 solver 4
+baron,ex6_2_10,time_limit,60.15,-3.05197612578218,-3.21265600076868,32345.0,model 2 solver 3
+baron,himmel11,optimal,0.03,-30665.5386786321,-30665.5386752108,1.0,model 1 solver 1
+baron,ex6_2_13,time_limit,60.96,-0.216209436876992,-0.227546938655513,38357.0,model 2 solver 3
+baron,pointpack04,optimal,0.05,1.0,1.0,1.0,model 1 solver 1
+baron,st_e28,optimal,0.04,-30665.5386786321,-30665.5386752108,1.0,model 1 solver 1
+baron,st_e33,optimal,0.04,-400.0,-400.0,1.0,model 1 solver 1
+baron,alkylation,optimal,0.09,1768.80696371625,1768.80696561097,11.0,model 1 solver 1
+baron,ex14_1_7,error,0.38,-1.01992685256448e-09,5.02665171344207e-09,71.0,model 2 solver 1
+baron,ex2_1_5,optimal,0.03,-268.014631541474,-268.014631541474,1.0,model 1 solver 1
+baron,ex2_1_6,optimal,0.04,-39.0000000525,-39.0000000525,1.0,model 1 solver 1
+baron,ex2_1_9,optimal,1.75,-0.375000000235469,-0.375000000235469,1625.0,model 1 solver 1
+baron,ex9_1_2,optimal,0.02,-16.0,-16.0,1.0,model 1 solver 1
+baron,ex9_1_4,optimal,0.02,-37.0,-37.0,0.0,model 1 solver 1
+baron,ex9_2_2,optimal,0.01,99.9998911858444,99.9998911858444,0.0,model 1 solver 1
+baron,ex9_2_7,optimal,0.03,17.0,17.0,1.0,model 1 solver 1
+baron,kall_congruentcircles_c31,optimal,0.05,0.64380550980766,0.64380550980766,11.0,model 1 solver 1
+baron,kall_congruentcircles_c32,optimal,0.07,1.37585631650343,1.37585631650342,9.0,model 1 solver 1
+baron,pooling_haverly1pq,optimal,0.04,-400.0,-400.0,1.0,model 1 solver 1
+baron,pooling_haverly1tp,optimal,0.04,-400.0,-400.0,1.0,model 1 solver 1
+baron,pooling_haverly2pq,optimal,0.04,-600.0,-600.0,1.0,model 1 solver 1
+baron,pooling_haverly2tp,optimal,0.05,-600.0,-600.0,1.0,model 1 solver 1
+baron,pooling_haverly3pq,optimal,0.04,-750.0,-750.0,1.0,model 1 solver 1
+baron,pooling_haverly3tp,optimal,0.03,-750.0,-750.0,1.0,model 1 solver 1
+baron,process,optimal,0.11,-1161.33660236492,-1161.33660246021,7.0,model 1 solver 1
+baron,shiporig,error,0.79,5.54091470953456,-1e+51,265.0,model 2 solver 1
+baron,st_bpaf1a,optimal,0.03,-45.3797101449275,-45.3797101449275,1.0,model 1 solver 1
+baron,st_bpaf1b,optimal,0.03,-42.9625576036866,-42.9625576036866,1.0,model 1 solver 1
+baron,st_e03,optimal,0.1,-1161.33660236492,-1161.33660246037,5.0,model 1 solver 1
+baron,st_e07,optimal,0.04,-400.000000003144,-400.0,1.0,model 1 solver 1
+baron,st_jcbpaf2,optimal,0.04,-794.855913978495,-794.855913978495,1.0,model 1 solver 1
+baron,st_qpc-m3a,optimal,0.02,-382.695,-382.695,0.0,model 1 solver 1
+baron,st_qpc-m3b,optimal,0.02,0.0,0.0,0.0,model 1 solver 1
+baron,st_qpc-m3c,optimal,0.01,0.0,0.0,0.0,model 1 solver 1
+baron,st_qpc-m4,optimal,0.01,0.0,0.0,0.0,model 1 solver 1
+baron,st_rv1,optimal,0.05,-59.9439166050066,-59.9439166050066,1.0,model 1 solver 1
+baron,chem,optimal,0.02,-47.7065148308467,-47.7065148308467,0.0,model 1 solver 1
+baron,st_qpk3,optimal,0.46,-36.0,-36.0,37.0,model 1 solver 1
+baron,ann_fermentation_exp,optimal,0.04,-99.9366329233685,-99.9366329233685,1.0,model 1 solver 1
+baron,ann_fermentation_tanh,unsupported,0.2856487911194563,,,,Cannot handle function 'tanh'
+baron,ex6_1_3,optimal,1.67,-0.352497801201914,-0.352497801201928,1293.0,model 1 solver 1
+baron,ex7_3_4,optimal,0.2,6.27463433652003,6.27463433652003,19.0,model 1 solver 1
+baron,haverly,optimal,0.05,-400.000000041347,-400.0,1.0,model 1 solver 1
+baron,kall_congruentcircles_c41,optimal,0.01,0.85840734641021,0.85840734641021,0.0,model 1 solver 1
+baron,kall_congruentcircles_c42,optimal,0.1,0.858407345932435,0.858407345932435,15.0,model 1 solver 1
+baron,st_e16,optimal,0.05,12292.4672755743,12292.4672755743,1.0,model 1 solver 1
+baron,ex2_1_3,optimal,0.03,-15.0,-15.0,1.0,model 1 solver 1
+baron,ex7_3_5,optimal,0.99,0.739666402584845,0.739666402584845,1345.0,model 1 solver 1
+baron,ex9_1_1,optimal,0.02,-13.0,-13.0,0.0,model 1 solver 1
+baron,ex9_1_5,optimal,0.02,-1.0,-1.0,0.0,model 1 solver 1
+baron,ex6_2_5,time_limit,60.15,-70.752077833452,-271.320765647339,31482.0,model 2 solver 3
+baron,pooling_bental4pq,optimal,0.04,-450.0,-450.0,1.0,model 1 solver 1
+baron,pooling_bental4tp,optimal,0.04,-450.0,-450.0,1.0,model 1 solver 1
+baron,pointpack06,optimal,1.0,0.361111111136208,0.361111111136208,981.0,model 1 solver 1
+baron,alkyl,optimal,0.06,-1.76499964667575,-1.76499964667576,3.0,model 1 solver 1
+baron,ex9_1_8,optimal,0.01,-3.25,-3.25,0.0,model 1 solver 1
+baron,ex6_2_7,time_limit,60.13,-0.160847615463606,-3.62632709597191,25556.0,model 2 solver 3
+baron,kall_congruentcircles_c51,optimal,0.2,1.07300918301276,1.07300918301276,431.0,model 1 solver 1
+baron,kall_congruentcircles_c52,optimal,0.19,1.53711079708339,1.53711079726218,71.0,model 1 solver 1
+baron,kall_diffcircles_5a,optimal,0.17,5.11617890136775,5.11617890136775,73.0,model 1 solver 1
+baron,pooling_haverly1stp,optimal,0.04,-400.000000003741,-400.000000003741,1.0,model 1 solver 1
+baron,kall_diffcircles_5b,optimal,0.34,5.11617890136786,5.11617890136775,455.0,model 1 solver 1
+baron,pooling_haverly2stp,optimal,0.05,-600.0,-600.0,1.0,model 1 solver 1
+baron,pooling_haverly3stp,optimal,0.04,-750.000000075695,-750.000000021805,1.0,model 1 solver 1
+baron,st_e30,optimal,0.07,-1.5811388300886,-1.5811388300886,9.0,model 1 solver 1
+baron,ex8_4_5,optimal,4.97,0.000307485200313683,0.000307485200313683,6027.0,model 1 solver 1
+baron,prob07,optimal,9.23,154990.229400363,154990.229374013,15105.0,model 1 solver 1
+baron,ex5_4_3,optimal,0.14,4845.46200495867,4845.46200474043,3.0,model 1 solver 1
+baron,ex9_2_3,optimal,0.05,0.0,0.0,7.0,model 1 solver 1
+baron,ex9_2_6,optimal,0.04,-1.0,-1.0,1.0,model 1 solver 1
+baron,kall_congruentcircles_c61,optimal,1.52,1.28761101961531,1.28761101844509,3467.0,model 1 solver 1
+baron,kall_congruentcircles_c62,optimal,0.29,1.28761101903896,1.28761101903896,187.0,model 1 solver 1
+baron,kall_congruentcircles_c63,optimal,0.05,1.28761101970066,1.28761101970066,1.0,model 1 solver 1
+baron,kall_diffcircles_6,optimal,0.19,7.78789459622075,7.78789459629316,36.0,model 1 solver 1
+baron,ex7_3_6,infeasible,0.01,nan,0.0,0.0,model 19 solver 1
+baron,ex8_4_4,error,0.43,0.212459838699641,0.212459610725423,175.0,model 2 solver 1
+baron,like,time_limit,60.49,1042.44523053638,-1e+51,6852.0,model 2 solver 3
+baron,himmel16,error,1.95,-0.866025403784439,-0.866025410698933,1833.0,model 2 solver 1
+baron,kall_circles_c6a,optimal,12.3,2.11171546521059,2.11171546521059,19469.0,model 1 solver 1
+baron,pointpack08,optimal,22.84,0.267949192342769,0.267949192342769,15299.0,model 1 solver 1
+baron,kall_circles_c6b,optimal,7.49,1.97359970246518,1.97359970245717,12597.0,model 1 solver 1
+baron,kall_congruentcircles_c72,optimal,1.4,1.96631446992743,1.96631446992743,1965.0,model 1 solver 1
+baron,kall_diffcircles_7,optimal,0.63,7.15313153294398,7.15313153294398,379.0,model 1 solver 1
+baron,pooling_bental4stp,optimal,0.04,-450.000000001138,-450.000000001138,1.0,model 1 solver 1
+baron,wastewater02m1,optimal,0.05,130.702544253781,130.702544253781,1.0,model 1 solver 1
+baron,ex2_1_10,optimal,0.03,49318.0179584122,49318.0179584122,1.0,model 1 solver 1
+baron,kall_congruentcircles_c71,optimal,11.98,1.50221285621786,1.50221285621786,22827.0,model 1 solver 1
+baron,ex2_1_7,optimal,0.35,-4150.41013392826,-4150.41013531776,283.0,model 1 solver 1
+baron,kall_circles_c7a,optimal,0.95,2.66281217940527,2.66281217940527,620.0,model 1 solver 1
+baron,kall_diffcircles_8,optimal,0.99,14.481258818839,14.481258818839,1127.0,model 1 solver 1
+baron,prolog,optimal,0.02,1.13686837721616e-13,-1.4210854715202e-14,0.0,model 1 solver 1
+baron,st_fp7a,optimal,0.1,-354.750612529863,-354.750612529864,3.0,model 1 solver 1
+baron,st_fp7b,optimal,0.11,-634.750612416137,-634.750612557975,3.0,model 1 solver 1
+baron,st_fp7c,optimal,0.1,-8695.01225076058,-8695.01225076058,3.0,model 1 solver 1
+baron,st_fp7d,optimal,0.09,-114.750612416137,-114.750612416137,3.0,model 1 solver 1
+baron,ex8_4_6,time_limit,60.46,0.00110497912249977,0.0,53669.0,model 2 solver 3
+baron,st_m1,optimal,0.06,-461356.938957225,-461356.938957225,1.0,model 1 solver 1
+baron,st_fp7e,optimal,0.38,-3730.41013531691,-3730.41013531691,283.0,model 1 solver 1
+baron,st_rv2,optimal,0.15,-64.4806951026839,-64.4806951026839,11.0,model 1 solver 1
+baron,st_rv3,optimal,0.1,-35.7606706378863,-35.7606706378863,3.0,model 1 solver 1
+baron,ex5_3_2,optimal,0.05,1.86415945947145,1.86415945938839,3.0,model 1 solver 1
+baron,ex8_4_1,error,0.56,0.618572759437079,0.618572553483642,343.0,model 2 solver 1
+baron,eq6_1,time_limit,60.38,767.377090695204,9.67061540473439,7657.0,model 2 solver 3
+baron,kall_diffcircles_9,optimal,3.94,13.350285461228,13.3502854635433,3391.0,model 1 solver 1
+baron,wastewater04m1,optimal,0.06,89.8360655734957,89.8360655734957,1.0,model 1 solver 1
+baron,ex2_1_8,optimal,0.04,15638.9999989106,15638.9999985414,1.0,model 1 solver 1
+baron,kall_circles_c6c,time_limit,60.6,2.96108151675975,0.0,67398.0,model 2 solver 3
+baron,pointpack10,time_limit,60.66,0.17746672575553,0.353458409212224,14869.0,model 2 solver 3
+baron,st_fp8,optimal,0.05,15638.9999950246,15638.999999041,1.0,model 1 solver 1
+baron,kall_circles_c8a,time_limit,60.67,2.54091913654081,2.19799005935228,52875.0,model 2 solver 3
+baron,kall_diffcircles_10,error,16.96,11.9354951118507,11.9355971200678,10731.0,model 2 solver 1
+baron,ex8_4_2,time_limit,60.63,0.48515248692929,0.0287224266974388,30209.0,model 2 solver 3
+baron,kriging_peaks-full010,optimal,2.73,0.291120782173522,0.291120782173522,1405.0,model 1 solver 1
+baron,ex5_4_4,optimal,32.01,10077.7754038811,10077.775403621,42839.0,model 1 solver 1
+baron,hhfair,optimal,0.08,-87.1590376065137,-87.1590376066523,1.0,model 1 solver 1
+baron,orth_d3m6,time_limit,60.24,0.707106781190273,0.0,16688.0,model 2 solver 3
+baron,pointpack12,time_limit,60.2,0.151111111104243,0.377279446150428,5951.0,model 2 solver 3
+baron,st_m2,optimal,0.1,-856648.819100097,-856648.819100097,1.0,model 1 solver 1
+baron,st_rv7,optimal,0.09,-138.187497129164,-138.187497147855,3.0,model 1 solver 1
+baron,hydro,optimal,0.04,4366944.15903641,4366944.15975606,1.0,model 1 solver 1
+baron,ex5_2_5,optimal,0.03,-3499.99999999896,-3500.0,0.0,model 1 solver 1
+baron,pooling_adhya1pq,optimal,0.13,-549.803050207646,-549.803050298568,3.0,model 1 solver 1
+baron,pooling_adhya1tp,optimal,0.27,-549.803050299395,-549.803050299395,7.0,model 1 solver 1
+baron,pooling_adhya2pq,optimal,0.12,-549.803050329425,-549.803050329425,3.0,model 1 solver 1
+baron,pooling_adhya2tp,error,0.16,-549.803050198838,-549.803051581186,3.0,model 2 solver 1
+baron,ramsey,optimal,0.03,-2.48746863896449,-2.48746863896449,1.0,model 1 solver 1
+baron,pooling_rt2pq,optimal,0.14,-4391.82589394576,-4391.82589386953,5.0,model 1 solver 1
+baron,pooling_rt2tp,optimal,0.09,-4391.82589368177,-4391.82589378342,1.0,model 1 solver 1
+baron,pooling_foulds2pq,optimal,0.02,-1100.0,-1100.0,0.0,model 1 solver 1
+baron,pooling_foulds2tp,optimal,0.03,-1100.0,-1100.0,0.0,model 1 solver 1
+baron,maxmin,time_limit,60.21,-0.366096007666148,-0.941541358133556,5258.0,model 2 solver 3
+baron,launch,optimal,0.09,2257.79755612193,2257.79755706822,1.0,model 1 solver 1
+baron,st_rv8,optimal,0.13,-132.661628962198,-132.661628962198,3.0,model 1 solver 1
+baron,pointpack14,time_limit,60.67,0.121741858688549,0.395963440571137,3123.0,model 2 solver 3
+baron,wastewater02m2,optimal,0.05,130.702544254061,130.702544253166,1.0,model 1 solver 1
+baron,ex8_6_2,time_limit,60.64,-31.8886296348503,-45.0,3170.0,model 2 solver 3
+baron,ex8_4_8_bnd,optimal,0.04,3.32184731381269,3.32184731381269,1.0,model 1 solver 1
+baron,knp3-12,time_limit,60.61,1.10557280900008,7.10424875858431,5180.0,model 2 solver 3
+baron,waterund01,time_limit,60.64,86.8333333333333,83.5837387004873,91818.0,model 2 solver 3
+baron,chenery,optimal,0.73,-1058.91985584723,-1058.91985612469,63.0,model 1 solver 1
+baron,kall_circlespolygons_c1p11,optimal,0.02,0.199601836602552,0.199601836602552,0.0,model 1 solver 1
+baron,kall_circlespolygons_c1p12,optimal,21.87,0.339606700586737,0.339606700586737,2313.0,model 1 solver 1
+baron,water,time_limit,60.73,904.902158476757,246.988030738997,26707.0,model 2 solver 3
+baron,kall_circlespolygons_c1p13,optimal,11.62,0.339601836599074,0.339601836599074,1343.0,model 1 solver 1
+baron,pooling_adhya1stp,optimal,0.78,-549.803050259505,-549.803050246872,42.0,model 1 solver 1
+baron,pooling_adhya2stp,optimal,0.57,-549.803050198886,-549.803050246796,3.0,model 1 solver 1
+baron,pooling_rt2stp,optimal,0.32,-4391.82589279585,-4391.82589392073,3.0,model 1 solver 1
+baron,orth_d3m6_pl,time_limit,60.75,0.707106781174611,0.0960254259854145,7833.0,model 2 solver 3
+baron,kriging_peaks-full020,optimal,16.69,0.372428536549996,0.3724285365613,4127.0,model 1 solver 1
+baron,wastewater15m1,optimal,0.84,2446.42857142857,2446.42857142108,77.0,model 1 solver 1
+baron,kall_circlesrectangles_c1r11,optimal,0.02,0.199601836602552,0.199601836602552,0.0,model 1 solver 1
+baron,pooling_foulds2stp,optimal,0.08,-1099.99999999309,-1100.0,0.0,model 1 solver 1
+baron,kall_circlesrectangles_c1r13,optimal,1.85,0.21460183660255,0.214601836228134,2905.0,model 1 solver 1
+baron,polygon25,unsupported,0.41565508395433426,,,,Cannot handle function 'cos'
+baron,orth_d4m6_pl,time_limit,60.74,0.649519052838329,0.0888304572047739,11693.0,model 2 solver 3
+baron,st_rv9,optimal,0.31,-120.15310851617,-120.15310851617,37.0,model 1 solver 1
+baron,kall_circlesrectangles_c1r12,optimal,23.55,0.339606428837423,0.339606428837423,2425.0,model 1 solver 1
+baron,wastewater05m1,time_limit,60.11,229.700839309597,168.791619645966,53576.0,model 2 solver 3
+baron,pricing050,time_limit,60.07,-1813.82907799431,-995.457357772428,10439.0,model 2 solver 3
