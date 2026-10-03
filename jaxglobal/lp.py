@@ -22,6 +22,14 @@ y >= 0 on the cut rows, weak duality gives
 which is analytic over a box. We evaluate this at the (clipped) IPM duals, so a
 poorly converged or infeasible LP still yields a valid bound. Infeasible LPs
 drive y to a Farkas ray, so the bound blows up and the node is pruned.
+
+The certificate is evaluated in floating point, so a bound on its rounding
+error (proportional to |A|^T|y| and |y|.|b|) is subtracted; without it, a
+diverging dual (|y| ~ 1e170 on degenerate LPs) turns cancellation noise into a
+huge, invalid bound. Constraint cuts are relaxed by ``tol`` (the B&B
+feasibility tolerance), which keeps the LP interior non-empty when an equality
+gives two opposing cuts, and makes the bound valid for the problem B&B
+actually solves (constraints satisfied to ``tol``).
 """
 
 from __future__ import annotations
@@ -30,6 +38,8 @@ import jax
 import jax.numpy as jnp
 
 from .relax import relax
+
+EPS = float(jnp.finfo(jnp.float64).eps)
 
 
 def ipm(c, A, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10):
@@ -80,7 +90,7 @@ def _as_vec(fn):
     return None if fn is None else (lambda x: jnp.atleast_1d(fn(x)))
 
 
-def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40):
+def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, tol=0.0):
     """Return ``bound(lo, hi) -> (lb, x_lp, infeasible)`` for one box."""
     rf = relax(f)
     rg = relax(_as_vec(ineq)) if ineq is not None else None
@@ -106,10 +116,10 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40):
         flo, fhi = mf.lo, mf.hi
         infeasible = jnp.array(False)
         if rg is not None:
-            infeasible |= jnp.any(rg(c, lo, hi).lo > 0)
+            infeasible |= jnp.any(rg(c, lo, hi).lo > tol)
         if rh is not None:
             mh = rh(c, lo, hi)
-            infeasible |= jnp.any(mh.lo > 0) | jnp.any(mh.hi < 0)
+            infeasible |= jnp.any(mh.lo > tol) | jnp.any(mh.hi < -tol)
 
         def cuts_at(p):
             """Affine minorants of each convex part at p, in unit-box coords u."""
@@ -138,11 +148,11 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40):
             """LP rows over z = (u, tau) with t = tlo + T tau.
 
             objective cut:  const0 + coef0.u <= t   -> coef0.u - T tau <= tlo - const0
-            constraint cut: const_i + coef_i.u <= 0 ->  coef_i.u         <= -const_i
+            constraint cut: const_i + coef_i.u <= tol -> coef_i.u        <= tol - const_i
             """
             tcol = jnp.zeros(const.shape + (1,)).at[..., 0, 0].set(-T)
             A = jnp.concatenate([coef, tcol], axis=-1).reshape(-1, n + 1)
-            bvec = jnp.concatenate([tlo_s - const[..., :1], -const[..., 1:]], axis=-1).reshape(-1)
+            bvec = jnp.concatenate([tlo_s - const[..., :1], tol - const[..., 1:]], axis=-1).reshape(-1)
             live = jnp.isfinite(bvec)
             nrm = jnp.linalg.norm(A, axis=1)
             live &= nrm > 0
@@ -165,7 +175,9 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40):
             y = y * jnp.where(s_obj > 1.0, 1.0 / s_obj, 1.0) ** (A[:, n] < 0)
             coef = cobj + A.T @ y
             val = jnp.sum(jnp.minimum(coef[:n], 0.0)) - y @ bvec
-            return tlo_s + T * val
+            # rounding error of the two sums (|A| <= 1 after row scaling)
+            err = (A.shape[0] + n + 2) * EPS * (jnp.sum(1.0 + jnp.abs(A).T @ y) + jnp.abs(bvec) @ y)
+            return tlo_s + T * (val - err)
 
         const, coef = const0, coef0
         best = jnp.where(bad_t, -jnp.inf, tlo)

@@ -1,0 +1,9 @@
+solver,name,status,time,primal,dual,nodes,message
+jaxglobal,ex6_2_6,time_limit,60.18112108344212,7.107625417113184e-07,-0.008925970700497799,162953,time_limit
+jaxglobal,kall_diffcircles_5a,time_limit,60.62021691724658,7.101672248467071,0.0,1983,time_limit
+jaxglobal,kall_circles_c6a,time_limit,61.027852333150804,2.4357456758323437,0.0,203,time_limit
+jaxglobal,kall_diffcircles_5b,time_limit,62.487583958078176,5.789512034265495,0.0,1263,time_limit
+jaxglobal,kall_diffcircles_8,time_limit,63.37426825007424,16.79912928946903,0.0,31,time_limit
+jaxglobal,kall_circles_c6c,time_limit,65.42279887478799,3.4740723257610324,0.0,15,time_limit
+jaxglobal,kall_diffcircles_9,time_limit,67.72080804081634,17.7717770597743,0.0,1,time_limit
+jaxglobal,kall_diffcircles_10,time_limit,78.86055929213762,nan,0.0,1,time_limit

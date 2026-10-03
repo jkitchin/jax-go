@@ -146,7 +146,7 @@ def minimize(
         return jnp.maximum(jnp.max(jnp.maximum(g(x), 0.0), initial=0.0), jnp.max(jnp.abs(h(x)), initial=0.0))
 
     if constrained:
-        cb = make_constrained_bounder(f, ineq, eq, n_kelley=n_kelley)
+        cb = make_constrained_bounder(f, ineq, eq, n_kelley=n_kelley, tol=feas_tol)
 
         def node(blo, bhi):
             lb, x, _ = cb(blo, bhi)

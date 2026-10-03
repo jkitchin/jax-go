@@ -59,3 +59,30 @@ def test_infeasible_problem():
     r = minimize(lambda x: x[0] + x[1], [-1, -1], [1, 1], ineq=lambda x: 1.5 - x[0] ** 2 - x[1] ** 2 * 0.1)
     assert r.status == "infeasible"
     assert r.fun == np.inf
+
+
+# kall_circles_c6a (MINLPLib): circle packing with two equalities. The IPM duals
+# diverge to ~1e170 on its degenerate LPs, and the certificate used to turn the
+# rounding noise into lower bounds of 1e47..1e276 (the solver then "proved" a
+# wrong optimum). x* is SCIP's solution, feasible to ~4e-8.
+C6A_X = [0.49999999114651, 0.499999990679916, 0.499999991021435, 1.49999998666014, 2.68174240423438,
+         0.499999990656766, 2.68174240477416, 1.49999998663835, 3.68174240029873, 0.499999990760315,
+         3.68174240067707, 1.49999998652489, 1.59087119780145, 0.999999989105133, 4.18174239168908,
+         1.99999997728567, 8.36348468839271, 2.11171530774902]  # fmt: skip
+
+
+def test_degenerate_lp_bound_valid():
+    import pathlib
+
+    from jaxglobal.nl import read_nl
+
+    M = read_nl(pathlib.Path(__file__).parent / "data" / "kall_circles_c6a.nl")
+    x = np.clip(np.array(C6A_X), M.lo, M.hi)
+    fstar = float(M.f(jnp.asarray(x)))
+    cb = jax.jit(make_constrained_bounder(M.f, M.ineq, M.eq, tol=1e-6))
+    lbs = []
+    for w in [None, 1e-2, 1e-3, 1e-5]:
+        lo, hi = (M.lo, M.hi) if w is None else (np.maximum(M.lo, x - w), np.minimum(M.hi, x + w))
+        lbs.append(float(cb(jnp.asarray(lo), jnp.asarray(hi))[0]))
+    assert all(lb <= fstar + 1e-6 for lb in lbs), lbs
+    assert lbs[-1] > fstar - 1e-3  # and still tight on a tiny box

@@ -13,3 +13,4 @@ benchmarks/minlplib/gms/
 benchmarks/minlplib/instancedata.csv
 # benchmark runs in progress; commit finished results deliberately
 benchmarks/results/*.log
+.DS_Store
