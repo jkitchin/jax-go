@@ -572,3 +572,202 @@ scip,wastewater02m1,optimal,0.05,130.702543727703,130.698474783725,31.0,solving 
 scip,ex2_1_10,optimal,0.02,49318.0156974494,49316.5271726733,5.0,solving was interrupted [gap limit reached]
 scip,kall_congruentcircles_c72,optimal,4.45,1.96631224716261,1.96631224716261,11991.0,problem is solved [optimal solution found]
 scip,ex2_1_7,optimal,0.18,-4150.41025909064,-4150.41025909064,953.0,problem is solved [optimal solution found]
+scip,kall_circles_c6a,time_limit,60.0,2.11171530774902,1.73844187129972,161369.0,solving was interrupted [time limit reached]
+scip,kall_congruentcircles_c71,time_limit,60.0,1.96631431097984,0.770039611793173,142399.0,solving was interrupted [time limit reached]
+scip,prolog,optimal,0.05,-4.74901753477752e-08,-4.74901753477752e-08,5.0,problem is solved [optimal solution found]
+scip,st_fp7a,optimal,0.12,-354.7506238186,-354.7506238186,311.0,problem is solved [optimal solution found]
+scip,st_fp7b,optimal,0.11,-634.750626618183,-634.750626618183,365.0,problem is solved [optimal solution found]
+scip,st_fp7c,optimal,0.11,-8695.01249218463,-8695.01249218463,449.0,problem is solved [optimal solution found]
+scip,st_fp7d,optimal,0.12,-114.750621418532,-114.750621418532,201.0,problem is solved [optimal solution found]
+scip,st_fp7e,optimal,0.17,-3730.41025820064,-3730.41025820064,953.0,problem is solved [optimal solution found]
+scip,st_m1,optimal,0.08,-461356.942034756,-461371.464306626,271.0,solving was interrupted [gap limit reached]
+scip,st_rv2,optimal,0.11,-64.4806953967362,-64.4806953967362,129.0,problem is solved [optimal solution found]
+scip,st_rv3,optimal,0.15,-35.7606716087191,-35.7606716087191,652.0,problem is solved [optimal solution found]
+scip,kall_diffcircles_8,optimal,32.26,14.481256919973,14.4798877314721,111671.0,solving was interrupted [gap limit reached]
+scip,ex5_3_2,optimal,0.07,1.86415945838548,1.86409616643795,21.0,solving was interrupted [gap limit reached]
+scip,ex8_4_1,optimal,0.23,0.618571859446829,0.618510182748857,171.0,solving was interrupted [gap limit reached]
+scip,kall_circles_c7a,optimal,59.58,2.66280855114555,2.66280855114555,151585.0,problem is solved [optimal solution found]
+scip,kall_circles_c6c,time_limit,60.0,2.95000576467366,0.0,119240.0,solving was interrupted [time limit reached]
+scip,wastewater04m1,optimal,0.08,89.8360653830665,89.8285572531915,67.0,solving was interrupted [gap limit reached]
+scip,ex2_1_8,optimal,0.13,15638.9998907725,15638.9998907725,57.0,problem is solved [optimal solution found]
+scip,pointpack10,time_limit,60.0,0.177476469244287,0.264656927465858,72945.0,solving was interrupted [time limit reached]
+scip,kall_circles_c8a,time_limit,60.0,2.5409189388889,0.539137878156817,110275.0,solving was interrupted [time limit reached]
+scip,st_fp8,optimal,0.11,15638.999890942,15638.999890942,57.0,problem is solved [optimal solution found]
+scip,kall_diffcircles_9,time_limit,60.0,14.2071743086224,12.2423230219687,162441.0,solving was interrupted [time limit reached]
+scip,ex8_4_2,time_limit,60.0,0.485151586487878,0.357073331439402,20507.0,solving was interrupted [time limit reached]
+scip,kriging_peaks-full010,optimal,0.57,0.291115285427586,0.291101353048326,641.0,solving was interrupted [gap limit reached]
+scip,ex5_4_4,optimal,0.32,10077.7753810888,10077.1872671441,1131.0,solving was interrupted [gap limit reached]
+scip,kall_diffcircles_10,time_limit,60.0,13.6857493918029,6.35522255559587,151054.0,solving was interrupted [time limit reached]
+scip,orth_d3m6,time_limit,60.0,0.71556587596862,0.0,13664.0,solving was interrupted [time limit reached]
+scip,pointpack12,time_limit,60.0,0.151111124207104,0.252857369478382,53937.0,solving was interrupted [time limit reached]
+scip,maxmin,time_limit,60.0,-0.358109080666206,-0.57736592271529,25750.0,solving was interrupted [time limit reached]
+scip,st_m2,optimal,0.09,-856648.846083931,-856655.872101232,221.0,solving was interrupted [gap limit reached]
+scip,st_rv7,optimal,0.25,-138.187497994188,-138.187497994188,1175.0,problem is solved [optimal solution found]
+scip,hydro,optimal,0.01,4366944.15490981,4366702.48339997,1.0,solving was interrupted [gap limit reached]
+scip,hhfair,time_limit,60.0,-87.1590376169349,-1e+20,176883.0,solving was interrupted [time limit reached]
+scip,pooling_adhya1pq,optimal,0.19,-549.803055783882,-549.840770270791,201.0,solving was interrupted [gap limit reached]
+scip,pooling_adhya1tp,optimal,0.23,-549.803056308086,-549.853105937166,475.0,solving was interrupted [gap limit reached]
+scip,pooling_adhya2pq,optimal,0.2,-549.803056271689,-549.842258679558,481.0,solving was interrupted [gap limit reached]
+scip,pooling_adhya2tp,optimal,0.22,-549.803056348092,-549.848640580116,338.0,solving was interrupted [gap limit reached]
+scip,ramsey,optimal,0.01,-2.48746870925537,-2.48756487821677,1.0,solving was interrupted [gap limit reached]
+scip,pooling_rt2pq,optimal,0.23,-4391.82600258878,-4391.82600258878,333.0,problem is solved [optimal solution found]
+scip,pooling_rt2tp,optimal,0.17,-4391.82599464748,-4391.82599464748,53.0,problem is solved [optimal solution found]
+scip,pooling_foulds2pq,optimal,0.02,-1100.00000665323,-1100.00000665323,1.0,problem is solved [optimal solution found]
+scip,pooling_foulds2tp,optimal,0.01,-1100.00000663983,-1100.00000663983,1.0,problem is solved [optimal solution found]
+scip,pointpack14,time_limit,60.0,0.121741865430694,0.281023139167615,27569.0,solving was interrupted [time limit reached]
+scip,launch,optimal,0.03,2257.79733033739,2257.65231093732,1.0,solving was interrupted [gap limit reached]
+scip,st_rv8,optimal,0.28,-132.661629558239,-132.661629558239,1075.0,problem is solved [optimal solution found]
+scip,ex8_6_2,time_limit,60.0,-31.5197679058502,-1744.31324965815,2766.0,solving was interrupted [time limit reached]
+scip,wastewater02m2,optimal,0.12,130.702544199643,130.702544199643,193.0,problem is solved [optimal solution found]
+scip,ex5_2_5,time_limit,60.0,-3500.00004262663,-3981.24878453902,118410.0,solving was interrupted [time limit reached]
+scip,knp3-12,time_limit,60.0,1.01729733341402,3.08443039429276,5832.0,solving was interrupted [time limit reached]
+scip,waterund01,time_limit,60.0,86.8333326840535,86.8140909198221,164218.0,solving was interrupted [time limit reached]
+scip,water,time_limit,60.0,934.938397069256,142.397899525054,140349.0,solving was interrupted [time limit reached]
+scip,chenery,optimal,0.36,-1058.91985904695,-1058.92809758495,371.0,solving was interrupted [gap limit reached]
+scip,kall_circlespolygons_c1p11,optimal,0.01,0.199601825612586,0.199601825612586,1.0,problem is solved [optimal solution found]
+scip,ex8_4_8_bnd,time_limit,60.0,3.32184639459415,1.56541812437183e-05,8372.0,solving was interrupted [time limit reached]
+scip,kall_circlespolygons_c1p13,optimal,2.96,0.339601781393401,0.339568003449687,7348.0,solving was interrupted [gap limit reached]
+scip,kall_circlespolygons_c1p12,optimal,6.79,0.339599936033341,0.339566010200664,17551.0,solving was interrupted [gap limit reached]
+scip,pooling_adhya1stp,optimal,0.74,-549.80306347053,-549.80306347053,960.0,problem is solved [optimal solution found]
+scip,pooling_adhya2stp,optimal,0.54,-549.803063640253,-549.835743070151,857.0,solving was interrupted [gap limit reached]
+scip,pooling_rt2stp,optimal,0.48,-4391.82601184827,-4391.83145760747,104.0,solving was interrupted [gap limit reached]
+scip,kriging_peaks-full020,optimal,5.3,0.37242245934171,0.372385298447082,2100.0,solving was interrupted [gap limit reached]
+scip,wastewater05m1,optimal,1.97,229.700831148327,229.700831148327,3845.0,problem is solved [optimal solution found]
+scip,pooling_foulds2stp,optimal,0.34,-1100.0,-1100.0,41.0,problem is solved [optimal solution found]
+scip,kall_circlesrectangles_c1r11,optimal,0.02,0.199601825612573,0.199601825612573,1.0,problem is solved [optimal solution found]
+scip,wastewater15m1,optimal,3.0,2446.42857066393,2446.26281278789,9525.0,solving was interrupted [gap limit reached]
+scip,kall_circlesrectangles_c1r13,optimal,1.31,0.214601231006102,0.214582735498297,2651.0,solving was interrupted [gap limit reached]
+scip,orth_d3m6_pl,time_limit,60.0,1.0,0.0,31955.0,solving was interrupted [time limit reached]
+scip,kall_circlesrectangles_c1r12,optimal,13.72,0.339599596122874,0.339565808960191,30211.0,solving was interrupted [gap limit reached]
+scip,st_rv9,optimal,0.48,-120.153109334554,-120.153109334554,1293.0,problem is solved [optimal solution found]
+couenne,ex4_1_1,optimal,0.067683,-7.48731,-7.48749,101.0,
+couenne,ex4_1_2,optimal,0.468301,-663.501,-663.511,101.0,
+couenne,ex4_1_3,optimal,0.065894,-443.672,-443.674,50.0,
+couenne,ex4_1_4,optimal,1.83965,-5.09185e-08,-5.09185e-08,21366.0,
+couenne,ex4_1_6,optimal,0.110416,6.99988,6.99931,101.0,
+couenne,ex4_1_7,optimal,0.045106,-7.5,-7.50002,39.0,
+couenne,ex8_1_2,optimal,0.088362,-1.15858,-1.15858,24.0,
+couenne,mathopt5_1,optimal,0.003941,-0.999612,-0.999684,0.0,
+couenne,mathopt5_2,optimal,0.018078,-1.0,-1.0,0.0,
+couenne,mathopt5_3,optimal,0.033768,-1.61642,-1.61642,8.0,
+couenne,mathopt5_4,optimal,0.001243,2.9867e-19,2.9867e-19,0.0,
+couenne,mathopt5_5,optimal,0.062827,-14.838,-14.838,8.0,
+couenne,mathopt5_6,optimal,0.014041,-0.943292,-0.943292,0.0,
+couenne,mathopt5_7,optimal,0.051377,-4.43673,-4.43673,26.0,
+couenne,mathopt5_8,optimal,0.053246,-0.686072,-0.686106,101.0,
+couenne,trig,optimal,0.058672,-3.7625,-3.7625,8.0,
+couenne,ex14_1_9,optimal,0.00155,-0.66443,-0.66443,0.0,
+couenne,ex4_1_5,optimal,0.146695,9.44416e-21,9.44416e-21,36.0,
+couenne,ex4_1_8,optimal,0.00875,-16.7389,-16.7389,0.0,
+couenne,ex4_1_9,optimal,0.155106,-5.50801,-5.50832,101.0,
+couenne,ex8_1_1,optimal,0.009613,-2.02181,-2.02181,0.0,
+scip,orth_d4m6_pl,time_limit,60.0,0.649519042951923,0.153391579050404,27407.0,solving was interrupted [time limit reached]
+couenne,ex8_1_4,optimal,0.163455,-2.69425e-10,-2.69425e-10,62.0,
+couenne,ex8_1_5,time_limit,0.231167,nan,nan,40.0,
+couenne,ex8_1_6,optimal,0.016231,-10.086,-10.086,0.0,
+couenne,filter,optimal,0.005752,8685.28,8685.28,0.0,
+couenne,kriging_peaks-red010,optimal,3.72083,0.291121,0.291092,1001.0,
+couenne,kriging_peaks-red020,optimal,23.1817,0.372429,0.372393,3001.0,
+scip,polygon25,time_limit,60.0,-0.771055963150021,-5.98106487965591,4628.0,solving was interrupted [time limit reached]
+scip,pricing050,time_limit,60.0,-1813.82907344702,-1505.86881659423,13112.0,solving was interrupted [time limit reached]
+couenne,ex8_1_3,time_limit,60.6306,3.0,nan,256248.0,
+couenne,kriging_peaks-red030,time_limit,60.8799,-1.58659,-1.58681,8381.0,
+couenne,kriging_peaks-red050,time_limit,60.0599,-1.15659,-1.1711,2805.0,
+couenne,mathopt1,optimal,0.001321,9.88852e-20,9.88852e-20,0.0,
+couenne,mathopt2,optimal,0.001053,1.93665e-19,1.93665e-19,0.0,
+couenne,mathopt4,optimal,0.001181,1.60215e-20,1.60215e-20,0.0,
+couenne,mathopt6,optimal,0.168597,-3.30687,-3.30692,101.0,
+couenne,prob06,optimal,0.009506,1.17712,1.17712,0.0,
+couenne,rbrock,optimal,0.001064,4.33314e-19,4.33314e-19,0.0,
+couenne,st_e01,optimal,0.000886,-6.66667,-6.66667,0.0,
+couenne,st_e08,optimal,0.00118,0.741782,0.741782,0.0,
+couenne,st_e09,optimal,0.007273,-0.5,-0.5,0.0,
+couenne,st_e18,optimal,0.001136,-2.82843,-2.82843,0.0,
+couenne,st_e19,optimal,0.088134,-118.705,-118.705,101.0,
+couenne,st_e22,optimal,0.00105,-85.0,-85.0053,0.0,
+couenne,st_e23,optimal,0.030625,-1.08333,-1.08333,10.0,
+couenne,st_e24,optimal,0.025273,3.0,3.0,0.0,
+couenne,st_e26,optimal,0.001012,-185.779,-185.779,0.0,
+couenne,st_ht,optimal,0.028452,-1.6,-1.6,4.0,
+couenne,st_ph10,optimal,0.001033,-10.5,-10.5,0.0,
+couenne,st_phex,optimal,0.010521,-85.0,-85.0,0.0,
+couenne,st_qpc-m0,optimal,0.013134,-5.0,-5.0,0.0,
+couenne,st_qpk1,optimal,0.033254,-3.0,-3.0,2.0,
+couenne,trigx,optimal,0.016896,0.0956312,0.0956312,0.0,
+couenne,ex14_1_1,optimal,0.00129,-1.39926e-07,-1.39926e-07,0.0,
+couenne,ex14_1_3,optimal,0.001318,-9.96535e-09,-9.96535e-09,0.0,
+couenne,ex14_1_4,optimal,0.00119,-9.97997e-09,-9.97997e-09,0.0,
+couenne,ex14_1_8,optimal,0.188001,0.0,0.0,6.0,
+couenne,ex3_1_4,optimal,0.163365,-4.0,-4.0,6.0,
+couenne,kriging_peaks-red100,time_limit,59.9208,-2.63751,-104.046,4.0,
+couenne,kriging_peaks-red200,time_limit,59.8503,-1.58588,-1022.41,0.0,
+couenne,kriging_peaks-red500,time_limit,59.6919,-2.33332,-1760.5,0.0,
+couenne,hs62,optimal,1.4835,-26274.1,-26275.7,782.0,
+couenne,ex6_2_11,time_limit,60.0781,-2.67241e-06,-0.0637723,29550.0,
+couenne,prob09,optimal,0.001155,6.57887e-21,6.57887e-21,0.0,
+couenne,st_bsj2,optimal,0.03702,1.0,1.0,4.0,
+couenne,st_e02,optimal,0.00119,201.159,201.159,0.0,
+couenne,st_e06,optimal,0.001039,0.0,0.0,0.0,
+couenne,st_e11,error,0.050143125001341105,nan,nan,nan,
+couenne,st_pan1,optimal,0.037649,-5.28371,-5.28371,2.0,
+couenne,st_ph11,optimal,0.022882,-11.2813,-11.2813,2.0,
+couenne,st_ph12,optimal,0.021472,-22.625,-22.625,2.0,
+couenne,st_ph13,optimal,0.032205,-11.2813,-11.2813,2.0,
+couenne,st_ph14,optimal,0.01382,-229.722,-229.722,0.0,
+couenne,st_ph20,optimal,0.03769,-158.0,-158.0,0.0,
+couenne,st_z,optimal,0.034526,-3.997e-08,-3.997e-08,2.0,
+couenne,chance,optimal,0.029094,29.8944,29.8944,2.0,
+couenne,dispatch,optimal,0.071716,3155.29,3155.29,12.0,
+couenne,ex14_2_2,optimal,0.001573,0.0,0.0,0.0,
+couenne,ex14_2_5,optimal,0.001676,0.0,0.0,0.0,
+couenne,ex14_2_8,optimal,0.437052,0.0,0.0,152.0,
+couenne,ex14_2_9,optimal,0.302975,0.0,0.0,110.0,
+couenne,ex6_1_2,optimal,0.198214,-0.0324638,-0.0324638,64.0,
+couenne,ex6_2_6,time_limit,60.4013,-2.60253e-06,-0.00016961,61206.0,
+couenne,ex6_2_12,optimal,12.5465,0.289195,0.289195,5282.0,
+couenne,ex6_2_8,time_limit,60.6351,-0.0270063,-0.0270938,69652.0,
+couenne,ex7_3_1,optimal,0.001953,0.34174,0.34174,0.0,
+couenne,ex7_3_2,optimal,0.001191,1.08986,1.08986,0.0,
+couenne,st_bpk1,optimal,0.001066,-13.0,-13.0,0.0,
+couenne,st_bpv1,optimal,0.000827,10.0,10.0,0.0,
+couenne,st_bpv2,optimal,0.008241,-8.0,-8.0,0.0,
+couenne,st_e04,error,0.04921529209241271,nan,nan,nan,
+couenne,st_e12,error,0.048911749850958586,nan,nan,nan,
+couenne,st_e25,optimal,0.012145,0.890194,0.890194,0.0,
+couenne,st_e37,optimal,0.082285,0.00104172,0.00104172,0.0,
+couenne,st_e41,optimal,0.019492,641.823,641.823,0.0,
+couenne,st_glmp_fp1,error,0.06692150002345443,nan,nan,nan,
+couenne,st_glmp_fp2,error,0.07163620879873633,nan,nan,nan,
+couenne,st_glmp_fp3,error,0.07670058403164148,nan,nan,nan,
+couenne,st_glmp_kk92,error,0.08744774991646409,nan,nan,nan,
+couenne,st_ph15,optimal,0.017846,-392.704,-392.704,0.0,
+couenne,ex14_2_1,optimal,0.001833,0.0,0.0,0.0,
+couenne,ex14_2_4,optimal,0.002242,0.0,0.0,0.0,
+couenne,ex14_2_6,optimal,0.002147,0.0,0.0,0.0,
+couenne,ex2_1_1,optimal,0.129936,-17.0,-17.0,8.0,
+couenne,ex3_1_2,optimal,0.020733,-30665.5,-30665.5,0.0,
+couenne,ex7_3_3,optimal,0.099869,0.817529,0.817529,8.0,
+couenne,ex8_1_7,optimal,0.489093,0.0293105,0.0293105,1048.0,
+couenne,ex8_5_3,optimal,3.79556,-0.00413543,-0.00413543,11244.0,
+couenne,ex6_2_9,optimal,27.4235,-0.0340662,-0.0340662,8878.0,
+couenne,ex6_2_14,optimal,48.3651,-0.695358,-0.695427,32801.0,
+couenne,mhw4d,optimal,1.16937,0.0293108,0.0293108,4908.0,
+couenne,nemhaus,optimal,0.000888,31.0,31.0,0.0,
+couenne,pointpack02,optimal,0.001233,2.0,2.0,0.0,
+couenne,st_e05,optimal,0.15724,7049.25,7049.0,101.0,
+couenne,st_glmp_kk90,optimal,0.000977,3.0,2.99997,0.0,
+couenne,st_glmp_ss1,optimal,0.065873,-24.5714,-24.5714,14.0,
+couenne,st_glmp_ss2,optimal,0.00125,3.0,2.99995,0.0,
+couenne,st_qpc-m1,optimal,0.068636,-473.778,-473.778,4.0,
+couenne,ex14_1_2,optimal,0.001649,-9.92e-09,-9.92e-09,0.0,
+couenne,ex14_1_5,optimal,0.001452,-9.98e-09,-9.98e-09,0.0,
+couenne,ex14_2_3,optimal,0.002626,0.0,0.0,0.0,
+couenne,ex14_2_7,optimal,0.00278,0.0,0.0,0.0,
+couenne,ex2_1_2,optimal,0.001145,-213.0,-213.0,0.0,
+couenne,ex2_1_4,optimal,0.001015,-11.0,-11.0,0.0,
+couenne,ex3_1_3,optimal,0.001742,-310.0,-310.0,0.0,
+couenne,ex8_5_4,optimal,36.6696,-0.000425147,-0.000425147,72268.0,
+couenne,ex6_1_4,optimal,0.626279,-0.294542,-0.29456,301.0,
+couenne,ex8_5_5,optimal,19.2264,-0.0107533,-0.0107533,42036.0,
+couenne,ex7_2_2,optimal,0.180018,-0.388811,-0.388811,6.0,
+couenne,least,time_limit,67.7299,14085.1,0.0,57801.0,
