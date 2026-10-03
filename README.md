@@ -131,7 +131,16 @@ pip install -e '.[dev]'
 pytest -q                      # soundness, cut validity, global optima (57 tests, ~30 s)
 python examples/benchmark.py
 python examples/figures.py
+
+# MINLPLib benchmark (phase 0 of docs/ROADMAP.md)
+python benchmarks/minlplib/fetch.py          # 322 continuous instances, ≤ 50 variables
+python benchmarks/run.py --time-limit 60     # jaxglobal, SCIP, Couenne, BARON (GAMS)
+python benchmarks/report.py                  # checked results, SGM time, profiles
 ```
+
+Any AMPL `.nl` model (text or binary) can be loaded with
+`jaxglobal.nl.read_nl(path)`, which returns `f`, `ineq`, `eq`, `lo`, `hi` for
+`minimize`.
 
 ## Lessons / gotchas found so far
 
@@ -148,8 +157,9 @@ python examples/figures.py
 
 * Not rigorous in floating point: no outward rounding, and αBB minimizers come
   from 60-step bisection.
-* Constrained bounds use a dense LP per node and SLSQP upper bounds: fine for
-  ≤ 10 variables, not beyond.
+* Constrained bounds use a dense LP per node: fine for ≤ 10 variables, not
+  beyond. Upper bounds come from local solves with pounce (default), optax or
+  scipy (`local_solver=`).
 * `dot_general` between two variable arrays only for 1-D inner products.
   `lax.cond`/`while`/`scan` with variable-dependent control flow are not
   supported; Python control flow on static values is fine.
@@ -166,3 +176,117 @@ python examples/figures.py
   (x·exp(x), x·log(x), bilinear `dot_general`).
 * Outward rounding (e.g. `nextafter`) for rigorous bounds.
 * GPU: the bounding step is already a pure `jit(vmap)` kernel.
+
+## Related work
+
+Citation keys refer to [`docs/references.bib`](docs/references.bib). Every
+entry with a DOI was checked against Crossref and its BibTeX taken from
+Crossref by `docs/verify_refs.py` (103 entries). The 38 entries without a
+Crossref DOI (conference papers, arXiv, software) are listed in
+`docs/refs.json` and were checked against arXiv or the publisher.
+
+**McCormick relaxations of code.** The relaxation arithmetic is McCormick's
+[mccormick1976computability], in the generalized and subgradient form of
+[mitsos2009mccormick, scott2011generalized]. That work relaxes whole programs
+by operator overloading (MC++ [chachuatmcpp, chachuat2015settheoretic]); MAiNGO
+[bongartz2018maingo, bongartz2017deterministic] and EAGO.jl
+[wilhelm2022eagojl] are the solvers built on it. Reduced-space branching on
+the original variables follows [epperly1997reduced]. Convergence theory:
+[bompadre2012convergence, najman2016convergence]. Possible tightenings:
+multivariate rules [tsoukalas2014multivariate], subgradient bound tightening
+[najman2019tighter], reverse propagation [wechsung2015reverse], LP from
+linearizations [najman2021linearization], Taylor and McCormick–Taylor models
+[makino2003taylor, sahlodin2011convex, bompadre2013convergence], DAG interval propagation [schichl2005interval],
+differentiable relaxations [khan2017differentiable], and relaxations of implicit
+functions [stuber2015convex], a route to relaxing `lax.while_loop`.
+Embedded ML models: [schweidtmann2019deterministic,
+schweidtmann2021deterministic, wilhelm2023convex]. jaxglobal's difference: no
+operator overloading or code generation. The relaxation is a *re-interpretation
+of the jaxpr*, so `jit`, `vmap` and `grad` apply to the bounding itself.
+
+**αBB and interval Hessians.** αBB [androulakis1995alphabb,
+adjiman1996rigorous, adjiman1998global, adjiman1998globalii] with tighter α
+[hladik2015efficient, nerantzis2019tighter, kazazakis2018arbitrarily,
+skjal2012generalization] and univariate underestimators
+[gounaris2008tight, meyer2005convex]. The closest prior art to evaluating
+`grad(grad(primitive))` on intervals is AD-based interval Hessian bounding
+[monnigmann2008efficient, schulzedarup2014efficient, schulzedarup2016improved,
+hladik2017effect]. We found no prior work that applies αBB *automatically per
+primitive* to every nonconvex primitive of a traced program.
+
+**GPU and parallel global optimization.** The most direct competitors:
+Gottlieb, Xu & Stuber generate McCormick kernels from Julia/Symbolics for
+GPU-batched lower bounding [gottlieb2024automatic, gottlieb2026automatic];
+Zhang et al. add GPU interval bounding to MAiNGO [zhang2025accelerating].
+Earlier GPU/parallel B&B: [barkalov2016parallel, bagoczki2017parallel,
+gillner2024gpuaccelerated, gendron1994parallel, crainic2006parallel,
+gmys2016gpubased]. Spatial B&B and its convergence theory: [falk1969algorithm,
+horst1990global, smith1999symbolic, kannan2018convergenceorder]. Rigorous
+and interval global optimization: [neumaier2004complete, kearfott1996rigorous,
+hansen2004global]. Branching rules: [achterberg2005branching].
+
+**Bound propagation in ML and jaxpr interpreters.** jaxpr-interpreting
+bounders already exist, but for other jobs:
+- jax_verify [stanforth2020jaxverify]: NN verification, with bilinear McCormick
+  and B&B over activation/input splits.
+- AutoBound [streeter2022automatically, streeter2023sharp]: Taylor enclosures,
+  with a toy B&B.
+- immrax [harapanahalli2024immrax]: interval reachability.
+
+The verification literature has GPU-batched bounding in B&B:
+- linear bounds: IBP [gowal2018effectiveness], CROWN [zhang2018efficient],
+  DeepPoly [singh2019abstract], auto_LiRPA [xu2020automatic];
+- B&B: α/β-CROWN [xu2021fast, wang2021beta], GenBaB [shi2025neural],
+  [bunel2020branch];
+- dual and SDP relaxations: [dvijotham2018dual, dvijotham2020efficient,
+  bunel2020lagrangian];
+- relaxation-gap results: [salman2019convex, tjandraatmadja2020convex].
+
+AD at kinks can return values that are not subgradients
+[kakade2018provably, lee2020correctness, bolte2020mathematical,
+bolte2021conservative]. This is the failure mode behind jaxglobal's tie-aware
+rules (see *Lessons* above). Nonsmooth implicit differentiation:
+[bolte2024differentiating]. Principled fixes: abs-normal forms
+[griewank2013stable, griewank2015solving] and lexicographic derivatives
+[nesterov2005lexicographic, khan2013evaluating, khan2015vector].
+
+**LP bounds.** Node bounds come from cuts [kelley1960cuttingplane,
+frank1956algorithm, jaggi2013revisiting], fed to an interior-point LP
+[mehrotra1992implementation, wright1997primaldual]. The bound is made safe by
+weak duality with box bounds, following [neumaier2004safe, jansson2004rigorous,
+keil2006computational]. That safety is what allows first-order GPU LP solvers
+in the tree: PDLP [applegate2021practical, applegate2026pdlp,
+applegate2023faster, applegate2024infeasibility], cuPDLP
+[lu2025cupdlpjl, lu2025practical], and MPAX in JAX [lu2024mpax]. Batched
+differentiable solvers: [amos2017optnet, agrawal2019differentiable].
+
+**Global solvers and bound tightening** (comparison baselines and roadmap
+targets):
+- solvers: BARON [tawarmalani2005polyhedral, khajavirad2018hybrid], SCIP
+  [vigerske2018scip, bestuzheva2025global, bolusani2024scip, hojny2025scip],
+  Couenne [belotti2009branching], ANTIGONE [misener2014antigone],
+  LindoGlobal [lin2009global];
+- bound tightening: FBBT [belotti2010feasibilitybased], domain reduction
+  [puranik2017domain, ryoo1996branchandreduce];
+- checking solver claims against reference values: [neumaier2005comparison],
+  which `benchmarks/report.py` follows.
+
+**Local solvers and infrastructure.**
+- local solvers: pounce derives from Ipopt [wachter2006implementation];
+  L-BFGS(-B) [liu1989limited, byrd1995limited], SLSQP [kraft1988software];
+- augmented Lagrangian: [hestenes1969multiplier, powell1969method];
+- tools: SciPy [virtanen2020scipy], JAX [bradbury2018jax, frostig2018compiling],
+  optax [deepmind2020deepmind], AD [griewank2008evaluating];
+- modeling for the comparisons: Pyomo [hart2011pyomo, bynum2021pyomo], GAMS
+  [brooke1988gams];
+- related MINLP work by the author: discopt [kitchin2026discopt], which uses
+  an algebraic modeling API rather than tracing;
+- ML-embedded optimization: [ceccon2022omlt, tsay2021partition,
+  kronqvist2025psplit, anderson2020strong, fischetti2018deep,
+  grimstad2019relu].
+
+**Test problems.**
+- sources: [floudas1999handbook, ryoo1995global, haverly1978studies,
+  michalewicz1996evolutionary, liang2006problem, surjanovic2013virtual,
+  jamil2013literature];
+- MINLPLib [bussieck2003minlplib].
