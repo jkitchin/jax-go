@@ -37,7 +37,6 @@ import numpy as np
 from .fbbt import Const, make_tape
 from .relax import AUTO_UNIVARIATE, MC, RULES, STRUCTURAL, Ctx, Unknown, eval_jaxpr_mc, is_mc, tighten
 
-RELAX_CTX = Ctx(interval_only=False)
 INTERVAL_CTX = Ctx(interval_only=True)
 
 NONSMOOTH = {"abs", "max", "min", "sign", "floor", "ceil", "round", "rem", "clamp", "reduce_max", "reduce_min",
@@ -216,8 +215,9 @@ def _lines(X, G, upper):
     return jnp.where(bad, 0.0, s), jnp.where(bad, -jnp.inf if not upper else jnp.inf, b)
 
 
-def make_univariate(f, K=65):
+def make_univariate(f, K=65, multivariate=False):
     """Return ``prepare(lo, hi) -> data`` and ``relax_with(x, lo, hi, data) -> MC``."""
+    ctx = Ctx(interval_only=False, multivariate=multivariate)
 
     def setup(x):
         tape = make_tape(f, x)
@@ -289,7 +289,7 @@ def make_univariate(f, K=65):
             if not any(isinstance(v, (MC, Unknown)) for v in invals):
                 outs = eqn.primitive.bind(*invals, **eqn.params)
             else:
-                outs = RULES[eqn.primitive.name](RELAX_CTX, eqn, *invals)
+                outs = RULES[eqn.primitive.name](ctx, eqn, *invals)
             outs = outs if eqn.primitive.multiple_results else [outs]
             for s, o in zip(node.outs, outs):
                 if s in override and is_mc(o):
@@ -339,7 +339,7 @@ class Relaxer(NamedTuple):
         return self.call(x, lo, hi, data)
 
 
-def make_relaxer(fn, univariate=True, alphabb=False, K=65):
+def make_relaxer(fn, univariate=True, alphabb=False, K=65, multivariate=False):
     """Relaxation of ``fn``: McCormick, optionally tightened by univariate hull
     envelopes (``univariate``) and whole-function scaled-Gershgorin alphaBB
     (``alphabb``, smooth ``fn`` only; ``alphabb="eigen"`` adds the eigenvalue
@@ -348,9 +348,9 @@ def make_relaxer(fn, univariate=True, alphabb=False, K=65):
     from .relax import relax
 
     if univariate:
-        uprep, ucall = make_univariate(fn, K)
+        uprep, ucall = make_univariate(fn, K, multivariate)
     else:
-        rf = relax(fn)
+        rf = relax(fn, multivariate)
         uprep, ucall = (lambda lo, hi: None), (lambda x, lo, hi, data: rf(x, lo, hi))
     if not alphabb:
         return Relaxer(uprep, ucall)

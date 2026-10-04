@@ -39,14 +39,14 @@ from .relax import relax
 from .univariate import make_relaxer
 
 
-def make_bounder(f, n_fw=20, univariate=False, alphabb=False):
+def make_bounder(f, n_fw=20, univariate=False, alphabb=False, multivariate=False):
     """Return ``bound(lo, hi, cutoff) -> (lb, x, f(x), lo', hi')`` for one box.
 
     ``[lo', hi']`` is the box after duality-based range reduction: every
     Frank-Wolfe cut ``f(z) >= cv(x) + g.(z - x)`` with ``f(z) <= cutoff``
     confines each ``z_j`` to an interval.
     """
-    rfu = make_relaxer(f, univariate, alphabb)
+    rfu = make_relaxer(f, univariate, alphabb, multivariate=multivariate)
 
     def bound(blo, bhi, cutoff=jnp.inf):
         data = rfu.prepare(blo, bhi)
@@ -145,6 +145,7 @@ def minimize(
     obbt_rounds=2,
     univariate=True,
     alphabb=True,
+    multivariate=False,
     lifted=False,
     time_limit=np.inf,
     verbose=False,
@@ -175,7 +176,9 @@ def minimize(
     (``univariate.py``); ``alphabb`` adds whole-function alphaBB with
     scaled-Gershgorin alpha from an interval Hessian for smooth functions
     (``alphabb.py``; ``alphabb="eigen"`` adds the eigenvalue relaxation of
-    exact quadratics); ``lifted`` bounds nodes with the extended-space LP
+    exact quadratics); ``multivariate`` relaxes products by the multivariate
+    McCormick rule of Tsoukalas & Mitsos, written as up to two extra facets
+    from its dual (tighter where a factor's interval straddles zero); ``lifted`` bounds nodes with the extended-space LP
     (``lifted.py``) instead of the reduced-space cuts.
     """
     t0 = time.perf_counter()
@@ -212,7 +215,8 @@ def minimize(
         raise ValueError(f"obbt must be False, 'root' or 'tree', not {obbt!r}")
     if lifted:
         lb_lifted = make_lifted_bounder(f, ineq, eq, n_kelley=n_kelley, fbbt_rounds=fbbt_rounds, tol=feas_tol,
-                                        univariate=univariate, alphabb=alphabb)
+                                        univariate=univariate, alphabb=alphabb,
+                                        multivariate=multivariate)
 
         def raw_bound(blo, bhi, cutoff):
             lb, x, _, rlo, rhi = lb_lifted(blo, bhi, cutoff)
@@ -220,17 +224,17 @@ def minimize(
             return lb, x, fx, rlo, rhi
     elif constrained:
         cb = make_constrained_bounder(f, ineq, eq, n_kelley=n_kelley, tol=feas_tol, univariate=univariate,
-                                      alphabb=alphabb)
+                                      alphabb=alphabb, multivariate=multivariate)
 
         def raw_bound(blo, bhi, cutoff):
             lb, x, _, rlo, rhi = cb(blo, bhi, cutoff)
             fx = jnp.where(violation(x) <= feas_tol, f(x), jnp.inf)
             return lb, x, fx, rlo, rhi
     else:
-        raw_bound = make_bounder(f, n_fw, univariate=univariate, alphabb=alphabb)
+        raw_bound = make_bounder(f, n_fw, univariate=univariate, alphabb=alphabb, multivariate=multivariate)
     tighten = make_fbbt(f, ineq, eq, rounds=fbbt_rounds, feas_tol=feas_tol) if fbbt else None
     lp_tighten = make_obbt(f, ineq, eq, rounds=obbt_rounds, tol=feas_tol, univariate=univariate,
-                            alphabb=alphabb) if obbt else None
+                            alphabb=alphabb, multivariate=multivariate) if obbt else None
 
     def node(blo, bhi, cutoff, with_obbt=False):
         """Tighten, then bound one box. Returns (lb, x, f(x), lo', hi')."""

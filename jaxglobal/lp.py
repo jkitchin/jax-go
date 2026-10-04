@@ -127,9 +127,9 @@ def _as_vec(fn):
     return None if fn is None else (lambda x: jnp.atleast_1d(fn(x)))
 
 
-def _parts_fn(f, ineq, eq, univariate, alphabb=False):
+def _parts_fn(f, ineq, eq, univariate, alphabb=False, multivariate=False):
     """``prepare(lo, hi)`` and ``parts(x, lo, hi, data)`` = [cv_f, cv_g..., cv_h..., -cc_h...]."""
-    rs = [make_relaxer(_as_vec(fn), univariate, alphabb) if fn is not None else None for fn in (f, ineq, eq)]
+    rs = [make_relaxer(_as_vec(fn), univariate, alphabb, multivariate=multivariate) if fn is not None else None for fn in (f, ineq, eq)]
 
     def prepare(lo, hi):
         return tuple(r.prepare(lo, hi) if r is not None else None for r in rs)
@@ -148,14 +148,14 @@ def _parts_fn(f, ineq, eq, univariate, alphabb=False):
 
 
 def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, tol=0.0, univariate=False,
-                             alphabb=False):
+                             alphabb=False, multivariate=False):
     """Return ``bound(lo, hi, cutoff) -> (lb, x_lp, infeasible, lo', hi')`` for one box.
 
     ``[lo', hi']`` is the box after duality-based range reduction against
     ``f <= cutoff`` (the incumbent value); it is the input box when
     ``cutoff`` is infinite.
     """
-    prepare, parts, (rf, rg, rh) = _parts_fn(f, ineq, eq, univariate, alphabb)
+    prepare, parts, (rf, rg, rh) = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate)
 
     def bound(lo, hi, cutoff=jnp.inf):
         n = lo.size
@@ -265,7 +265,8 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
     return bound
 
 
-def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate=False, alphabb=False):
+def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate=False, alphabb=False,
+              multivariate=False):
     """Return ``obbt(lo, hi, cutoff) -> (lo', hi', infeasible)`` for one box.
 
     Optimality-based bound tightening: each variable is minimized and
@@ -278,7 +279,7 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
     node bound, the new variable bounds are weak-duality certificates, so an
     inexact LP solve can only make them looser, never invalid.
     """
-    prepare, parts, _ = _parts_fn(f, ineq, eq, univariate, alphabb)
+    prepare, parts, _ = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate)
 
     def obbt(lo, hi, cutoff=jnp.inf):
         n = lo.size

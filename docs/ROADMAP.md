@@ -242,6 +242,26 @@ relaxations, choosing tree-OBBT variables by impact, and probing.
   the mean relaxation gap by about a third. None of the 21 problems has a
   nonnegative-over-positive quotient, so their node counts do not change.
 
+- *Multivariate McCormick for products* (`relax.mc_mul`, opt-in
+  `multivariate=True`). The Tsoukalas–Mitsos bound
+  `min over [a.cv, a.cc] × [b.cv, b.cc] of max(F₁, F₂)` is evaluated through
+  its dual: `max over λ` of the single facet `λF₁ + (1−λ)F₂` minimized over
+  the rectangle. That is concave piecewise-linear in λ, with breakpoints
+  where a combined coefficient changes sign; these depend only on the box.
+  So the rule is the two standard facets plus at most two extra facets
+  (only when a factor's interval straddles zero), and the cv is a max of
+  convex facets with ordinary autodiff subgradients.
+
+  A first version selected the primal minimizer among corner and edge
+  candidates. It failed cut-validity tests twice. First, autodiff through the
+  argmin mixed in the concave `a.cc` slope where the rectangle degenerates.
+  Second, with `custom_jvp` subgradients, XLA under `jit` with reverse mode
+  re-evaluated knife-edge comparisons differently in the forward and backward
+  passes. The dual form has neither problem. Node counts with it:
+  shubert 305 → 159, reactor 439 → 353, piecewise 31 → 29, six_hump_camel
+  23 → 25, others unchanged. Wall time is 10–70% higher (mostly compilation),
+  so it stays opt-in.
+
 **Phase 2 outcome.** Root gaps on the polynomial problems close far more
 than 2×: styblinski_tang −612 → −118.6 (f* −117.5) and six_hump_camel
 −156 → −7.1 (f* −1.03). On goldstein_price, αBB gives about 2.7× smaller
@@ -265,12 +285,6 @@ gaps on small boxes. Node counts against phase 1, with no regressions:
   haverly stays at −1550 under every relaxation. Pooling needs
   formulation-level structure (pq-cuts, RLT on the flow balances), which
   belongs with structure detection in a later phase.
-- *Multivariate McCormick for products* (Tsoukalas–Mitsos) was implemented
-  and is tighter and convex, but autodiff gradients through the min over
-  rectangle candidates are not valid subgradients when the rectangle
-  degenerates (`cv == cc`). Cut-validity tests failed on 8 of 14 problems,
-  so it was removed. A correct version needs hand-written subgradients (the
-  paper's subgradient propagation) via `jax.custom_jvp`.
 - *Trilinear envelopes* (Meyer–Floudas facets): not implemented. No test
   problem has a trilinear term to validate against; trilinear terms are
   relaxed as nested bilinear McCormick (and lifted, with `lifted=True`).

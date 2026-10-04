@@ -253,3 +253,82 @@ def test_fractional_envelope_tighter():
     old = jax.vmap(lambda x: mc_mul(MC(lo[0], hi[0], x[0], x[0]), mc_recip(MC(lo[1], hi[1], x[1], x[1]))).cv)(X)
     assert np.all(np.asarray(new) >= np.asarray(old) - 1e-12)
     assert float(jnp.mean(new - old)) > 0.03
+
+
+PRODUCTS = [
+    ("composite*composite", lambda x: (x[0] ** 2 - x[1]) * (jnp.exp(x[0]) - x[1] ** 2), [-1.0, -1.0], [1.5, 1.2]),
+    ("raw*composite", lambda x: x[0] * (jnp.sin(3 * x[1]) + x[0] ** 2), [-2.0, -1.0], [1.0, 2.0]),
+    ("raw*raw (degenerate rectangle)", lambda x: x[0] * x[1], [-1.0, -2.0], [2.0, 1.0]),
+    ("nested", lambda x: (x[0] * x[1] - 1.0) * (x[0] + x[1] ** 3), [-1.5, -1.0], [1.0, 1.5]),
+]
+
+
+def _check_cuts(rf, f, lo, hi, X, anchors):
+    F = np.asarray(jax.vmap(f)(X))
+    m = jax.vmap(lambda x: rf(x, lo, hi))(X)
+    CV, CC = np.asarray(m.cv), np.asarray(m.cc)
+    ok = np.isfinite(F)
+    s = 1e-9 * (1 + np.abs(F[ok]).max())
+    assert np.all(CV[ok] <= F[ok] + s) and np.all(F[ok] <= CC[ok] + s)
+    vg_cv = jax.jit(jax.value_and_grad(lambda x: rf(x, lo, hi).cv))
+    vg_cc = jax.jit(jax.value_and_grad(lambda x: rf(x, lo, hi).cc))
+    fin = np.isfinite(CV) & np.isfinite(CC)
+    tol = 1e-8 * (1 + np.abs(CV[fin]).max(initial=0) + np.abs(CC[fin]).max(initial=0))
+    for x0 in anchors:
+        v, g = vg_cv(jnp.asarray(x0))
+        if np.isfinite(v) and np.all(np.isfinite(g)):
+            assert np.all(np.asarray(v + (X - x0) @ g)[fin] <= CV[fin] + tol)
+        v, g = vg_cc(jnp.asarray(x0))
+        if np.isfinite(v) and np.all(np.isfinite(g)):
+            assert np.all(np.asarray(v + (X - x0) @ g)[fin] >= CC[fin] - tol)
+
+
+@pytest.mark.parametrize("case", PRODUCTS, ids=[c[0] for c in PRODUCTS])
+def test_multivariate_mccormick_sound_and_cuts_valid(case):
+    """cv <= f <= cc, and custom-JVP subgradients give valid cuts of cv and cc."""
+    from jaxglobal import relax
+
+    _, f, lo, hi = case
+    lo, hi = jnp.asarray(lo), jnp.asarray(hi)
+    rng = np.random.default_rng(8)
+    X = jnp.asarray(rng.uniform(lo, hi, (4000, 2)))
+    # anchors include box vertices and edges, where rectangles degenerate
+    anchors = np.concatenate([rng.uniform(lo, hi, (10, 2)), np.array([[lo[0], lo[1]], [hi[0], hi[1]],
+                              [lo[0], hi[1]], [0.5 * (lo[0] + hi[0]), lo[1]]])])  # fmt: skip
+    _check_cuts(relax(f, multivariate=True), f, lo, hi, X, anchors)
+
+
+@pytest.mark.parametrize("p", PROBLEMS, ids=lambda p: p.name)
+def test_multivariate_cuts_valid_on_problems(p):
+    """The same check on every test function, at random points and box vertices."""
+    from jaxglobal import relax
+
+    rng = np.random.default_rng(10)
+    for lo, hi in list(boxes(p.lo, p.hi, rng, 3)):
+        lo, hi = jnp.asarray(lo), jnp.asarray(hi)
+        X = jnp.asarray(rng.uniform(lo, hi, (1500, lo.size)))
+        bits = rng.integers(0, 2, size=(3, lo.size))
+        anchors = np.concatenate([rng.uniform(lo, hi, (3, lo.size)), np.where(bits, hi, lo)])
+        _check_cuts(relax(p.f, multivariate=True), p.f, lo, hi, X, anchors)
+
+
+def test_multivariate_mccormick_tighter():
+    """On a product of composite factors the joint minimization beats the standard rule."""
+    from jaxglobal import relax
+
+    f = PRODUCTS[0][1]
+    lo, hi = jnp.array([-1.0, -1.0]), jnp.array([1.5, 1.2])
+    X = jnp.asarray(np.random.default_rng(9).uniform(lo, hi, (3000, 2)))
+    new = np.asarray(jax.vmap(lambda x: relax(f, multivariate=True)(x, lo, hi).cv)(X))
+    old = np.asarray(jax.vmap(lambda x: relax(f)(x, lo, hi).cv)(X))
+    assert np.all(new >= old - 1e-12)
+    assert np.mean(new - old) > 1e-3
+
+
+def test_multivariate_minimize():
+    sh = next(p for p in PROBLEMS if p.name == "shubert")
+    on = minimize(sh.f, sh.lo, sh.hi, abs_tol=1e-5, rel_tol=1e-6, multivariate=True)
+    off = minimize(sh.f, sh.lo, sh.hi, abs_tol=1e-5, rel_tol=1e-6)
+    assert on.status == off.status == "optimal"
+    assert abs(on.fun - sh.fstar) <= 1e-4 * (1 + abs(sh.fstar)) and on.lower_bound <= sh.fstar + 1e-5
+    assert on.nodes < off.nodes

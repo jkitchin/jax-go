@@ -65,6 +65,7 @@ class Unknown(NamedTuple):
 
 class Ctx(NamedTuple):
     interval_only: bool = False
+    multivariate: bool = False  # Tsoukalas-Mitsos products (tighter, slower to compile)
 
 
 def is_mc(v):
@@ -244,7 +245,7 @@ def mc_square(x: MC) -> MC:
     return convex_rule(jnp.square, x, jnp.clip(0.0, x.lo, x.hi))
 
 
-def mc_mul(a: MC, b: MC) -> MC:
+def mc_mul(a: MC, b: MC, multivariate: bool = False) -> MC:
     """McCormick product rule (Mitsos, Chachuat & Barton 2009)."""
     xL, xU, yL, yU = a.lo, a.hi, b.lo, b.hi
     prods = jnp.stack([xL * yL, xL * yU, xU * yL, xU * yU])
@@ -266,6 +267,43 @@ def mc_mul(a: MC, b: MC) -> MC:
         mx(yL, a) + mx(xU, b) - xU * yL,
         mx(yU, a) + mx(xL, b) - xL * yU,
     )
+    if not multivariate:
+        return tighten(MC(lo, hi, cv, cc))
+    # Multivariate McCormick (Tsoukalas & Mitsos 2014):
+    #   cv = min over (x, y) in [a.cv, a.cc] x [b.cv, b.cc] of max(F1, F2).
+    # By minimax duality this equals max over lam in [0, 1] of the single facet
+    # lam F1 + (1 - lam) F2 minimized over the rectangle, i.e. of
+    #   C(lam) + mn(rho_x(lam), a) + mn(rho_y(lam), b),
+    # a concave piecewise-linear function of lam whose breakpoints are where
+    # rho_x or rho_y changes sign. Those depend only on the box, so the rule is
+    # the two standard facets (lam = 0, 1) plus at most two more, and cv is a
+    # max of convex functions of the point: autodiff gives valid subgradients
+    # with no argmin, tolerance or custom JVP.
+    fin = jnp.isfinite(xL) & jnp.isfinite(xU) & jnp.isfinite(yL) & jnp.isfinite(yU)
+    z = jnp.zeros_like(xL)
+    # finite stand-ins where a bound is infinite (those elements are masked
+    # below), so the extra facets never put NaN into a gradient
+    xL, xU, yL, yU = (jnp.where(fin, v, z) for v in (xL, xU, yL, yU))
+
+    def frac(num, den):  # breakpoint in (0, 1), else a duplicate of lam = 0
+        ok = (den != 0) & jnp.isfinite(num) & jnp.isfinite(den)
+        t = num / jnp.where(ok, den, 1.0)
+        return lax.stop_gradient(jnp.where(ok & (t > 0) & (t < 1), t, z))
+
+    def facet_lo(lam):  # lam * (yL x + xL y - xL yL) + (1 - lam) * (yU x + xU y - xU yU)
+        rx, ry = lam * yL + (1 - lam) * yU, lam * xL + (1 - lam) * xU
+        c = -(lam * xL * yL + (1 - lam) * xU * yU)
+        return mn(rx, a) + mn(ry, b) + c
+
+    def facet_hi(mu):  # mu * (yL x + xU y - xU yL) + (1 - mu) * (yU x + xL y - xL yU)
+        rx, ry = mu * yL + (1 - mu) * yU, mu * xU + (1 - mu) * xL
+        c = -(mu * xU * yL + (1 - mu) * xL * yU)
+        return mx(rx, a) + mx(ry, b) + c
+
+    for lam in (frac(yU, yU - yL), frac(xU, xU - xL)):  # rho_x = 0, rho_y = 0
+        cv = jnp.maximum(cv, jnp.where(fin, facet_lo(lam), -jnp.inf))
+    for mu in (frac(yU, yU - yL), frac(xL, xL - xU)):
+        cc = jnp.minimum(cc, jnp.where(fin, facet_hi(mu), jnp.inf))
     return tighten(MC(lo, hi, cv, cc))
 
 
@@ -409,7 +447,7 @@ def _mul(ctx, eqn, a, b):
         return mc_scale(a, b)
     if _same_var(eqn, 0, 1):
         return mc_square(a)
-    return mc_mul(a, b)
+    return mc_mul(a, b, ctx.multivariate)
 
 
 @rule("div")
@@ -419,7 +457,7 @@ def _div(ctx, eqn, a, b):
     r = mc_recip(b)
     if not is_mc(a):
         return mc_scale(r, a)
-    return mc_frac(a, b, mc_mul(a, r))
+    return mc_frac(a, b, mc_mul(a, r, ctx.multivariate))
 
 
 def mc_frac(a: MC, b: MC, base: MC) -> MC:
@@ -452,7 +490,7 @@ def _dot(ctx, eqn, a, b):
     if is_mc(a) and is_mc(b):
         (ca, cb), (ba, bb) = eqn.params["dimension_numbers"]
         if a.lo.ndim == 1 and b.lo.ndim == 1 and not ba and not bb:
-            p = mc_square(a) if _same_var(eqn, 0, 1) else mc_mul(a, b)
+            p = mc_square(a) if _same_var(eqn, 0, 1) else mc_mul(a, b, ctx.multivariate)
             return MC(*(jnp.sum(c) for c in p))
         raise NotImplementedError(
             "dot_general between two variable-dependent arrays is only "
@@ -508,7 +546,7 @@ def _pow(ctx, eqn, a, b):
         return mc_pow_const(a, b)
     # a**b = exp(b * log a)
     la = mc_log(as_mc(a)) if is_mc(a) else const_mc(jnp.log(a))
-    return mc_exp(mc_mul(b, la))
+    return mc_exp(mc_mul(b, la, ctx.multivariate))
 
 
 @rule("exp")
@@ -724,12 +762,16 @@ def eval_jaxpr_mc(jaxpr, consts, args, ctx: Ctx = Ctx()):
     return [read(v) for v in jaxpr.outvars]
 
 
-def relax(f):
-    """Return ``rf(x, lo, hi) -> MC``: relaxations of ``f`` on the box [lo, hi] at x."""
+def relax(f, multivariate=False):
+    """Return ``rf(x, lo, hi) -> MC``: relaxations of ``f`` on the box [lo, hi] at x.
+
+    ``multivariate=True`` relaxes products with the multivariate McCormick rule.
+    """
+    ctx = Ctx(multivariate=multivariate)
 
     def rf(x, lo, hi):
         closed = jax.make_jaxpr(f)(x)
-        (out,) = eval_jaxpr_mc(closed.jaxpr, closed.consts, [MC(lo, hi, x, x)])
+        (out,) = eval_jaxpr_mc(closed.jaxpr, closed.consts, [MC(lo, hi, x, x)], ctx)
         return as_mc(out)
 
     return rf

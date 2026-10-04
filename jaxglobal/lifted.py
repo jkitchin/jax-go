@@ -42,7 +42,6 @@ from .fbbt import Const, joint_tape, output_bounds, propagate
 from .lp import EPS, _parts_fn, _safe_costs, ipm, reduce_ranges
 from .relax import MC, RULES, STRUCTURAL, Ctx, Unknown, is_mc
 
-RELAX_CTX = Ctx(interval_only=False)
 
 AFFINE = set(STRUCTURAL) | {"neg", "sub"}
 
@@ -83,7 +82,7 @@ def _pattern(r):
 
 
 def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_rounds=3, tol=0.0,
-                        univariate=True, alphabb=True):
+                        univariate=True, alphabb=True, multivariate=False):
     """Return ``bound(lo, hi, cutoff) -> (lb, x_lp, infeasible, lo', hi')`` for one box.
 
     Same contract as ``lp.make_constrained_bounder`` (``ineq``/``eq`` may be
@@ -92,7 +91,7 @@ def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_ro
     univariate hull envelopes and alphaBB) on the ``x`` columns, so it is at
     least as tight as both formulations.
     """
-    prepare_parts, parts, (rel_f, _, _) = _parts_fn(f, ineq, eq, univariate, alphabb)
+    prepare_parts, parts, (rel_f, _, _) = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate)
     n_f = 1
 
     def bound(lo, hi, cutoff=jnp.inf):
@@ -194,7 +193,7 @@ def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_ro
                 args = list(ins)
                 for i, p in zip(L.mc_pos, ps):
                     args[i] = MC(ins[i].lo, ins[i].hi, p, p)
-                out = RULES[eqn.primitive.name](RELAX_CTX, eqn, *args)
+                out = RULES[eqn.primitive.name](Ctx(multivariate=multivariate), eqn, *args)
                 outs = out if eqn.primitive.multiple_results else [out]
                 cv = jnp.concatenate([jnp.reshape(jnp.broadcast_to(o.cv, tape.shapes[s][0]), (-1,))
                                       for o, s in zip(outs, L.out_slots)])  # fmt: skip
