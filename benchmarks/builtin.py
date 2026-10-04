@@ -9,6 +9,7 @@ Usage:
   python benchmarks/builtin.py --out before.json
   python benchmarks/builtin.py --out after.json --compare before.json
   python benchmarks/builtin.py --only gramacy_lee,G04
+  python benchmarks/builtin.py --cache-dir .jax_cache --only G04   # persistent XLA cache
   python benchmarks/builtin.py --opts '{"batch_sizes": [16, 64]}'
 """
 
@@ -26,8 +27,14 @@ ROOT = HERE.parent
 TAG = "BUILTIN-RESULT "
 
 
-def worker(name, opts):
+def worker(name, opts, cache_dir=""):
     sys.path.insert(0, str(ROOT))
+    if cache_dir:
+        import jax
+
+        jax.config.update("jax_compilation_cache_dir", cache_dir)
+        jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
+        jax.config.update("jax_persistent_cache_min_entry_size_bytes", 0)
     from jaxglobal import minimize
     from jaxglobal.problems import CONSTRAINED_PROBLEMS, PROBLEMS
 
@@ -50,9 +57,10 @@ def main():
     ap.add_argument("--out", default="")
     ap.add_argument("--compare", default="")
     ap.add_argument("--opts", default="{}", help="JSON dict of extra minimize options")
+    ap.add_argument("--cache-dir", default="", help="JAX persistent compilation cache directory (default: off)")
     a = ap.parse_args()
     if a.worker:
-        return worker(a.worker, json.loads(a.opts))
+        return worker(a.worker, json.loads(a.opts), a.cache_dir)
 
     sys.path.insert(0, str(ROOT))
     from jaxglobal.problems import CONSTRAINED_PROBLEMS, PROBLEMS
@@ -67,7 +75,7 @@ def main():
     rows = []
     print(f"{'problem':20s} {'cold':>7s} {'warm':>7s} {'nodes':>6s}  status     gap" + ("   (ref cold / warm / nodes)" if ref else ""))
     for n in names:
-        p = subprocess.run([sys.executable, __file__, "--worker", n, "--opts", a.opts], capture_output=True, text=True)
+        p = subprocess.run([sys.executable, __file__, "--worker", n, "--opts", a.opts, "--cache-dir", a.cache_dir], capture_output=True, text=True)
         line = next((ln for ln in p.stdout.splitlines() if ln.startswith(TAG)), None)
         if line is None:
             print(f"{n:20s} ERROR {p.stderr.strip()[-300:]}")
