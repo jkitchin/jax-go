@@ -95,7 +95,7 @@ reduction.
 5 rounds per node in a `fori_loop`), duality-based range reduction in both
 bounders (`lp.reduce_ranges`), and batched OBBT (`lp.make_obbt`, root by
 default, `obbt="tree"` for every node). Node counts on the 21 problems
-(defaults, same tolerances as `examples/benchmark.py` and the tests):
+(defaults, same tolerances as `examples/03-test-problems.ipynb` and the tests):
 
 | problem | before | after | ratio |
 |---|---:|---:|---:|
