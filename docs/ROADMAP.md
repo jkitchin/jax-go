@@ -210,12 +210,62 @@ relaxations, choosing tree-OBBT variables by impact, and probing.
   bilinear, where the eigen-secant equals McCormick). It made reactor worse
   (439 → 761 nodes, from different cut points), so it is off by default.
 
-Not yet done: multivariate McCormick, trilinear/fractional envelopes,
-and the lifted LP using the new envelopes. The pooling
-half of the exit criterion (Adhya, Ben-Tal) cannot be measured in this
-environment, because MINLPLib is not reachable. Separable bilinear pooling
-constraints gain nothing from either piece so far (haverly's root bound is
-−1550 in both formulations).
+- *Lifted LP with the new envelopes* (`lifted=True`): the lifted LP also gets
+  the reduced-space cuts of the whole functions (univariate hull + αBB) on
+  the `x` columns, plus the hull's interval floor, so its root bound is at
+  least as tight as reduced space on all 21 problems. In the tree it is
+  mixed against the default:
+
+  | problem | default | lifted |
+  |---|---:|---:|
+  | goldstein_price | 1445 | 561 |
+  | gramacy_lee | 5 | 1 |
+  | six_hump_camel | 23 | 59 |
+  | shubert | 305 | 681 |
+  | hartmann3 | 155 | 313 |
+  | reactor | 439 | 897 |
+
+  It is also 2–30× slower per solve (dense IPM over the extra columns), so it
+  stays opt-in.
+- *Fractional envelope* (`relax.mc_frac`): for `a/b` with `a ≥ 0`, `b > 0`,
+  the Tawarmalani–Sahinidis convex envelope
+  `((a + √(aᴸaᵁ))/(√aᴸ + √aᵁ))² / b`, composed with `a.cv` and `b.cc`,
+  tightens McCormick of `a·(1/b)`. On `x/y` over `[0.5,4]×[1,3]` it cuts
+  the mean relaxation gap by about a third. None of the 21 problems has a
+  nonnegative-over-positive quotient, so their node counts do not change.
+
+**Phase 2 outcome.** Root gaps on the polynomial problems close far more
+than 2×: styblinski_tang −612 → −118.6 (f* −117.5) and six_hump_camel
+−156 → −7.1 (f* −1.03). On goldstein_price, αBB gives about 2.7× smaller
+gaps on small boxes. Node counts against phase 1, with no regressions:
+
+| problem | phase 1 | phase 2 |
+|---|---:|---:|
+| styblinski_tang_3d | 333 | 9 |
+| goldstein_price | 7309 | 1445 |
+| shubert | 1781 | 305 |
+| six_hump_camel | 167 | 23 |
+| hartmann3 | 515 | 155 |
+| hartmann6 | 2261 | 1083 |
+| reactor (post-main baseline 747) | 541 | 439 |
+| G24 | 37 | 3 |
+
+**Not done:**
+- *Pooling exit criterion (Adhya, Ben-Tal).* Not measured: MINLPLib is
+  unreachable from the development environment. Nothing implemented here
+  tightens the root bound of separable bilinear pooling constraints:
+  haverly stays at −1550 under every relaxation. Pooling needs
+  formulation-level structure (pq-cuts, RLT on the flow balances), which
+  belongs with structure detection in a later phase.
+- *Multivariate McCormick for products* (Tsoukalas–Mitsos) was implemented
+  and is tighter and convex, but autodiff gradients through the min over
+  rectangle candidates are not valid subgradients when the rectangle
+  degenerates (`cv == cc`). Cut-validity tests failed on 8 of 14 problems,
+  so it was removed. A correct version needs hand-written subgradients (the
+  paper's subgradient propagation) via `jax.custom_jvp`.
+- *Trilinear envelopes* (Meyer–Floudas facets): not implemented. No test
+  problem has a trilinear term to validate against; trilinear terms are
+  relaxed as nested bilinear McCormick (and lifted, with `lifted=True`).
 
 ### Phase 3 — search (4 weeks)
 
