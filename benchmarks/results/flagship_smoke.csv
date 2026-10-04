@@ -1,0 +1,21 @@
+solver,cls,name,status,verdict,time,primal,dual,nodes,fstar,loc_jax,loc_pyomo,message
+scip,logic,pipes_parallel,time_limit,unsolved,60.05,3874.17810083612,3845.15472253038,61276.0,3874.178193,8,23,solving was interrupted [time limit reached] [pyomo build 0.2s]
+scip,logic,hx_water,time_limit,unsolved,60.0,52.5431578121447,51.2008678205629,74285.0,52.543162,12,38,solving was interrupted [time limit reached] [pyomo build 0.4s]
+couenne,logic,pipes_parallel,optimal,wrong,11.5044,4082.88,4082.88,8670.0,3874.178193,8,23, [pyomo build 0.2s]
+couenne,logic,hx_water,time_limit,unsolved,59.9267,52.5432,40.5517,19686.0,52.543162,12,38, [pyomo build 0.2s]
+baron,logic,pipes_parallel,optimal,correct,0.34,3874.17819306982,3874.17819306982,59.0,3874.178193,8,23,model 1 solver 1 *** Status: Normal completion [pyomo build 0.2s]
+baron,logic,hx_water,time_limit,unsolved,71.78,52.5431622904586,29.5761973448295,65780.0,52.543162,12,38,model 8 solver 3 *** Status: Normal completion [pyomo build 0.2s]
+jaxglobal,logic,pipes_parallel,time_limit,unsolved,70.40868012513965,5227.064551502523,1413.980845964148,15,3874.178193,8,23,time_limit
+jaxglobal,logic,hx_water,time_limit,unsolved,60.0,,,,52.543162,12,38,killed
+scip,kinetics,gasoil_h0.1,time_limit,unsolved,60.0,0.00523312937221969,-1.00000896452457e-09,1.0,0.005233159124563396,14,21,solving was interrupted [time limit reached] [pyomo build 0.4s]
+scip,kinetics,methanol_h0.2,time_limit,unsolved,60.0,0.0090490709102005,-1.00000896452457e-09,32.0,0.009049111059327009,20,29,solving was interrupted [time limit reached] [pyomo build 0.3s]
+scip,logic,tariff_blend,optimal,correct,0.03,708.333333333333,708.333333333333,11.0,708.3333333,5,16,problem is solved [optimal solution found] [pyomo build 0.4s]
+couenne,kinetics,gasoil_h0.1,time_limit,unsolved,59.8441,0.00523316,0.00405368,123.0,0.005233159124563396,14,21, [pyomo build 0.2s]
+couenne,kinetics,methanol_h0.2,time_limit,unsolved,59.9972,0.00904911,0.00010719,3.0,0.009049111059327009,20,29, [pyomo build 0.2s]
+couenne,logic,tariff_blend,optimal,correct,0.383682,708.333,708.333,26.0,708.3333333,5,16, [pyomo build 0.2s]
+baron,kinetics,gasoil_h0.1,time_limit,unsolved,66.18,0.00523315912472754,0.00316071031676919,450.0,0.005233159124563396,14,21,model 2 solver 3 *** Status: Normal completion [pyomo build 0.2s]
+baron,kinetics,methanol_h0.2,time_limit,unsolved,77.92,0.00904911105821067,0.0,38.0,0.009049111059327009,20,29,model 2 solver 3 *** Status: Normal completion [pyomo build 0.2s]
+baron,logic,tariff_blend,optimal,correct,0.02,708.33333332204,708.33333332204,1.0,708.3333333,5,16,model 1 solver 1 *** Status: Normal completion [pyomo build 0.2s]
+jaxglobal,kinetics,gasoil_h0.1,time_limit,unsolved,60.0,,,,0.005233159124563396,14,21,killed
+jaxglobal,kinetics,methanol_h0.2,time_limit,unsolved,60.0,,,,0.009049111059327009,20,29,killed
+jaxglobal,logic,tariff_blend,optimal,correct,19.325883083045483,708.3332837625851,708.3332837451211,1661,708.3333333,5,16,optimal

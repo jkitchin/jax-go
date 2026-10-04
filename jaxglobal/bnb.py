@@ -37,11 +37,11 @@ from .domain import bound_domain
 from .fbbt import make_fbbt
 from .lifted import make_lifted_bounder
 from .lp import make_constrained_bounder, make_obbt, reduce_ranges
-from .relax import relax
+from .relax import SAFE_K
 from .univariate import make_relaxer
 
 
-def make_bounder(f, n_fw=20, univariate=False, alphabb=False, multivariate=False, return_xr=False):
+def make_bounder(f, n_fw=20, univariate=False, alphabb=False, multivariate=False, return_xr=False, safe=False):
     """Return ``bound(lo, hi, cutoff) -> (lb, x, f(x), lo', hi')`` for one box.
 
     ``[lo', hi']`` is the box after duality-based range reduction: every
@@ -49,7 +49,8 @@ def make_bounder(f, n_fw=20, univariate=False, alphabb=False, multivariate=False
     confines each ``z_j`` to an interval. With ``return_xr`` a sixth output is
     the final Frank-Wolfe iterate (the relaxation minimizer estimate).
     """
-    rfu = make_relaxer(f, univariate, alphabb, multivariate=multivariate)
+    rfu = make_relaxer(f, univariate, alphabb, multivariate=multivariate, safe=safe)
+    eps = float(jnp.finfo(jnp.float64).eps)
 
     def bound(blo, bhi, cutoff=jnp.inf):
         data = rfu.prepare(blo, bhi)
@@ -66,6 +67,8 @@ def make_bounder(f, n_fw=20, univariate=False, alphabb=False, multivariate=False
             v, g = vg(x)
             vert = jnp.where(g > 0, blo, bhi)
             lb = v + jnp.dot(g, vert - x)
+            if safe:  # rounding of the cut value (the subgradient itself is exact for the widened cv)
+                lb = lb - SAFE_K * (blo.size + 3) * eps * (jnp.abs(v) + jnp.abs(g) @ jnp.abs(vert - x) + jnp.abs(lb))
             ok = jnp.isfinite(lb) & jnp.all(jnp.isfinite(g))
             best = jnp.maximum(best, jnp.where(ok, lb, -jnp.inf))
             klo, khi = reduce_ranges(blo, bhi, jnp.where(ok, lb, -jnp.inf), jnp.where(ok, g, 0.0), cutoff)
@@ -109,6 +112,7 @@ def nonlinear_variables(fns, lo, hi, n_samples=3, seed=0, hessians=None):
 # Functions are keyed by identity, as ``jax.jit`` does, so a function whose
 # behavior changes through mutable globals is not recompiled; call
 # ``clear_cache()`` after such a change.
+SAFE_DEFAULT = False  # outward rounding of every bound; set after measuring its overhead (docs/ROADMAP.md)
 _CACHE = OrderedDict()
 _CACHE_SIZE = 32
 
@@ -145,7 +149,7 @@ class _Kernels:
     """
 
     def __init__(self, f, ineq, eq, *, n_fw, n_kelley, fbbt, fbbt_rounds, dbbt, obbt, obbt_rounds,
-                 univariate, alphabb, multivariate, lifted, crown, feas_tol):  # fmt: skip
+                 univariate, alphabb, multivariate, lifted, crown, feas_tol, safe):  # fmt: skip
         constrained = ineq is not None or eq is not None
         g, h = _vec(ineq), _vec(eq)
 
@@ -155,7 +159,7 @@ class _Kernels:
         if lifted:
             lb_lifted = make_lifted_bounder(f, ineq, eq, n_kelley=n_kelley, fbbt_rounds=fbbt_rounds, tol=feas_tol,
                                             univariate=univariate, alphabb=alphabb,
-                                            multivariate=multivariate)
+                                            multivariate=multivariate, safe=safe)
 
             def raw_bound(blo, bhi, cutoff):
                 lb, x, _, rlo, rhi = lb_lifted(blo, bhi, cutoff)
@@ -163,7 +167,7 @@ class _Kernels:
                 return lb, x, fx, rlo, rhi, x
         elif constrained:
             cb = make_constrained_bounder(f, ineq, eq, n_kelley=n_kelley, tol=feas_tol, univariate=univariate,
-                                          alphabb=alphabb, multivariate=multivariate)
+                                          alphabb=alphabb, multivariate=multivariate, safe=safe)
 
             def raw_bound(blo, bhi, cutoff):
                 lb, x, _, rlo, rhi = cb(blo, bhi, cutoff)
@@ -171,12 +175,12 @@ class _Kernels:
                 return lb, x, fx, rlo, rhi, x
         else:
             raw_bound = make_bounder(f, n_fw, univariate=univariate, alphabb=alphabb, multivariate=multivariate,
-                                     return_xr=True)
-        tighten = make_fbbt(f, ineq, eq, rounds=fbbt_rounds, feas_tol=feas_tol) if fbbt else None
+                                     return_xr=True, safe=safe)
+        tighten = make_fbbt(f, ineq, eq, rounds=fbbt_rounds, feas_tol=feas_tol, safe=safe) if fbbt else None
         lp_tighten = make_obbt(f, ineq, eq, rounds=obbt_rounds, tol=feas_tol, univariate=univariate,
-                                alphabb=alphabb, multivariate=multivariate) if obbt else None
+                                alphabb=alphabb, multivariate=multivariate, safe=safe) if obbt else None
 
-        crown_lb = make_crown(f) if crown else None
+        crown_lb = make_crown(f, safe=safe) if crown else None
 
         def node(blo, bhi, cutoff):
             """Tighten, then bound one box. Returns (lb, x, f(x), lo', hi', xr)."""
@@ -214,6 +218,34 @@ class _Kernels:
 
 def _vec(fn):
     return lambda x: jnp.atleast_1d(fn(x)) if fn is not None else jnp.zeros(0)
+
+
+def _verify(f, ineq, eq, x, fun, lo, hi, feas_tol):
+    """Re-evaluate ``x`` outside jit in float64: ``(max_violation, ok, reason)``.
+
+    Checks the box, ``ineq <= feas_tol``, ``|eq| <= feas_tol`` and
+    ``f(x) == fun`` (to 1e-8 relative). With no incumbent (``fun`` infinite)
+    there is nothing to verify: ``(inf, False, "")``.
+    """
+    if not np.isfinite(fun):
+        return float("inf"), False, ""
+    xj = jnp.asarray(x, dtype=jnp.float64)
+    with jax.disable_jit():
+        fx = float(np.sum(np.asarray(f(xj))))
+        g = np.atleast_1d(np.asarray(ineq(xj), dtype=np.float64)) if ineq is not None else np.zeros(0)
+        h = np.atleast_1d(np.asarray(eq(xj), dtype=np.float64)) if eq is not None else np.zeros(0)
+    box = max(float(np.max(np.maximum(lo - x, 0.0), initial=0.0)), float(np.max(np.maximum(x - hi, 0.0), initial=0.0)))
+    viol = max(box, float(np.max(np.maximum(g, 0.0), initial=0.0)), float(np.max(np.abs(h), initial=0.0)))
+    if np.isnan(viol) or np.isnan(fx):
+        return float("nan"), False, "NaN in x, f or a constraint"
+    why = []
+    if box > 1e-9 * (1 + np.max(np.abs(np.concatenate([lo, hi])))):
+        why.append(f"x outside the box by {box:.3g}")
+    if viol - box > feas_tol:
+        why.append(f"constraint violation {viol:.3g} > feas_tol {feas_tol:.3g}")
+    if abs(fx - fun) > 1e-8 * (1 + abs(fun)):
+        why.append(f"f(x) = {fx:.12g} != fun = {fun:.12g}")
+    return viol, not why, "; ".join(why)
 
 
 class _Padder:
@@ -262,6 +294,8 @@ class Result:
     status: str = ""
     message: str = ""
     evaluations: int = 0  # boxes bounded, including strong-branching trials
+    max_violation: float = float("nan")  # of x, re-evaluated outside jit: box, ineq > 0, |eq|
+    verified: bool = False  # x is feasible to feas_tol and f(x) == fun, checked in float64 after the search
 
     @property
     def gap(self):
@@ -306,6 +340,7 @@ def minimize(
     multivariate=False,
     lifted=False,
     crown=False,
+    safe=SAFE_DEFAULT,
     time_limit=np.inf,
     verbose=False,
 ):
@@ -345,6 +380,16 @@ def minimize(
     saturating activation or ReLU; otherwise off). With ``True`` and an
     unsupported ``f`` the CROWN bound is ``-inf``, i.e. no effect.
 
+    ``safe`` rounds every quantity feeding a lower bound outward (interval and
+    McCormick values, envelopes, alphaBB, CROWN lines, LP rows and the dual
+    certificate) at the primitive-dispatch level; see docs/ROADMAP.md for what
+    that does and does not guarantee.
+
+    After the search the incumbent is re-evaluated outside jit in float64
+    (box, ``ineq``, ``eq``, ``f(x) == fun``): ``Result.max_violation`` and
+    ``Result.verified`` report it, and a failed check changes status
+    ``"optimal"`` to ``"unverified"`` (with ``message``) instead of passing silently.
+
     Branching: ``branch_point`` is ``"mid"`` (bisect) or ``"relax"`` (split at
     the relaxation minimizer, pulled toward the midpoint and kept away from the
     faces, see ``_LAM`` and ``_BETA``); ``branch_var`` is ``"width"`` (largest
@@ -364,6 +409,7 @@ def minimize(
     t0 = time.perf_counter()
     lo = np.asarray(lo, dtype=np.float64)
     hi = np.asarray(hi, dtype=np.float64)
+    lo_user, hi_user = lo, hi
     seed_x, seed_f = None, np.inf
     if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
         # derive finite bounds from the constraints and a feasible point (domain.py)
@@ -394,7 +440,7 @@ def minimize(
         crown = crown_supported(f, lo)  # an unsupported f gets no CROWN kernel
     opts = dict(n_fw=n_fw, n_kelley=n_kelley, fbbt=bool(fbbt), fbbt_rounds=fbbt_rounds, dbbt=bool(dbbt),
                 obbt=bool(obbt), obbt_rounds=obbt_rounds, univariate=univariate, alphabb=alphabb,
-                multivariate=multivariate, lifted=lifted, crown=bool(crown), feas_tol=feas_tol)  # fmt: skip
+                multivariate=multivariate, lifted=lifted, crown=bool(crown), feas_tol=feas_tol, safe=bool(safe))  # fmt: skip
     K = _cached(("kernels", f, ineq, eq, tuple(sorted(opts.items()))), lambda: _Kernels(f, ineq, eq, **opts))
     branchable = nonlinear_variables(K.fns, lo, hi, hessians=K.hessians)
     width0 = np.where(branchable, width0, np.inf)  # never split linear variables
@@ -610,8 +656,15 @@ def minimize(
         status = "time_limit"
     else:
         status = "max_iter"
+    xbest = np.asarray(xbest)
+    maxv, verified, why = _verify(f, ineq, eq, xbest, ub, lo_user, hi_user, feas_tol)
+    message = ""
+    if np.isfinite(ub) and not verified:
+        message = f"incumbent failed float64 verification: {why}"
+        if status == "optimal":
+            status, converged = "unverified", False
     return Result(
-        x=np.asarray(xbest),
+        x=xbest,
         fun=ub,
         lower_bound=glb,
         converged=converged,
@@ -621,4 +674,7 @@ def minimize(
         time=time.perf_counter() - t0,
         history=history,
         status=status,
+        message=message,
+        max_violation=maxv,
+        verified=verified,
     )

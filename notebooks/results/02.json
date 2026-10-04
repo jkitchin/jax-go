@@ -1,0 +1,78 @@
+{
+ "A: pipe (where, clip)": {
+  "loc_pyomo": 28,
+  "loc_jax": 11,
+  "pyomo_vars": 14,
+  "pyomo_cons": 16,
+  "rows": [
+   {
+    "solver": "scip",
+    "obj": -2828.741931947145,
+    "bound": NaN,
+    "time": 0.29120658291503787,
+    "status": "optimal"
+   },
+   {
+    "solver": "couenne",
+    "obj": -2828.7385933384676,
+    "bound": NaN,
+    "time": 0.9701140830293298,
+    "status": "optimal"
+   },
+   {
+    "solver": "baron",
+    "obj": -2828.738567737351,
+    "bound": -2828.73856773727,
+    "time": 1.0133498748764396,
+    "status": "optimal"
+   },
+   {
+    "solver": "jaxglobal",
+    "obj": -2828.738215833161,
+    "bound": -2828.841751361011,
+    "time": 23.052080917172134,
+    "status": "optimal",
+    "nodes": 39
+   }
+  ],
+  "note": "4 binaries after GDP/Piecewise"
+ },
+ "B: steam tables (interp, max)": {
+  "loc_pyomo": 15,
+  "loc_jax": 11,
+  "pyomo_vars": 33,
+  "pyomo_cons": 32,
+  "rows": [
+   {
+    "solver": "scip",
+    "obj": 453289.72791494004,
+    "bound": 453261.833073732,
+    "time": 0.40545616718009114,
+    "status": "optimal"
+   },
+   {
+    "solver": "couenne",
+    "obj": 453289.7075257055,
+    "bound": NaN,
+    "time": 1.176818666048348,
+    "status": "optimal"
+   },
+   {
+    "solver": "baron",
+    "obj": 453289.72806516883,
+    "bound": 453289.72806516883,
+    "time": 1.1529857502318919,
+    "status": "optimal"
+   },
+   {
+    "solver": "jaxglobal",
+    "obj": 453290.1504857959,
+    "bound": 453285.79978744395,
+    "time": 21.418248707894236,
+    "status": "optimal",
+    "nodes": 181
+   }
+  ],
+  "note": "12 binaries from Piecewise"
+ }
+}

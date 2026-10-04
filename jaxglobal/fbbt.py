@@ -34,10 +34,11 @@ import numpy as np
 from jax import lax
 from jax.extend import core as jcore
 
-from .relax import MC, RULES, SUBJAXPR_PARAMS, Ctx, Unknown, _same_var, is_mc
+from .relax import MC, RULES, SUBJAXPR_PARAMS, Ctx, Unknown, _same_var, apply_rule, is_mc
 
 INF = jnp.inf
 CTX = Ctx(interval_only=True)
+SAFE_CTX = Ctx(interval_only=True, safe=True)
 PAD = 1e-10  # relative outward widening of backward results
 EMPTY_TOL = 1e-9  # relative tolerance before a crossed interval counts as empty
 
@@ -589,7 +590,7 @@ def _b_select(eqn, Z, pred, *cases):
 # ---------------------------------------------------------------------------
 
 
-def _forward(tape, x_bounds, prior):
+def _forward(tape, x_bounds, prior, safe=False):
     """Interval value of every slot; ``prior`` holds earlier bounds per slot."""
     vals = {0: MC(x_bounds[0], x_bounds[1], x_bounds[0], x_bounds[1])}
     empty = jnp.array(False)
@@ -603,7 +604,7 @@ def _forward(tape, x_bounds, prior):
         if not any(isinstance(v, (MC, Unknown)) for v in invals):
             outs = eqn.primitive.bind(*invals, **eqn.params)
         else:
-            outs = RULES[eqn.primitive.name](CTX, eqn, *invals)
+            outs = apply_rule(SAFE_CTX if safe else CTX, eqn, invals)
         if not eqn.primitive.multiple_results:
             outs = [outs]
         for s, o in zip(node.outs, outs):
@@ -678,7 +679,7 @@ def output_bounds(tape, ineq, eq, cutoff, feas_tol):
     return out
 
 
-def propagate(tape, lo, hi, out_bounds, rounds):
+def propagate(tape, lo, hi, out_bounds, rounds, safe=False):
     """FBBT on a tape: ``rounds`` backward+forward sweeps from the box [lo, hi].
 
     Returns ``(vals, empty)``: ``vals`` maps every slot to its final value (an
@@ -689,7 +690,7 @@ def propagate(tape, lo, hi, out_bounds, rounds):
     # abstract evaluation instead of tracing a first forward sweep whose
     # result the first round would recompute (a round starts with a sweep
     # against the earlier bounds, here none: the box and unbounded slots).
-    shapes = jax.eval_shape(lambda l, h: _forward(tape, (l, h), {})[0], lo, hi)
+    shapes = jax.eval_shape(lambda l, h: _forward(tape, (l, h), {}, safe)[0], lo, hi)
     slots = sorted(s for s, v in shapes.items() if is_mc(v))
     empty = jnp.array(False)
     # a constant output that violates its constraint makes every box infeasible
@@ -706,18 +707,18 @@ def propagate(tape, lo, hi, out_bounds, rounds):
     def body(_, carry):
         bounds, empty = carry
         prior = dict(zip(slots, bounds))
-        vals, e1 = _forward(tape, prior[0], prior)
+        vals, e1 = _forward(tape, prior[0], prior, safe)
         b, e2 = _backward(tape, vals, live)
         return tuple(fix(s, b[s]) for s in slots), empty | e1 | e2
 
     init = tuple(fix(s, (lo, hi) if s == 0 else (-INF, INF)) for s in slots)
     bounds, empty = lax.fori_loop(0, rounds, body, (init, empty))
     prior = dict(zip(slots, bounds))
-    vals, e = _forward(tape, prior[0], prior)
+    vals, e = _forward(tape, prior[0], prior, safe)
     return vals, empty | e
 
 
-def make_fbbt(f, ineq=None, eq=None, rounds=5, feas_tol=1e-6):
+def make_fbbt(f, ineq=None, eq=None, rounds=5, feas_tol=1e-6, safe=False):
     """Return ``fbbt(lo, hi, cutoff) -> (lo, hi, infeasible)`` for one box.
 
     The returned box contains every point of ``[lo, hi]`` with
@@ -730,7 +731,7 @@ def make_fbbt(f, ineq=None, eq=None, rounds=5, feas_tol=1e-6):
     def fbbt(lo, hi, cutoff=INF):
         (tape,) = tape_of(lo)
         ob = output_bounds(tape, ineq, eq, jnp.asarray(cutoff, lo.dtype), feas_tol)
-        vals, empty = propagate(tape, lo, hi, ob, rounds)
+        vals, empty = propagate(tape, lo, hi, ob, rounds, safe)
         x = vals[0]
         return jnp.minimum(x.lo, x.hi), jnp.maximum(x.lo, x.hi), empty
 

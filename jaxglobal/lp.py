@@ -47,6 +47,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
+from .relax import SAFE_K
 from .univariate import make_relaxer
 
 EPS = float(jnp.finfo(jnp.float64).eps)
@@ -100,6 +101,26 @@ def ipm(c, A, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10):
     return z, yb, best
 
 
+def _cut_const(v, J, lo, p, coef, safe):
+    """Value of the cut at u = 0, lowered (when ``safe``) by the rounding of ``v + J (lo - p)`` and of ``coef . u``.
+
+    Lowering a cut's constant only weakens it, so the cut stays a valid minorant.
+    """
+    const = v + J @ (lo - p)
+    if safe:
+        n = lo.size
+        const = const - SAFE_K * (n + 3) * EPS * (jnp.abs(v) + jnp.abs(J) @ jnp.abs(lo - p) + jnp.abs(coef).sum(axis=-1))
+    return const
+
+
+def _row_margin(A, b, mag, live, safe):
+    """Slack added to normalized rows ``A u <= b`` for the rounding of the division by the row norm."""
+    if not safe:
+        return b
+    m = SAFE_K * EPS * (jnp.abs(b) + jnp.abs(A).sum(axis=1) + mag)
+    return jnp.where(live, b + m, b)
+
+
 def _safe_costs(r, A, y):
     """Reduced costs shrunk toward 0 by their rounding error (|A| <= 1)."""
     err = (A.shape[0] + 2) * EPS * (1.0 + jnp.abs(A).T @ y)
@@ -127,9 +148,9 @@ def _as_vec(fn):
     return None if fn is None else (lambda x: jnp.atleast_1d(fn(x)))
 
 
-def _parts_fn(f, ineq, eq, univariate, alphabb=False, multivariate=False):
+def _parts_fn(f, ineq, eq, univariate, alphabb=False, multivariate=False, safe=False):
     """``prepare(lo, hi)`` and ``parts(x, lo, hi, data)`` = [cv_f, cv_g..., cv_h..., -cc_h...]."""
-    rs = [make_relaxer(_as_vec(fn), univariate, alphabb, multivariate=multivariate) if fn is not None else None for fn in (f, ineq, eq)]
+    rs = [make_relaxer(_as_vec(fn), univariate, alphabb, multivariate=multivariate, safe=safe) if fn is not None else None for fn in (f, ineq, eq)]
 
     def prepare(lo, hi):
         return tuple(r.prepare(lo, hi) if r is not None else None for r in rs)
@@ -148,14 +169,14 @@ def _parts_fn(f, ineq, eq, univariate, alphabb=False, multivariate=False):
 
 
 def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, tol=0.0, univariate=False,
-                             alphabb=False, multivariate=False):
+                             alphabb=False, multivariate=False, safe=False):
     """Return ``bound(lo, hi, cutoff) -> (lb, x_lp, infeasible, lo', hi')`` for one box.
 
     ``[lo', hi']`` is the box after duality-based range reduction against
     ``f <= cutoff`` (the incumbent value); it is the input box when
     ``cutoff`` is infinite.
     """
-    prepare, parts, (rf, rg, rh) = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate)
+    prepare, parts, (rf, rg, rh) = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate, safe)
 
     def bound(lo, hi, cutoff=jnp.inf):
         n = lo.size
@@ -181,8 +202,8 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
             """Affine minorants of each convex part at p, in unit-box coords u."""
             v = convex_parts(p, lo, hi)
             J = jax.jacfwd(convex_parts)(p, lo, hi)
-            const = v + J @ (lo - p)  # value of the cut at u = 0
             coef = J * w  # d cut / d u
+            const = _cut_const(v, J, lo, p, coef, safe)  # value of the cut at u = 0
             ok = jnp.isfinite(const) & jnp.all(jnp.isfinite(coef), axis=1)
             return jnp.where(ok, const, -jnp.inf), jnp.where(ok[:, None], coef, 0.0)
 
@@ -193,6 +214,9 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
         # objective-variable range [tlo, thi] from intervals and the cuts
         cmin = const0[:, 0] + jnp.sum(jnp.minimum(coef0[:, 0], 0), axis=1)
         cmax = const0[:, 0] + jnp.sum(jnp.maximum(coef0[:, 0], 0), axis=1)
+        if safe:  # rounding of the sums over coef
+            cmin = cmin - SAFE_K * n * EPS * jnp.sum(jnp.abs(coef0[:, 0]), axis=1)
+            cmax = cmax + SAFE_K * n * EPS * jnp.sum(jnp.abs(coef0[:, 0]), axis=1)
         tlo = jnp.maximum(flo, jnp.max(jnp.where(jnp.isfinite(cmin), cmin, -jnp.inf)))
         thi = jnp.minimum(fhi, jnp.max(jnp.where(jnp.isfinite(cmax), cmax, -jnp.inf)))
         thi = jnp.where(jnp.isfinite(thi) & (thi > tlo), thi, tlo + 1.0)
@@ -213,8 +237,10 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
             nrm = jnp.linalg.norm(A, axis=1)
             live &= nrm > 0
             nrm = jnp.where(live, nrm, 1.0)
+            mag = jnp.concatenate([jnp.abs(tlo_s) + jnp.abs(const[..., :1]), abs(tol) + jnp.abs(const[..., 1:])], axis=-1).reshape(-1)
             A = jnp.where(live[:, None], A / nrm[:, None], 0.0)
             bvec = jnp.where(live, bvec / nrm, 1.0)  # dead rows: 0 <= 1
+            bvec = _row_margin(A, bvec, jnp.where(live, mag / nrm, 0.0), live, safe)
             return A, bvec
 
         box_A = jnp.concatenate([jnp.eye(n + 1), -jnp.eye(n + 1)])
@@ -234,6 +260,9 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
             val = jnp.sum(jnp.minimum(coef[:n], 0.0)) - y @ bvec
             # rounding error of the two sums (|A| <= 1 after row scaling)
             err = (A.shape[0] + n + 2) * EPS * (jnp.sum(1.0 + jnp.abs(A).T @ y) + jnp.abs(bvec) @ y)
+            if safe:  # the certificate is evaluated in floats: widen the error bound, round tlo + T * val
+                err = SAFE_K * err
+                return tlo_s + T * (val - err) - SAFE_K * EPS * (jnp.abs(tlo_s) + T * (jnp.abs(val) + err)), _safe_costs(coef[:n], A[:, :n], y)
             return tlo_s + T * (val - err), _safe_costs(coef[:n], A[:, :n], y)
 
         # Kelley rounds as one lax.scan over a fixed-size cut buffer: slots for
@@ -276,7 +305,7 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
 
 
 def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate=False, alphabb=False,
-              multivariate=False):
+              multivariate=False, safe=False):
     """Return ``obbt(lo, hi, cutoff) -> (lo', hi', infeasible)`` for one box.
 
     Optimality-based bound tightening: each variable is minimized and
@@ -289,7 +318,7 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
     node bound, the new variable bounds are weak-duality certificates, so an
     inexact LP solve can only make them looser, never invalid.
     """
-    prepare, parts, _ = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate)
+    prepare, parts, _ = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate, safe)
 
     def obbt(lo, hi, cutoff=jnp.inf):
         n = lo.size
@@ -303,8 +332,8 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
         def cuts_at(p):
             v = convex_parts(p, lo, hi)
             J = jax.jacfwd(convex_parts)(p, lo, hi)
-            const = v + J @ (lo - p)
             coef = J * w
+            const = _cut_const(v, J, lo, p, coef, safe)
             ok = jnp.isfinite(const) & jnp.all(jnp.isfinite(coef), axis=1)
             return jnp.where(ok, const, -jnp.inf), jnp.where(ok[:, None], coef, 0.0)
 
@@ -314,7 +343,10 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
             nrm = jnp.linalg.norm(A, axis=1)
             live = jnp.isfinite(rhs) & (nrm > 0)
             nrm = jnp.where(live, nrm, 1.0)
-            return jnp.where(live[:, None], A / nrm[:, None], 0.0), jnp.where(live, rhs / nrm, 1.0)
+            mag = jnp.concatenate([abs(cutoff) + jnp.abs(const[:, :1]), abs(tol) + jnp.abs(const[:, 1:])], axis=1).reshape(-1)
+            A = jnp.where(live[:, None], A / nrm[:, None], 0.0)
+            b = jnp.where(live, rhs / nrm, 1.0)
+            return A, _row_margin(A, b, jnp.where(live, mag / nrm, 0.0), live, safe)
 
         box_A = jnp.concatenate([jnp.eye(n), -jnp.eye(n)])
         box_b = jnp.concatenate([jnp.ones(n), jnp.zeros(n)])
@@ -327,6 +359,8 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
                 y = jnp.where(jnp.isfinite(y[:nA]), jnp.maximum(y[:nA], 0.0), 0.0)
                 val = jnp.sum(jnp.minimum(cvec + A.T @ y, 0.0)) - y @ bvec
                 err = (nA + n + 2) * EPS * (jnp.sum(1.0 + jnp.abs(A).T @ y) + jnp.abs(bvec) @ y)
+                if safe:
+                    err = SAFE_K * err
                 return val - err
 
             z, _, best = ipm(cvec, jnp.concatenate([A, box_A]), jnp.concatenate([bvec, box_b]), ipm_iters, cert=cert)

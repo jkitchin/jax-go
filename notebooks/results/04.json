@@ -1,0 +1,80 @@
+{
+ "tanh MLP 2-8-8-1 (reduced space)": {
+  "loc_pyomo": 11,
+  "loc_jax": 2,
+  "pyomo_vars": 2,
+  "pyomo_cons": 0,
+  "rows": [
+   {
+    "solver": "jaxglobal",
+    "obj": -0.923083806993036,
+    "bound": -0.9231679542727939,
+    "time": 6.924716624896973,
+    "status": "optimal",
+    "nodes": 1041
+   },
+   {
+    "solver": "jaxglobal crown",
+    "obj": -0.923083806993036,
+    "bound": -0.9231679542727939,
+    "time": 4.1455743331462145,
+    "status": "optimal",
+    "nodes": 219
+   },
+   {
+    "solver": "scip (reduced, exp)",
+    "obj": -0.9230838069930343,
+    "bound": -0.92317596660219,
+    "time": 18.39158241590485,
+    "status": "optimal"
+   },
+   {
+    "solver": "baron (reduced, exp)",
+    "obj": -0.9230838069930347,
+    "bound": -0.9230838069930606,
+    "time": 4.295033750124276,
+    "status": "optimal"
+   }
+  ],
+  "note": "exp-form tanh for Pyomo; Couenne did not converge in the limit"
+ },
+ "tanh MLP 2-8-8-1 (full space)": {
+  "loc_pyomo": 19,
+  "loc_jax": 2,
+  "pyomo_vars": 34,
+  "pyomo_cons": 32,
+  "rows": [
+   {
+    "solver": "jaxglobal",
+    "obj": -0.923083806993036,
+    "bound": -0.9231679542727939,
+    "time": 6.924716624896973,
+    "status": "optimal",
+    "nodes": 1041
+   },
+   {
+    "solver": "jaxglobal crown",
+    "obj": -0.923083806993036,
+    "bound": -0.9231679542727939,
+    "time": 4.1455743331462145,
+    "status": "optimal",
+    "nodes": 219
+   },
+   {
+    "solver": "scip (full, exp)",
+    "obj": -0.9231142384277184,
+    "bound": -0.923205834895438,
+    "time": 4.940765124745667,
+    "status": "optimal"
+   },
+   {
+    "solver": "baron (full, exp)",
+    "obj": -0.9230919725826314,
+    "bound": -4.565767656647584,
+    "time": 31.88670799974352,
+    "status": "locallyOptimal"
+   }
+  ],
+  "note": "exp-form tanh for Pyomo; Couenne did not converge in the limit"
+ }
+}

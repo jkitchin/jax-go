@@ -556,15 +556,21 @@
  },
  {
   "key": "kraft1988software",
-  "bibtex": "@techreport{kraft1988software,\n  author = {Kraft, Dieter},\n  title = {A software package for sequential quadratic programming},\n  institution = {DLR German Aerospace Center, K{\\\"o}ln},\n  type = {Technical Report},\n  number = {DFVLR-FB 88-28},\n  year = {1988}\n}"
+  "bibtex": "@techreport{kraft1988software,\n  author = {Kraft, Dieter},\n  title = {A software package for sequential quadratic programming},\n  institution = {DLR German Aerospace Center, K{\\\"o}ln},\n  type = {Technical Report},\n  number = {DFVLR-FB 88-28},\n  year = {1988}\n}",
+  "seen_at": [
+   "https://docs.scipy.org/doc/scipy/reference/optimize.minimize-slsqp.html"
+  ]
  },
  {
   "key": "powell1969method",
-  "bibtex": "@incollection{powell1969method,\n  author = {Powell, M. J. D.},\n  title = {A method for nonlinear constraints in minimization problems},\n  booktitle = {Optimization},\n  editor = {Fletcher, R.},\n  pages = {283--298},\n  publisher = {Academic Press},\n  address = {London},\n  year = {1969}\n}"
+  "bibtex": "@incollection{powell1969method,\n  author = {Powell, M. J. D.},\n  title = {A method for nonlinear constraints in minimization problems},\n  booktitle = {Optimization},\n  editor = {Fletcher, R.},\n  pages = {283--298},\n  publisher = {Academic Press},\n  address = {London},\n  year = {1969}\n}",
+  "seen_at": [
+   "https://en.wikipedia.org/wiki/Augmented_Lagrangian_method"
+  ]
  },
  {
   "key": "kakade2018provably",
-  "bibtex": "@inproceedings{kakade2018provably,\n  author = {Kakade, Sham M. and Lee, Jason D.},\n  title = {Provably correct automatic sub-differentiation for qualified programs},\n  booktitle = {Advances in Neural Information Processing Systems},\n  volume = {31},\n  year = {2018}\n}"
+  "bibtex": "@inproceedings{kakade2018provably,\n  author = {Kakade, Sham M. and Lee, Jason D.},\n  title = {Provably correct automatic sub-differentiation for qualified programs},\n  booktitle = {Advances in Neural Information Processing Systems},\n  volume = {31},\n  year = {2018},\n  url = {https://proceedings.neurips.cc/paper_files/paper/2018/hash/142c65e00f4f7cf2e6c4c996e34005df-Abstract.html}\n}"
  },
  {
   "key": "lee2020correctness",
@@ -576,7 +582,8 @@
  },
  {
   "key": "liang2006problem",
-  "bibtex": "@techreport{liang2006problem,\n  author = {Liang, J. J. and Runarsson, T. P. and Mezura-Montes, E. and Clerc, M. and Suganthan, P. N. and Coello Coello, C. A. and Deb, K.},\n  title = {Problem definitions and evaluation criteria for the {CEC} 2006 special session on constrained real-parameter optimization},\n  institution = {Nanyang Technological University},\n  address = {Singapore},\n  year = {2006}\n}"
+  "bibtex": "@techreport{liang2006problem,\n  author = {Liang, J. J. and Runarsson, T. P. and Mezura-Montes, E. and Clerc, M. and Suganthan, P. N. and Coello Coello, C. A. and Deb, K.},\n  title = {Problem definitions and evaluation criteria for the {CEC} 2006 special session on constrained real-parameter optimization},\n  institution = {Nanyang Technological University},\n  address = {Singapore},\n  year = {2006},\n  url = {https://github.com/P-N-Suganthan/CEC2006/blob/master/technical_report.pdf}\n}",
+  "hand_checked": "title and authors match the title page of technical_report.pdf in github.com/P-N-Suganthan/CEC2006 (2026-10-04)"
  },
  {
   "key": "surjanovic2013virtual",
@@ -660,10 +667,79 @@
  },
  {
   "key": "deepmind2020deepmind",
-  "bibtex": "@misc{deepmind2020deepmind,\n  author = {{DeepMind} and Babuschkin, Igor and others},\n  title = {The {DeepMind} {JAX} Ecosystem},\n  year = {2020},\n  howpublished = {\\url{http://github.com/google-deepmind}}\n}"
+  "bibtex": "@misc{deepmind2020deepmind,\n  author = {{DeepMind} and Babuschkin, Igor and others},\n  title = {The {DeepMind} {JAX} Ecosystem},\n  year = {2020},\n  howpublished = {\\url{https://github.com/google-deepmind}}\n}"
  },
  {
   "key": "kitchin2026discopt",
   "bibtex": "@misc{kitchin2026discopt,\n  author = {Kitchin, John R.},\n  title = {discopt: a hybrid {MINLP} solver combining {Rust}, {JAX}, and {Python}},\n  year = {2026},\n  version = {v0.3.0},\n  publisher = {Zenodo},\n  doi = {10.5281/zenodo.19762815},\n  url = {https://github.com/jkitchin/discopt}\n}"
+ },
+ {
+  "key": "tjoa1991simultaneous",
+  "doi": "10.1021/ie00050a015",
+  "title": "Simultaneous solution and optimization strategies for parameter estimation of differential-algebraic equation systems"
+ },
+ {
+  "key": "esposito2000global",
+  "doi": "10.1021/ie990486w",
+  "title": "Global Optimization for the Parameter Estimation of Differential-Algebraic Systems"
+ },
+ {
+  "key": "maria1989adaptive",
+  "doi": "10.1002/cjce.5450670514",
+  "title": "An adaptive strategy for solving kinetic model concomitant estimation"
+ },
+ {
+  "key": "dolan2004benchmarking",
+  "doi": "10.2172/834714",
+  "title": "Benchmarking optimization software with COPS 3.0"
+ },
+ {
+  "key": "wagner2000iapws",
+  "doi": "10.1115/1.483186",
+  "title": "The IAPWS Industrial Formulation 1997 for the Thermodynamic Properties of Water and Steam"
+ },
+ {
+  "key": "huber2009new",
+  "doi": "10.1063/1.3088050",
+  "title": "New International Formulation for the Viscosity of H2O"
+ },
+ {
+  "key": "huber2012new",
+  "doi": "10.1063/1.4738955",
+  "title": "New International Formulation for the Thermal Conductivity of H2O"
+ },
+ {
+  "key": "blasius1913aehnlichkeitsgesetz",
+  "doi": "10.1007/978-3-662-02239-9_1",
+  "title": "Das Aehnlichkeitsgesetz bei Reibungsvorgängen in Flüssigkeiten"
+ },
+ {
+  "key": "swamee1976explicit",
+  "doi": "10.1061/jyceaj.0004542",
+  "title": "Explicit Equations for Pipe-Flow Problems"
+ },
+ {
+  "key": "colebrook1939turbulent",
+  "doi": "10.1680/ijoti.1939.13150",
+  "title": "Turbulent flow in pipes, with particular reference to the transition region between the smooth and rough pipe laws"
+ },
+ {
+  "key": "moody1944friction",
+  "doi": "10.1115/1.4018140",
+  "title": "Friction Factors for Pipe Flow"
+ },
+ {
+  "key": "rachford1952procedure",
+  "doi": "10.2118/952327-g",
+  "title": "Procedure for Use of Electronic Digital Computers in Calculating Flash Vaporization Hydrocarbon Equilibrium"
+ },
+ {
+  "key": "gomera2024iapws",
+  "bibtex": "@software{gomera2024iapws,\n  author = {Gómez Romera, Juan José},\n  title = {iapws: Python implementation of standards from The International Association for the Properties of Water and Steam},\n  version = {1.5.5},\n  url = {https://github.com/jjgomera/iapws},\n  note = {Python package, \\url{https://pypi.org/project/iapws/}}\n}"
+ },
+ {
+  "key": "tawarmalani2001semidefinite",
+  "doi": "10.1023/a:1011233805045",
+  "title": "Semidefinite Relaxations of Fractional Programs via Novel Convexification Techniques"
  }
 ]

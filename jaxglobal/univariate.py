@@ -35,9 +35,10 @@ import jax.numpy as jnp
 import numpy as np
 
 from .fbbt import Const, make_tape, tape_cache
-from .relax import AUTO_UNIVARIATE, MC, RULES, STRUCTURAL, Ctx, Unknown, eval_jaxpr_mc, is_mc, tighten
+from .relax import AUTO_UNIVARIATE, MC, RULES, SAFE_K, STRUCTURAL, Ctx, Unknown, apply_rule, eval_jaxpr_mc, is_mc, tighten
 
 INTERVAL_CTX = Ctx(interval_only=True)
+SAFE_INTERVAL_CTX = Ctx(interval_only=True, safe=True)
 
 NONSMOOTH = {"abs", "max", "min", "sign", "floor", "ceil", "round", "rem", "clamp", "reduce_max", "reduce_min",
              "gt", "ge", "lt", "le", "eq", "ne", "and", "or", "not", "select_n", "argmax", "argmin"}  # fmt: skip
@@ -181,6 +182,23 @@ def _eval_tape(tape, x, want):
     return [jnp.reshape(vals[s], (-1,)) for s in want]
 
 
+def _eval_tape_iv(tape, x, want):
+    """Rigorous (outward-rounded) interval value of the ``want`` slots at the point ``x``: (lo, hi)."""
+    vals = {0: MC(x, x, x, x)}
+    for node in tape.nodes:
+        args = [a.val if isinstance(a, Const) else vals[a] for a in node.ins]
+        if not any(isinstance(a, (MC, Unknown)) for a in args):
+            out = node.eqn.primitive.bind(*args, **node.eqn.params)
+        else:
+            out = apply_rule(SAFE_INTERVAL_CTX, node.eqn, args)
+        out = out if node.eqn.primitive.multiple_results else [out]
+        for s, o in zip(node.outs, out):
+            vals[s] = o
+    iv = [vals[s] if is_mc(vals[s]) else MC(*(jnp.asarray(vals[s]),) * 4) for s in want]
+    return (jnp.concatenate([jnp.reshape(m.lo, (-1,)) for m in iv]),
+            jnp.concatenate([jnp.reshape(m.hi, (-1,)) for m in iv]))  # fmt: skip
+
+
 class Hull(NamedTuple):
     lo: jax.Array  # (m,) interval bounds per element
     hi: jax.Array
@@ -215,9 +233,15 @@ def _lines(X, G, upper):
     return jnp.where(bad, 0.0, s), jnp.where(bad, -jnp.inf if not upper else jnp.inf, b)
 
 
-def make_univariate(f, K=65, multivariate=False):
-    """Return ``prepare(lo, hi) -> data`` and ``relax_with(x, lo, hi, data) -> MC``."""
-    ctx = Ctx(interval_only=False, multivariate=multivariate)
+def make_univariate(f, K=65, multivariate=False, safe=False):
+    """Return ``prepare(lo, hi) -> data`` and ``relax_with(x, lo, hi, data) -> MC``.
+
+    With ``safe`` the grid values come from outward-rounded interval evaluation,
+    the curvature bounds from outward-rounded interval arithmetic, and the hull
+    lines are lowered (raised) by the rounding error of evaluating them.
+    """
+    ctx = Ctx(interval_only=False, multivariate=multivariate, safe=safe)
+    ictx = SAFE_INTERVAL_CTX if safe else INTERVAL_CTX
 
     @tape_cache
     def setup(x):
@@ -246,7 +270,7 @@ def make_univariate(f, K=65, multivariate=False):
             closed = jax.make_jaxpr(d2)(lo)
 
             def cell(a, b):
-                (out,) = eval_jaxpr_mc(closed.jaxpr, closed.consts, [MC(a, b, a, b)], INTERVAL_CTX)
+                (out,) = eval_jaxpr_mc(closed.jaxpr, closed.consts, [MC(a, b, a, b)], ictx)
                 out = out if is_mc(out) else MC(out, out, out, out)
                 return jnp.broadcast_to(out.lo, (dep.size,)), jnp.broadcast_to(out.hi, (dep.size,))
 
@@ -264,14 +288,25 @@ def make_univariate(f, K=65, multivariate=False):
         El = jnp.maximum(jnp.concatenate([pad, el], 1), jnp.concatenate([el, pad], 1))
         Eu = jnp.maximum(jnp.concatenate([pad, eu], 1), jnp.concatenate([eu, pad], 1))
         nan = jnp.isnan(G)
-        Gl = jnp.where(nan, -jnp.inf, G - El)
-        Gu = jnp.where(nan, jnp.inf, G + Eu)
+        if safe:  # grid values are enclosures: plain float evaluation may be off by more than the hull margin
+            G0, G1 = jax.vmap(lambda t: _eval_tape_iv(tape, lo + t * w, want))(ts)
+            G0, G1 = G0.T, G1.T
+            nan = nan | jnp.isnan(G0) | jnp.isnan(G1)
+            Gl = jnp.where(nan, -jnp.inf, G0 - El)
+            Gu = jnp.where(nan, jnp.inf, G1 + Eu)
+        else:
+            Gl = jnp.where(nan, -jnp.inf, G - El)
+            Gu = jnp.where(nan, jnp.inf, G + Eu)
         ls, li = _lines(X, jnp.where(jnp.isfinite(Gl), Gl, -1e300), upper=False)
         us, ui = _lines(X, jnp.where(jnp.isfinite(Gu), Gu, 1e300), upper=True)
         okl = jnp.all(jnp.isfinite(Gl), axis=1, keepdims=True)
         oku = jnp.all(jnp.isfinite(Gu), axis=1, keepdims=True)
         li = jnp.where(okl, li, -jnp.inf)
         ui = jnp.where(oku, ui, jnp.inf)
+        if safe:  # rounding of ``slope * x + intercept`` at any x of the box
+            xm = jnp.maximum(jnp.abs(lo[dep]), jnp.abs(hi[dep]))[:, None]
+            li = li - SAFE_K * float(jnp.finfo(lo.dtype).eps) * (jnp.abs(ls) * xm + jnp.abs(li))
+            ui = ui + SAFE_K * float(jnp.finfo(lo.dtype).eps) * (jnp.abs(us) * xm + jnp.abs(ui))
         return Hull(jnp.where(okl[:, 0], Gl.min(1), -jnp.inf), jnp.where(oku[:, 0], Gu.max(1), jnp.inf), ls, li, us, ui)
 
     def relax_with(x, lo, hi, data):
@@ -290,7 +325,7 @@ def make_univariate(f, K=65, multivariate=False):
             if not any(isinstance(v, (MC, Unknown)) for v in invals):
                 outs = eqn.primitive.bind(*invals, **eqn.params)
             else:
-                outs = RULES[eqn.primitive.name](ctx, eqn, *invals)
+                outs = apply_rule(ctx, eqn, invals)
             outs = outs if eqn.primitive.multiple_results else [outs]
             for s, o in zip(node.outs, outs):
                 if s in override and is_mc(o):
@@ -314,12 +349,12 @@ def make_univariate(f, K=65, multivariate=False):
     return prepare, relax_with
 
 
-def relax_univariate(f, K=65):
+def relax_univariate(f, K=65, safe=False):
     """Drop-in for ``relax(f)``: ``rf(x, lo, hi[, data])``, with ``rf.prepare(lo, hi)``.
 
     Without ``data`` the hull is rebuilt on every call (correct but slower).
     """
-    prepare, relax_with = make_univariate(f, K)
+    prepare, relax_with = make_univariate(f, K, safe=safe)
 
     def rf(x, lo, hi, data=None):
         if data is None:
@@ -340,22 +375,22 @@ class Relaxer(NamedTuple):
         return self.call(x, lo, hi, data)
 
 
-def make_relaxer(fn, univariate=True, alphabb=False, K=65, multivariate=False):
+def make_relaxer(fn, univariate=True, alphabb=False, K=65, multivariate=False, safe=False):
     """Relaxation of ``fn``: McCormick, optionally tightened by univariate hull
     envelopes (``univariate``) and whole-function scaled-Gershgorin alphaBB
     (``alphabb``, smooth ``fn`` only; ``alphabb="eigen"`` adds the eigenvalue
-    relaxation of exact quadratics)."""
+    relaxation of exact quadratics). ``safe`` rounds every bound outward."""
     from .alphabb import make_alphabb
     from .relax import relax
 
     if univariate:
-        uprep, ucall = make_univariate(fn, K, multivariate)
+        uprep, ucall = make_univariate(fn, K, multivariate, safe)
     else:
-        rf = relax(fn, multivariate)
+        rf = relax(fn, multivariate, safe)
         uprep, ucall = (lambda lo, hi: None), (lambda x, lo, hi, data: rf(x, lo, hi))
     if not alphabb:
         return Relaxer(uprep, ucall)
-    aprep, aapply = make_alphabb(fn, eigen=alphabb == "eigen")
+    aprep, aapply = make_alphabb(fn, eigen=alphabb == "eigen", safe=safe)
 
     def prepare(lo, hi):
         return uprep(lo, hi), aprep(lo, hi)

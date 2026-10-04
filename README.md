@@ -1,3 +1,5 @@
+<p align="center"><img src="figures/logo.svg" alt="jaxglobal" width="560"></p>
+
 # jaxglobal — global optimization of plain JAX functions (proof of concept)
 
 Write an ordinary Python function with `jax.numpy`, give a box, and get a
@@ -148,6 +150,27 @@ using a `jnp`→Pyomo shim on numpy object arrays. It then runs SCIP and Couenne
 `examples/compare_results.json`, and `examples/compare_plot.py` draws
 `figures/benchmark.png`. The slides in `slides/jaxglobal.md` summarize this.
 
+**Pyomo side by side.** The notebooks in [`notebooks/`](notebooks/README.md)
+write each model twice, in Pyomo and as a plain JAX function, and solve both:
+basic and pooling problems, `where`/`clip`/table lookups, RK4 kinetics, NN
+surrogates, and things Pyomo cannot express directly.
+
+**Flagship benchmark.** `jaxglobal.applications` holds code-defined models
+(ODE kinetics, regime-switching engineering models, tanh NN surrogates after
+[schweidtmann2019deterministic]), each with a hand-written Pyomo twin.
+`benchmarks/flagship.py` runs jaxglobal, SCIP, Couenne and BARON on them and
+judges each answer against the best known optimum.
+
+## Correctness checks
+
+`minimize(..., safe=True)` widens every relaxation outward by a few ulps so
+floating-point rounding cannot cut off the global minimum (off by default, about
+1.7× slower). Every result is re-evaluated in float64; a point that violates the
+constraints is reported with status `"unverified"` and its `max_violation`.
+`tests/test_fuzz.py` checks bounds against sampled points on random problems
+(`JAXGLOBAL_FUZZ=N` for more cases), and `benchmarks/check_wrong.py` exits
+nonzero on any wrong or unverified MINLPLib answer.
+
 ## Run
 
 ```bash
@@ -215,9 +238,14 @@ Any AMPL `.nl` model (text or binary) can be loaded with
 
 Citation keys refer to [`docs/references.bib`](docs/references.bib). Every
 entry with a DOI was checked against Crossref and its BibTeX taken from
-Crossref by `docs/verify_refs.py` (103 entries). The 38 entries without a
-Crossref DOI (conference papers, arXiv, software) are listed in
-`docs/refs.json` and were checked against arXiv or the publisher.
+Crossref by `docs/verify_refs.py` (116 entries). The 39 entries without a
+Crossref DOI (conference papers, arXiv, software, reports) are written by
+hand in `docs/refs.json`; the same script confirms each one from an
+independent source: the arXiv record, the DOI record, OpenAlex, the GitHub
+repository, or the entry's title on the publisher's page. The CEC 2006
+report has no online record and was checked against its title page.
+`tests/test_citations.py` fails on any `[key]` in the repo's `.py`, `.md` or
+notebook sources that is not in the bibliography.
 
 **McCormick relaxations of code.** The relaxation arithmetic is McCormick's
 [mccormick1976computability], in the generalized and subgradient form of
