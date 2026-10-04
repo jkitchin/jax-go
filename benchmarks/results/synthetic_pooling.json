@@ -1,0 +1,22 @@
+[
+ {
+  "name": "pooling_2_4_2",
+  "family": "pooling",
+  "n": 14,
+  "n_con": 14,
+  "fstar": null,
+  "cold": 20.036474999971688,
+  "status": "time_limit",
+  "fun": -653.2232065021562,
+  "lower_bound": -662.391948211667,
+  "gap": 9.168741709510755,
+  "nodes": 207,
+  "iterations": 14,
+  "evaluations": 208,
+  "search": 20.036448542028666,
+  "root_time": 0.690738582983613,
+  "root_lb": -676.805025067942,
+  "root_fun": -653.223206502156,
+  "root_gap": 23.581818565785966
+ }
+]
