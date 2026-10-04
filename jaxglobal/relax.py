@@ -246,7 +246,7 @@ def mc_square(x: MC) -> MC:
 
 
 def mc_mul(a: MC, b: MC, multivariate: bool = False) -> MC:
-    """McCormick product rule (Mitsos, Chachuat & Barton 2009)."""
+    """McCormick product rule (Mitsos, Chachuat & Barton 2009 [mitsos2009mccormick])."""
     xL, xU, yL, yU = a.lo, a.hi, b.lo, b.hi
     prods = jnp.stack([xL * yL, xL * yU, xU * yL, xU * yU])
     lo, hi = prods.min(0), prods.max(0)
@@ -269,7 +269,7 @@ def mc_mul(a: MC, b: MC, multivariate: bool = False) -> MC:
     )
     if not multivariate:
         return tighten(MC(lo, hi, cv, cc))
-    # Multivariate McCormick (Tsoukalas & Mitsos 2014):
+    # Multivariate McCormick (Tsoukalas & Mitsos 2014 [tsoukalas2014multivariate]):
     #   cv = min over (x, y) in [a.cv, a.cc] x [b.cv, b.cc] of max(F1, F2).
     # By minimax duality this equals max over lam in [0, 1] of the single facet
     # lam F1 + (1 - lam) F2 minimized over the rectangle, i.e. of
@@ -464,7 +464,7 @@ def mc_frac(a: MC, b: MC, base: MC) -> MC:
     """Tighten ``base`` (McCormick of a * (1/b)) with the convex envelope of a/b.
 
     For a in [aL, aU] with aL >= 0 and b in [bL, bU] with bL > 0
-    (Tawarmalani & Sahinidis 2001):
+    (Tawarmalani & Sahinidis 2001 [tawarmalani2001semidefinite]):
 
         a / b >= ((a + sqrt(aL aU)) / (sqrt(aL) + sqrt(aU)))^2 / b,
 

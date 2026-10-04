@@ -1,4 +1,4 @@
-"""CROWN-style backward linear bound propagation over the tape (Zhang et al. 2018).
+"""CROWN-style backward linear bound propagation over the tape (Zhang et al. 2018 [zhang2018efficient]).
 
 Every nonlinear primitive of the tape gets, on the interval ``[l, u]`` of its
 input, a linear lower and upper relaxation ``a_l z + b_l <= g(z) <= a_u z + b_u``.

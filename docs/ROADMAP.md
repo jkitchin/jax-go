@@ -472,7 +472,7 @@ non-compiled Python. Timings are from a loaded machine.
   the only tool that certifies the optimum, or is at least 10× faster.
 
 **CROWN bounds (Phase 5).** `crown.py` adds backward linear bound
-propagation (CROWN, Zhang et al. 2018) as an extra node lower bound,
+propagation (CROWN, Zhang et al. 2018 [zhang2018efficient]) as an extra node lower bound,
 `minimize(..., crown=True)`; the node bound is the max of it and the existing
 one. Every nonlinear tape node gets linear lower/upper relaxations on the
 interval of its input (tanh, sigmoid, erf, atan, asinh by convexity region with

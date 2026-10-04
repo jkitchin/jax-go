@@ -1,3 +1,5 @@
+<p align="center"><img src="figures/logo.svg" alt="jaxglobal" width="560"></p>
+
 # jaxglobal — global optimization of plain JAX functions (proof of concept)
 
 Write an ordinary Python function with `jax.numpy`, give a box, and get a
@@ -215,9 +217,14 @@ Any AMPL `.nl` model (text or binary) can be loaded with
 
 Citation keys refer to [`docs/references.bib`](docs/references.bib). Every
 entry with a DOI was checked against Crossref and its BibTeX taken from
-Crossref by `docs/verify_refs.py` (103 entries). The 38 entries without a
-Crossref DOI (conference papers, arXiv, software) are listed in
-`docs/refs.json` and were checked against arXiv or the publisher.
+Crossref by `docs/verify_refs.py` (116 entries). The 39 entries without a
+Crossref DOI (conference papers, arXiv, software, reports) are written by
+hand in `docs/refs.json`; the same script confirms each one from an
+independent source: the arXiv record, the DOI record, OpenAlex, the GitHub
+repository, or the entry's title on the publisher's page. The CEC 2006
+report has no online record and was checked against its title page.
+`tests/test_citations.py` fails on any `[key]` in the repo's `.py`, `.md` or
+notebook sources that is not in the bibliography.
 
 **McCormick relaxations of code.** The relaxation arithmetic is McCormick's
 [mccormick1976computability], in the generalized and subgradient form of

@@ -215,7 +215,7 @@ def haverly_eq(z):
     return jnp.stack([Px + Py - A - B, x - Px - Cx, y - Py - Cy, p * (Px + Py) - 3 * A - B])
 
 
-# Reactor network design (Ryoo & Sahinidis 1995)
+# Reactor network design (Ryoo & Sahinidis 1995 [ryoo1995global])
 _K1 = 0.09755988
 _K2 = 0.99 * _K1
 _K3 = 0.0391908

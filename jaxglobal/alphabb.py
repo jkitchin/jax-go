@@ -7,7 +7,7 @@ For a smooth ``g`` (each output separately) on the box ``[l, u]``,
 
 when ``H + 2 diag(a)`` (``-H + 2 diag(b)``) is positive semidefinite for every
 Hessian ``H`` of ``g`` on the box. With an interval Hessian ``[H]`` and box
-widths ``d``, the scaled Gershgorin rule (Adjiman et al. 1998) gives
+widths ``d``, the scaled Gershgorin rule (Adjiman et al. 1998 [adjiman1998global]) gives
 
     a_i = max(0, -(H_ii^L - sum_{j != i} max|H_ij| d_j / d_i) / 2),
     b_i = max(0,  (H_ii^U + sum_{j != i} max|H_ij| d_j / d_i) / 2).
