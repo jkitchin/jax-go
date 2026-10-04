@@ -357,6 +357,80 @@ each kernel. Options are a persistent compilation cache, leaner `prepare`
 and alphaBB tracing, fewer padded batch sizes, and a lower XLA optimisation
 level (tried: small compile gain, about 5x slower solves).
 
+### Scaling (synthetic benchmark)
+
+`jaxglobal/synthetic.py` generates seeded instances of four families
+(`univariate_sum`, `qcqp`, `pooling`, `nn_surrogate`); `benchmarks/synthetic.py`
+runs each in a fresh process (cold solve, warm repeat, root-only solve) and
+writes JSON (`benchmarks/results/synthetic_*.json`). The machine was heavily
+loaded (load ~200), so times are indicative only; nodes and gaps are not.
+Runs were cut short (limits of 300 s, then abandoned), so large-n rows are
+partial. Defaults, 300 s limit:
+
+| instance | n | m | nodes | status | final gap | root gap |
+|---|---:|---:|---:|---|---:|---:|
+| univariate_sum_5 / 10 / 20 | 5-20 | 0 | 21 / 73 / 511 | optimal | <2e-4 | 7e-3 / 2e-2 / 1e-1 |
+| univariate_sum_50 | 50 | 0 | 4197 | optimal | 3e-4 | 0.40 |
+| univariate_sum_100 | 100 | 0 | 4827 | time_limit | 0.58 | 0.86 |
+| qcqp_5_2 / 10_5 | 5-10 | 2-5 | 15 / 109 | optimal | 0 | 0.7 / 3.7 |
+| qcqp_20_10 | 20 | 10 | 16361 | time_limit | 0.03 | 9.3 |
+| nn_tanh 2 / 5 inputs (8x2) | 2-5 | 0 | 243 / 883471 | optimal | <2e-6 | 2.4 / 3.1 |
+| nn_tanh 10 inputs | 10 | 0 | 764927 | time_limit | 0.12 | 0.13 |
+| pooling (binding spec) 2_4_2 | 14 | 14 | 17-31k | time_limit | ~1e-2 (1e-5 rel) | n/a |
+| pooling (binding spec) 3_4_3 | 24 | 19 | 10k | time_limit | ~16 | n/a |
+
+(Pooling rows are from 200-300 s runs of the final generator; an earlier
+version with non-binding quality specs solved at the root up to n = 24 and
+was not kept. `pooling_2_4_2` in the JSON is a 20 s smoke run.)
+
+Single-kernel measurements (batch 16, `make_jaxpr` / compile / call):
+
+| instance | n | jaxpr eqns | trace + compile | bound call, per box |
+|---|---:|---:|---:|---:|
+| univariate_sum | 5 / 20 / 50 / 100 | 12331 (all) | ~2 s | 0.4 / 1.1 / 3.7 / 8.8 ms |
+| qcqp | 5 / 10 / 20 / 50 | 10796 (all) | ~4 s | 0.3 / 1.6 / 8.1 / 72 ms |
+| pooling_4_6_4 | 44 | 19697 | ~6 s | 51 ms |
+| nn_tanh (8x2) | 2-10 | 6583 | ~2 s | 0.1 ms |
+
+Root OBBT on one box: univariate_sum_100 about 12 s, qcqp_50_25 1.6 s.
+
+What dominates:
+
+- **Not compile time.** The jaxpr is vectorized, so equation count depends on
+  the structure of `f`, not on n; trace + compile is a few seconds per kernel
+  at every size, and cold - warm is small once solves take minutes. (The
+  cold solve of tiny instances is 10-30 s, many kernels and batch shapes.)
+- **Search size from weak relaxations first.** nn_tanh needs 883k nodes at n = 5
+  although each node costs 0.1 ms: composed tanh layers lose tightness through
+  interval propagation, root gap 3.1. qcqp root gaps grow with n (0.7, 3.7,
+  9.3) and nodes with them (15, 109, 16k); univariate_sum is separable, yet
+  the tree grows 21, 73, 511, 4197 nodes with n because branching one variable
+  at a time cannot exploit separability (each term must be refined inside
+  every combination of the others' boxes).
+- **Per-node cost next.** The dense LP / IPM per node grows roughly as
+  n^2.4 on constrained problems (qcqp 8 ms -> 72 ms from n = 20 to 50) and root
+  OBBT (2n LPs per round) becomes seconds by n = 100.
+- **Upper bound is not the problem.** Best of 30 random-start SLSQP runs
+  matched the incumbent on qcqp_20_10 (-21.33481) and nn_tanh 5 / 10
+  (-1.7174 vs -1.7174; -1.6583 vs -1.6583), so the gap is on the lower-bound
+  side. The first local solve (box center) can be poor (nn_tanh_5 root
+  incumbent -0.75 vs -1.72), which only affects early pruning.
+
+Not done: no run past the time limits above; no n = 50 / 100 B&B for qcqp,
+pooling or nn_tanh; no memory measurement; no check of relaxation tightness
+against exact envelopes. Candidate fixes: separable-aware branching and bounds
+(branch where the per-term gap is largest), tighter composition rules for
+tanh layers (or an extended-space `lifted` bound), and sparse / structured LP
+for constraint-heavy problems.
+
+### Persistent compilation cache
+
+`tests/conftest.py` and `benchmarks/*.py --cache-dir` turn on JAX's persistent
+cache (the library does not). `builtin.py --only gramacy_lee,G08,haverly`,
+first vs second process (cold): 7.1 / 31.9 / 20.7 s -> 3.4 / 8.5 / 7.1 s.
+Hits do occur across processes; what is left is tracing and the
+non-compiled Python. Timings are from a loaded machine.
+
 ### Phase 3 — search (4 weeks)
 
 - **Branching.** Choose the variable by violation-weighted or pseudocost
