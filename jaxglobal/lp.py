@@ -47,7 +47,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from .relax import relax
+from .univariate import make_relaxer
 
 EPS = float(jnp.finfo(jnp.float64).eps)
 
@@ -127,40 +127,53 @@ def _as_vec(fn):
     return None if fn is None else (lambda x: jnp.atleast_1d(fn(x)))
 
 
-def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, tol=0.0):
+def _parts_fn(f, ineq, eq, univariate):
+    """``prepare(lo, hi)`` and ``parts(x, lo, hi, data)`` = [cv_f, cv_g..., cv_h..., -cc_h...]."""
+    rs = [make_relaxer(_as_vec(fn), univariate) if fn is not None else None for fn in (f, ineq, eq)]
+
+    def prepare(lo, hi):
+        return tuple(r.prepare(lo, hi) if r is not None else None for r in rs)
+
+    def parts(x, lo, hi, data):
+        rf, rg, rh = rs
+        out = [jnp.atleast_1d(rf(x, lo, hi, data[0]).cv)]
+        if rg is not None:
+            out.append(rg(x, lo, hi, data[1]).cv)
+        if rh is not None:
+            mh = rh(x, lo, hi, data[2])
+            out += [mh.cv, -mh.cc]
+        return jnp.concatenate(out)
+
+    return prepare, parts, rs
+
+
+def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, tol=0.0, univariate=False):
     """Return ``bound(lo, hi, cutoff) -> (lb, x_lp, infeasible, lo', hi')`` for one box.
 
     ``[lo', hi']`` is the box after duality-based range reduction against
     ``f <= cutoff`` (the incumbent value); it is the input box when
     ``cutoff`` is infinite.
     """
-    rf = relax(f)
-    rg = relax(_as_vec(ineq)) if ineq is not None else None
-    rh = relax(_as_vec(eq)) if eq is not None else None
-
-    def convex_parts(x, lo, hi):
-        """[cv_f, cv_g..., cv_h..., -cc_h...] -- every entry convex in x."""
-        parts = [jnp.atleast_1d(rf(x, lo, hi).cv)]
-        if rg is not None:
-            parts.append(rg(x, lo, hi).cv)
-        if rh is not None:
-            mh = rh(x, lo, hi)
-            parts += [mh.cv, -mh.cc]
-        return jnp.concatenate(parts)
+    prepare, parts, (rf, rg, rh) = _parts_fn(f, ineq, eq, univariate)
 
     def bound(lo, hi, cutoff=jnp.inf):
         n = lo.size
         w = hi - lo
         c = 0.5 * (lo + hi)
+        data = prepare(lo, hi)
+
+        def convex_parts(x, lo, hi):
+            """[cv_f, cv_g..., cv_h..., -cc_h...] -- every entry convex in x."""
+            return parts(x, lo, hi, data)
 
         # --- interval information (constant on the box) ---------------------
-        mf = rf(c, lo, hi)
-        flo, fhi = mf.lo, mf.hi
+        mf = rf(c, lo, hi, data[0])
+        flo, fhi = mf.lo[0], mf.hi[0]
         infeasible = jnp.array(False)
         if rg is not None:
-            infeasible |= jnp.any(rg(c, lo, hi).lo > tol)
+            infeasible |= jnp.any(rg(c, lo, hi, data[1]).lo > tol)
         if rh is not None:
-            mh = rh(c, lo, hi)
+            mh = rh(c, lo, hi, data[2])
             infeasible |= jnp.any(mh.lo > tol) | jnp.any(mh.hi < -tol)
 
         def cuts_at(p):
@@ -251,7 +264,7 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
     return bound
 
 
-def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0):
+def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate=False):
     """Return ``obbt(lo, hi, cutoff) -> (lo', hi', infeasible)`` for one box.
 
     Optimality-based bound tightening: each variable is minimized and
@@ -264,23 +277,16 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0):
     node bound, the new variable bounds are weak-duality certificates, so an
     inexact LP solve can only make them looser, never invalid.
     """
-    rf = relax(f)
-    rg = relax(_as_vec(ineq)) if ineq is not None else None
-    rh = relax(_as_vec(eq)) if eq is not None else None
-
-    def convex_parts(x, lo, hi):
-        parts = [jnp.atleast_1d(rf(x, lo, hi).cv)]
-        if rg is not None:
-            parts.append(rg(x, lo, hi).cv)
-        if rh is not None:
-            mh = rh(x, lo, hi)
-            parts += [mh.cv, -mh.cc]
-        return jnp.concatenate(parts)
+    prepare, parts, _ = _parts_fn(f, ineq, eq, univariate)
 
     def obbt(lo, hi, cutoff=jnp.inf):
         n = lo.size
         w = hi - lo
         c = 0.5 * (lo + hi)
+        data = prepare(lo, hi)
+
+        def convex_parts(x, lo, hi):
+            return parts(x, lo, hi, data)
 
         def cuts_at(p):
             v = convex_parts(p, lo, hi)

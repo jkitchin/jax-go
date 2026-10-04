@@ -57,6 +57,18 @@ r = minimize(f, [-512, -512], [512, 512])
      outer-approximation LP, as 2n `vmap`-ed LPs with weak-duality-certified
      results; on the root by default (`obbt="tree"` for every node).
    Children are split from the tightened box.
+6. **Univariate envelopes** (`jaxglobal/univariate.py`, on by default). Every
+   smooth sub-expression whose elements each depend on one variable (found
+   structurally on the jaxpr: separable sums, polynomial factors,
+   `sin(x)·sin(x²)^20`, ...) is sampled on a 65-point grid. The samples are
+   lowered by `max(g″, 0)·h²/8`, with `g″` bounded per cell by interval
+   evaluation of `jvp(jvp(g))`, and their lower convex hull is a nearly exact
+   convex envelope (symmetrically for the concave one). It is intersected
+   with the McCormick relaxation, so it never loosens it. On Styblinski–Tang
+   the root bound goes from −612 to −118.6 (f* = −117.5).
+   An extended-space LP bound (`jaxglobal/lifted.py`, `lifted=True`) is also
+   available: one LP column per nonlinear jaxpr node, cut from that node's own
+   McCormick rule at FBBT-tightened bounds.
 
 ![relaxations](figures/relaxations.png)
 

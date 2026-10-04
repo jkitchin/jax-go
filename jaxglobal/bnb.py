@@ -32,26 +32,35 @@ import numpy as np
 
 from .local import make_local
 from .fbbt import make_fbbt
+from .lifted import make_lifted_bounder
 from .lp import make_constrained_bounder, make_obbt, reduce_ranges
 from .relax import relax
+from .univariate import relax_univariate
 
 
-def make_bounder(f, n_fw=20):
+def make_bounder(f, n_fw=20, univariate=False):
     """Return ``bound(lo, hi, cutoff) -> (lb, x, f(x), lo', hi')`` for one box.
 
     ``[lo', hi']`` is the box after duality-based range reduction: every
     Frank-Wolfe cut ``f(z) >= cv(x) + g.(z - x)`` with ``f(z) <= cutoff``
     confines each ``z_j`` to an interval.
     """
-    rf = relax(f)
+    if univariate:
+        rfu = relax_univariate(f)
+    else:
+        rf0 = relax(f)
+        rfu = lambda x, lo, hi, data: rf0(x, lo, hi)  # noqa: E731
+        rfu.prepare = lambda lo, hi: None
 
     def bound(blo, bhi, cutoff=jnp.inf):
+        data = rfu.prepare(blo, bhi)
+
         def cv(x):
-            return rf(x, blo, bhi).cv
+            return rfu(x, blo, bhi, data).cv
 
         vg = jax.value_and_grad(cv)
         c = 0.5 * (blo + bhi)
-        ilb = rf(c, blo, bhi).lo
+        ilb = rfu(c, blo, bhi, data).lo
 
         def step(carry, k):
             x, best, rlo, rhi = carry
@@ -137,6 +146,8 @@ def minimize(
     dbbt=True,
     obbt="root",
     obbt_rounds=2,
+    univariate=True,
+    lifted=False,
     time_limit=np.inf,
     verbose=False,
 ):
@@ -155,6 +166,11 @@ def minimize(
     (duality-based range reduction from each node's bound certificate), and
     ``obbt`` (LP-based tightening of every variable: ``"root"``, ``"tree"`` for
     every node, or ``False``).
+
+    Relaxations: ``univariate`` replaces the relaxation of every smooth
+    sub-expression of a single variable by a grid-hull envelope
+    (``univariate.py``); ``lifted`` bounds nodes with the extended-space LP
+    (``lifted.py``) instead of the reduced-space cuts.
     """
     t0 = time.perf_counter()
     lo = np.asarray(lo, dtype=np.float64)
@@ -174,17 +190,24 @@ def minimize(
 
     if obbt not in (False, None, "root", "tree"):
         raise ValueError(f"obbt must be False, 'root' or 'tree', not {obbt!r}")
-    if constrained:
-        cb = make_constrained_bounder(f, ineq, eq, n_kelley=n_kelley, tol=feas_tol)
+    if lifted:
+        lb_lifted = make_lifted_bounder(f, ineq, eq, n_kelley=n_kelley, fbbt_rounds=fbbt_rounds, tol=feas_tol)
+
+        def raw_bound(blo, bhi, cutoff):
+            lb, x, _, rlo, rhi = lb_lifted(blo, bhi, cutoff)
+            fx = jnp.where(violation(x) <= feas_tol, f(x), jnp.inf)
+            return lb, x, fx, rlo, rhi
+    elif constrained:
+        cb = make_constrained_bounder(f, ineq, eq, n_kelley=n_kelley, tol=feas_tol, univariate=univariate)
 
         def raw_bound(blo, bhi, cutoff):
             lb, x, _, rlo, rhi = cb(blo, bhi, cutoff)
             fx = jnp.where(violation(x) <= feas_tol, f(x), jnp.inf)
             return lb, x, fx, rlo, rhi
     else:
-        raw_bound = make_bounder(f, n_fw)
+        raw_bound = make_bounder(f, n_fw, univariate=univariate)
     tighten = make_fbbt(f, ineq, eq, rounds=fbbt_rounds, feas_tol=feas_tol) if fbbt else None
-    lp_tighten = make_obbt(f, ineq, eq, rounds=obbt_rounds, tol=feas_tol) if obbt else None
+    lp_tighten = make_obbt(f, ineq, eq, rounds=obbt_rounds, tol=feas_tol, univariate=univariate) if obbt else None
 
     def node(blo, bhi, cutoff, with_obbt=False):
         """Tighten, then bound one box. Returns (lb, x, f(x), lo', hi')."""

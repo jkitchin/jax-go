@@ -142,6 +142,52 @@ relaxations, choosing tree-OBBT variables by impact, and probing.
 - **Exit:** root gaps close at least 2× on the pooling and polynomial
   instances; Adhya and Ben-Tal pooling instances solve.
 
+**Status (started).** Two pieces are implemented.
+
+- *Univariate envelopes* (`jaxglobal/univariate.py`, default on): a structural
+  per-element dependency analysis of the jaxpr finds smooth sub-expressions of
+  a single variable that are built from more than one exactly relaxed
+  operation. Each one gets a grid-hull envelope: the samples are lowered by a
+  per-cell curvature bound from interval `jvp(jvp(g))`, then the lower convex
+  hull is taken. That envelope is intersected with McCormick. This covers the
+  "sums of univariate terms" structure and "tighter univariate envelopes"
+  above. Root lower bounds (whole box, no tightening):
+
+  | problem | f* | McCormick | + univariate |
+  |---|---:|---:|---:|
+  | styblinski_tang_3d | −117.50 | −612 | −118.64 |
+  | six_hump_camel | −1.032 | −156.1 | −7.08 |
+  | michalewicz_2d | −1.801 | −2.000 | −1.823 |
+  | goldstein_price | 3 | −8.79e7 | −7.48e7 |
+
+  Node counts change only where such blocks exist (phase-1 tightening on in
+  both columns; other problems are unchanged):
+
+  | problem | without | with |
+  |---|---:|---:|
+  | styblinski_tang_3d | 333 | 9 |
+  | six_hump_camel | 167 | 31 |
+  | shubert | 1781 | 305 |
+  | michalewicz_2d | 9 | 1 |
+  | G24 | 39 | 3 |
+  | G08 | 33 | 31 |
+
+- *Lifted LP* (`jaxglobal/lifted.py`, `lifted=True`): one column per
+  nonlinear jaxpr node, linked to its inputs by cuts from the node's own
+  McCormick rule (bilinear terms get the four McCormick facets) at FBBT
+  bounds, with Kelley rounds and the same safe certificate. With FBBT bounds
+  for both, the root bound is at most ~8% tighter than reduced space on the
+  21 problems. Node counts are mixed: G11 47 → 31, but reactor 747 → 2491.
+  So it stays opt-in until it also uses the univariate envelopes and
+  structure-specific cuts.
+
+Not yet done: multivariate McCormick, trilinear/fractional envelopes,
+quadratic-form detection with eigenvalue cuts, and scaled αBB. The pooling
+half of the exit criterion (Adhya, Ben-Tal) cannot be measured in this
+environment, because MINLPLib is not reachable. Separable bilinear pooling
+constraints gain nothing from either piece so far (haverly's root bound is
+−1550 in both formulations).
+
 ### Phase 3 — search (4 weeks)
 
 - **Branching.** Choose the variable by violation-weighted or pseudocost

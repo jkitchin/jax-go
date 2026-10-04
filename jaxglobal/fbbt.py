@@ -579,6 +579,65 @@ def _backward(tape, vals, out_bounds):
     return b
 
 
+def joint_tape(f, ineq, eq, x):
+    """Tape of ``x -> [f, ineq, eq]`` (each as a 1-D array; ``None`` skipped)."""
+    used = [fn for fn in (f, ineq, eq) if fn is not None]
+    return make_tape(lambda x: [jnp.atleast_1d(fn(x)) for fn in used], x)
+
+
+def output_bounds(tape, ineq, eq, cutoff, feas_tol):
+    """Constraints on the tape outputs: f <= cutoff, ineq <= tol, |eq| <= tol."""
+    zs = [(-INF, cutoff)]
+    if ineq is not None:
+        zs.append((-INF, feas_tol))
+    if eq is not None:
+        zs.append((-feas_tol, feas_tol))
+    out = []
+    for a, (zl, zh) in zip(tape.outs, zs):
+        if isinstance(a, Const):
+            out.append((zl, zh))
+        else:
+            shp, dt = tape.shapes[a]
+            out.append((jnp.full(shp, zl, dt), jnp.full(shp, zh, dt)))
+    return out
+
+
+def propagate(tape, lo, hi, out_bounds, rounds):
+    """FBBT on a tape: ``rounds`` backward+forward sweeps from the box [lo, hi].
+
+    Returns ``(vals, empty)``: ``vals`` maps every slot to its final value (an
+    interval ``MC(lo, hi, lo, hi)``, an ``Unknown`` or a constant) from a last
+    forward sweep, so every interval is consistent with the tightened box.
+    """
+    vals, empty = _forward(tape, (lo, hi), {})
+    slots = sorted(s for s, v in vals.items() if is_mc(v))
+    # a constant output that violates its constraint makes every box infeasible
+    for a, z in zip(tape.outs, out_bounds):
+        if isinstance(a, Const):
+            v = jnp.asarray(a.val)
+            empty |= jnp.any((v < z[0]) | (v > z[1]))
+    live = [None if isinstance(a, Const) else z for a, z in zip(tape.outs, out_bounds)]
+
+    def fix(s, c):
+        shp, dt = tape.shapes[s]
+        return tuple(jnp.broadcast_to(jnp.asarray(v, dt), shp) for v in c)
+
+    def body(_, carry):
+        bounds, empty = carry
+        prior = dict(zip(slots, bounds))
+        vals, e1 = _forward(tape, prior[0], prior)
+        b = _backward(tape, vals, live)
+        for s in slots:
+            empty |= jnp.any(_empty(*b[s]))
+        return tuple(fix(s, b[s]) for s in slots), empty | e1
+
+    init = tuple(fix(s, (vals[s].lo, vals[s].hi)) for s in slots)
+    bounds, empty = lax.fori_loop(0, rounds, body, (init, empty))
+    prior = dict(zip(slots, bounds))
+    vals, e = _forward(tape, prior[0], prior)
+    return vals, empty | e
+
+
 def make_fbbt(f, ineq=None, eq=None, rounds=5, feas_tol=1e-6):
     """Return ``fbbt(lo, hi, cutoff) -> (lo, hi, infeasible)`` for one box.
 
@@ -587,49 +646,11 @@ def make_fbbt(f, ineq=None, eq=None, rounds=5, feas_tol=1e-6):
     ``infeasible`` means no such point exists.
     """
 
-    def vec(fn):
-        return None if fn is None else (lambda x: jnp.atleast_1d(fn(x)))
-
-    fns = [vec(f), vec(ineq), vec(eq)]
-    used = [fn for fn in fns if fn is not None]
-
-    def joint(x):
-        return [fn(x) for fn in used]
-
     def fbbt(lo, hi, cutoff=INF):
-        tape = make_tape(joint, lo)
-        cutoff = jnp.asarray(cutoff, lo.dtype)
-        zs = [(jnp.full(1, -INF), jnp.full(1, cutoff))]
-        if ineq is not None:
-            zs.append((-INF, feas_tol))
-        if eq is not None:
-            zs.append((-feas_tol, feas_tol))
-        out_bounds = [(jnp.broadcast_to(z[0], tape.shapes[a][0]), jnp.broadcast_to(z[1], tape.shapes[a][0]))
-                      if not isinstance(a, Const) else None for a, z in zip(tape.outs, zs)]  # fmt: skip
-
-        vals, empty = _forward(tape, (lo, hi), {})
-        slots = sorted(s for s, v in vals.items() if is_mc(v))
-        # a constant output that violates its constraint makes every box infeasible
-        for a, z in zip(tape.outs, zs):
-            if isinstance(a, Const):
-                empty |= jnp.any((jnp.asarray(a.val) < z[0]) | (jnp.asarray(a.val) > z[1]))
-
-        def fix(s, c):
-            shp, dt = tape.shapes[s]
-            return tuple(jnp.broadcast_to(jnp.asarray(v, dt), shp) for v in c)
-
-        def body(_, carry):
-            bounds, empty = carry
-            prior = dict(zip(slots, bounds))
-            vals, e1 = _forward(tape, prior[0], prior)
-            b = _backward(tape, vals, out_bounds)
-            for s in slots:
-                empty |= jnp.any(_empty(*b[s]))
-            return tuple(fix(s, b[s]) for s in slots), empty | e1
-
-        init = tuple(fix(s, (vals[s].lo, vals[s].hi)) for s in slots)
-        bounds, empty = lax.fori_loop(0, rounds, body, (init, empty))
-        nlo, nhi = bounds[slots.index(0)]
-        return jnp.minimum(nlo, nhi), jnp.maximum(nlo, nhi), empty
+        tape = joint_tape(f, ineq, eq, lo)
+        ob = output_bounds(tape, ineq, eq, jnp.asarray(cutoff, lo.dtype), feas_tol)
+        vals, empty = propagate(tape, lo, hi, ob, rounds)
+        x = vals[0]
+        return jnp.minimum(x.lo, x.hi), jnp.maximum(x.lo, x.hi), empty
 
     return fbbt
