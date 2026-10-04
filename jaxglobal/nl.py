@@ -158,6 +158,16 @@ class _Binary:
         return c - ord("0")
 
 
+def _plus(*terms):
+    """Sum of terms, dropping literal zeros (no ``0.0 + t`` equations in the trace)."""
+    out = None
+    for t in terms:
+        if isinstance(t, (int, float)) and t == 0:
+            continue
+        out = t if out is None else out + t
+    return 0.0 if out is None else out
+
+
 def _parse_expr(R):
     c, v = R.leaf()
     if c in "nsl":
@@ -268,9 +278,21 @@ def parse_nl(data, name="model"):
     if n_obj > 1:
         raise NLError("multiple objectives are not supported")
 
-    def compile_(x):
-        """Evaluate all model expressions at x (one trace; defined vars cached)."""
+    def compile_(x, obj_wanted=True, rows=None):
+        """Evaluate model expressions at x (one trace; defined vars cached).
+
+        Only the objective (``obj_wanted``) and the constraints ``rows`` (default
+        all) are traced, so ``f``, ``ineq`` and ``eq`` do not carry each
+        other's expressions as dead code. Variable reads are shared and zero
+        linear coefficients (structural nonzeros) are skipped.
+        """
         cache = {}
+        xs = {}
+
+        def xv(j):
+            if j not in xs:
+                xs[j] = x[j]
+            return xs[j]
 
         def ev(e):
             op = e[0]
@@ -279,7 +301,7 @@ def parse_nl(data, name="model"):
             if op == "var":
                 j = e[1]
                 if j < n:
-                    return x[j]
+                    return xv(j)
                 if j not in cache:
                     lin, ex = defined[j]
                     cache[j] = ev(ex) + sum(a * ev(("var", k)) for k, a in lin.items())
@@ -308,14 +330,14 @@ def parse_nl(data, name="model"):
             return BINARY[op](ev(args[0]), ev(args[1]))
 
         def linear(lin):
-            return sum(a * x[j] for j, a in lin.items())
+            return _plus(*(a * xv(j) for j, a in lin.items() if a != 0))
 
-        obj = (ev(exprs_o[0]) + linear(lin_o[0])) if n_obj else 0.0
-        body = [ev(exprs_c[i]) + linear(lin_c[i]) for i in range(m)]
+        obj = _plus(ev(exprs_o[0]), linear(lin_o[0])) if (n_obj and obj_wanted) else 0.0
+        body = [_plus(ev(exprs_c[i]), linear(lin_c[i])) for i in (range(m) if rows is None else rows)]
         return obj, body
 
     def objective(x):
-        return jnp.asarray(compile_(x)[0], dtype=x.dtype)
+        return jnp.asarray(compile_(x, True, [])[0], dtype=x.dtype)
 
     def bodies(x):
         return jnp.stack([jnp.asarray(b, dtype=x.dtype) for b in compile_(x)[1]]) if m else jnp.zeros(0, x.dtype)
@@ -329,14 +351,18 @@ def parse_nl(data, name="model"):
     up_i = [i for i in range(m) if clo[i] != chi[i] and np.isfinite(chi[i])]
     lo_i = [i for i in range(m) if clo[i] != chi[i] and np.isfinite(clo[i])]
 
+    def rows_of(x, idx):
+        """Constraint bodies ``idx`` stacked; only those expressions are traced."""
+        _, b = compile_(x, False, idx)
+        return jnp.stack([jnp.asarray(v, dtype=x.dtype) for v in b]) if idx else jnp.zeros(0, x.dtype)
+
     def eq(x):
-        b = bodies(x)
-        return b[jnp.asarray(eq_i)] - jnp.asarray(clo[eq_i])
+        return rows_of(x, eq_i) - jnp.asarray(clo[eq_i])
 
     def ineq(x):
-        b = bodies(x)
-        return jnp.concatenate([b[jnp.asarray(up_i, dtype=int)] - jnp.asarray(chi[up_i]),
-                                jnp.asarray(clo[lo_i]) - b[jnp.asarray(lo_i, dtype=int)]])  # fmt: skip
+        parts = ([rows_of(x, up_i) - jnp.asarray(chi[up_i])] if up_i else []) + (
+            [jnp.asarray(clo[lo_i]) - rows_of(x, lo_i)] if lo_i else [])
+        return parts[0] if len(parts) == 1 else jnp.concatenate(parts)
 
     return NLModel(
         name=name, n=n, lo=lo, hi=hi, x0=x0, f=f,
