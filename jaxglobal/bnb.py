@@ -40,12 +40,13 @@ from .relax import relax
 from .univariate import make_relaxer
 
 
-def make_bounder(f, n_fw=20, univariate=False, alphabb=False, multivariate=False):
+def make_bounder(f, n_fw=20, univariate=False, alphabb=False, multivariate=False, return_xr=False):
     """Return ``bound(lo, hi, cutoff) -> (lb, x, f(x), lo', hi')`` for one box.
 
     ``[lo', hi']`` is the box after duality-based range reduction: every
     Frank-Wolfe cut ``f(z) >= cv(x) + g.(z - x)`` with ``f(z) <= cutoff``
-    confines each ``z_j`` to an interval.
+    confines each ``z_j`` to an interval. With ``return_xr`` a sixth output is
+    the final Frank-Wolfe iterate (the relaxation minimizer estimate).
     """
     rfu = make_relaxer(f, univariate, alphabb, multivariate=multivariate)
 
@@ -76,7 +77,8 @@ def make_bounder(f, n_fw=20, univariate=False, alphabb=False, multivariate=False
         lb = jnp.maximum(jnp.where(jnp.isnan(ilb), -jnp.inf, ilb), cut)
         fc, ff = f(c), f(xfw)
         use_c = ~(ff < fc)
-        return lb, jnp.where(use_c, c, xfw), jnp.where(use_c, fc, ff), rlo, rhi
+        out = lb, jnp.where(use_c, c, xfw), jnp.where(use_c, fc, ff), rlo, rhi
+        return out + (xfw,) if return_xr else out
 
     return bound
 
@@ -157,7 +159,7 @@ class _Kernels:
             def raw_bound(blo, bhi, cutoff):
                 lb, x, _, rlo, rhi = lb_lifted(blo, bhi, cutoff)
                 fx = jnp.where(violation(x) <= feas_tol, f(x), jnp.inf)
-                return lb, x, fx, rlo, rhi
+                return lb, x, fx, rlo, rhi, x
         elif constrained:
             cb = make_constrained_bounder(f, ineq, eq, n_kelley=n_kelley, tol=feas_tol, univariate=univariate,
                                           alphabb=alphabb, multivariate=multivariate)
@@ -165,24 +167,26 @@ class _Kernels:
             def raw_bound(blo, bhi, cutoff):
                 lb, x, _, rlo, rhi = cb(blo, bhi, cutoff)
                 fx = jnp.where(violation(x) <= feas_tol, f(x), jnp.inf)
-                return lb, x, fx, rlo, rhi
+                return lb, x, fx, rlo, rhi, x
         else:
-            raw_bound = make_bounder(f, n_fw, univariate=univariate, alphabb=alphabb, multivariate=multivariate)
+            raw_bound = make_bounder(f, n_fw, univariate=univariate, alphabb=alphabb, multivariate=multivariate,
+                                     return_xr=True)
         tighten = make_fbbt(f, ineq, eq, rounds=fbbt_rounds, feas_tol=feas_tol) if fbbt else None
         lp_tighten = make_obbt(f, ineq, eq, rounds=obbt_rounds, tol=feas_tol, univariate=univariate,
                                 alphabb=alphabb, multivariate=multivariate) if obbt else None
 
         def node(blo, bhi, cutoff):
-            """Tighten, then bound one box. Returns (lb, x, f(x), lo', hi')."""
+            """Tighten, then bound one box. Returns (lb, x, f(x), lo', hi', xr)."""
             empty = jnp.array(False)
             if tighten is not None:
                 blo, bhi, empty = tighten(blo, bhi, cutoff)
-            lb, x, fx, rlo, rhi = raw_bound(blo, bhi, cutoff)
+            lb, x, fx, rlo, rhi, xr = raw_bound(blo, bhi, cutoff)
             if not dbbt:
                 rlo, rhi = blo, bhi
             # an empty box holds no feasible point with f <= cutoff
             return (jnp.where(empty, cutoff, lb), x, jnp.where(empty, jnp.inf, fx),
-                    jnp.where(empty, blo, rlo), jnp.where(empty, bhi, rhi))  # fmt: skip
+                    jnp.where(empty, blo, rlo), jnp.where(empty, bhi, rhi),
+                    jnp.where(empty, 0.5 * (blo + bhi), xr))  # fmt: skip
 
         def node_obbt(blo, bhi, cutoff):
             """FBBT, then OBBT on the result. Returns (lo', hi', empty).
@@ -207,6 +211,39 @@ def _vec(fn):
     return lambda x: jnp.atleast_1d(fn(x)) if fn is not None else jnp.zeros(0)
 
 
+class _Padder:
+    """Pad batches of boxes to a few fixed sizes and spread big ones over devices.
+
+    Kernel cost grows about linearly with the number of boxes, so a batch is
+    padded to the smallest of ``sizes`` (plus the full batch) that holds it;
+    each size used is compiled once. With several JAX devices (e.g. CPU cores exposed by
+    ``XLA_FLAGS=--xla_force_host_platform_device_count=N``) a full batch is
+    rounded up to a multiple of the device count and split across them.
+    """
+
+    def __init__(self, batch, sizes, devices):
+        self.mesh = None
+        if len(devices) > 1:
+            from jax.sharding import Mesh, NamedSharding, PartitionSpec
+
+            self.mesh = NamedSharding(Mesh(np.array(devices), ("boxes",)), PartitionSpec("boxes"))
+            batch = -(-batch // len(devices)) * len(devices)
+        self.sizes = sorted({min(int(s), batch) for s in sizes} | {batch})
+
+    def __call__(self, *arrays):
+        k = len(arrays[0])
+        size = next(s for s in self.sizes if s >= k)
+        out = [np.concatenate([a, np.repeat(a[:1], size - k, 0)]) for a in arrays]
+        if self.mesh is not None and size == self.sizes[-1]:
+            return [jax.device_put(a, self.mesh) for a in out]
+        return [jnp.asarray(a) for a in out]
+
+
+_LAM, _BETA = 0.75, 0.2  # branch_point="relax": pull toward the relaxation minimizer, margin from faces
+_FLOOR = 0.05  # pseudocosts are floored at this fraction of the mean over observed variables
+_ETA, _M = 2, 4  # branch_var="reliability": observations to trust a pseudocost, strong-branching candidates
+
+
 @dataclass
 class Result:
     x: np.ndarray
@@ -219,6 +256,7 @@ class Result:
     history: list = field(default_factory=list)
     status: str = ""
     message: str = ""
+    evaluations: int = 0  # boxes bounded, including strong-branching trials
 
     @property
     def gap(self):
@@ -243,6 +281,8 @@ def minimize(
     rel_tol=1e-6,
     feas_tol=1e-6,
     batch=256,
+    batch_sizes=(16, 64),
+    devices=None,
     max_iter=5000,
     n_fw=20,
     n_kelley=4,
@@ -254,6 +294,8 @@ def minimize(
     dbbt=True,
     obbt="root",
     obbt_rounds=2,
+    branch_point="mid",
+    branch_var="width",
     univariate=True,
     alphabb=True,
     multivariate=False,
@@ -291,6 +333,22 @@ def minimize(
     McCormick rule of Tsoukalas & Mitsos, written as up to two extra facets
     from its dual (tighter where a factor's interval straddles zero); ``lifted`` bounds nodes with the extended-space LP
     (``lifted.py``) instead of the reduced-space cuts.
+
+    Branching: ``branch_point`` is ``"mid"`` (bisect) or ``"relax"`` (split at
+    the relaxation minimizer, pulled toward the midpoint and kept away from the
+    faces, see ``_LAM`` and ``_BETA``); ``branch_var`` is ``"width"`` (largest
+    relative width among nonlinear variables), ``"pseudocost"`` (product score
+    of per-variable bound gains observed so far) or ``"reliability"`` (like
+    pseudocost, but variables with fewer than ``_ETA`` observations are
+    strong-branched, up to ``_M`` of them per box, within the ``batch`` budget).
+    ``Result.evaluations`` counts every box bounded.
+
+    Batches of boxes are padded to the smallest of ``batch_sizes`` or ``batch``
+    that holds them (each size used compiles once). With several JAX devices
+    full batches are split across them; on CPU, expose cores by setting
+    ``XLA_FLAGS=--xla_force_host_platform_device_count=N`` before JAX is
+    imported. ``devices`` overrides the device list (e.g.
+    ``devices=jax.devices()[:1]`` to disable splitting).
     """
     t0 = time.perf_counter()
     lo = np.asarray(lo, dtype=np.float64)
@@ -311,6 +369,10 @@ def minimize(
             )  # fmt: skip
     width0 = np.where(hi > lo, hi - lo, 1.0)
     constrained = ineq is not None or eq is not None
+    if branch_point not in ("mid", "relax"):
+        raise ValueError(f"branch_point must be 'mid' or 'relax', not {branch_point!r}")
+    if branch_var not in ("width", "pseudocost", "reliability"):
+        raise ValueError(f"branch_var must be 'width', 'pseudocost' or 'reliability', not {branch_var!r}")
     if obbt not in (False, None, "root", "tree"):
         raise ValueError(f"obbt must be False, 'root' or 'tree', not {obbt!r}")
     opts = dict(n_fw=n_fw, n_kelley=n_kelley, fbbt=bool(fbbt), fbbt_rounds=fbbt_rounds, dbbt=bool(dbbt),
@@ -333,14 +395,13 @@ def minimize(
         i = int(np.argmin(F))
         return X[i], float(F[i])
 
-    def padded(blo, bhi):
-        pad = batch - len(blo)
-        return (jnp.asarray(np.concatenate([blo, np.repeat(blo[:1], pad, 0)])),
-                jnp.asarray(np.concatenate([bhi, np.repeat(bhi[:1], pad, 0)])))  # fmt: skip
+    padded = _Padder(batch, batch_sizes, jax.devices() if devices is None else list(devices))
 
     def evaluate(blo, bhi, with_obbt=False):
-        """Tighten and bound a batch of boxes: (lb, x, f(x), lo', hi')."""
+        """Tighten and bound a batch of boxes: (lb, x, f(x), lo', hi', xr)."""
+        nonlocal evaluations
         k = len(blo)
+        evaluations += k
         cutoff = jnp.asarray(ub, dtype=jnp.float64)
         empty = np.zeros(k, bool)
         if with_obbt:
@@ -349,11 +410,13 @@ def minimize(
             args = padded(blo, bhi) if obbt == "tree" else (jnp.asarray(blo), jnp.asarray(bhi))
             olo, ohi, oe = (np.asarray(a)[:k] for a in K.obbt(*args, cutoff))
             blo, bhi, empty = np.where(oe[:, None], blo, olo), np.where(oe[:, None], bhi, ohi), oe
-        lb, x, fx, rlo, rhi = (np.asarray(a)[:k] for a in K.bound(*padded(blo, bhi), cutoff))
+        lb, x, fx, rlo, rhi, xr = (np.asarray(a)[:k] for a in K.bound(*padded(blo, bhi), cutoff))
         # an empty box holds no feasible point with f <= cutoff
         return (np.where(empty, ub, lb), x, np.where(empty, np.inf, fx),
-                np.where(empty[:, None], blo, rlo), np.where(empty[:, None], bhi, rhi))  # fmt: skip
+                np.where(empty[:, None], blo, rlo), np.where(empty[:, None], bhi, rhi),
+                np.where(empty[:, None] | ~np.isfinite(xr), 0.5 * (blo + bhi), xr))  # fmt: skip
 
+    evaluations = 0
     ub, xbest = np.inf, 0.5 * (lo + hi)
     if seed_x is not None:  # feasible point found while bounding the domain
         ub, xbest = float(seed_f), np.asarray(seed_x)
@@ -381,15 +444,33 @@ def minimize(
     def tol():
         return max(abs_tol, rel_tol * abs(ub)) if np.isfinite(ub) else abs_tol
 
-    lb, xc, fc, rlo, rhi = evaluate(lo[None], hi[None])
+    lb, xc, fc, rlo, rhi, rxr = evaluate(lo[None], hi[None])
     update_incumbent(xc, fc, lb)
     if obbt and (constrained or np.isfinite(ub)):
         # root OBBT once an incumbent cutoff is known (it is useless without
         # one when there are no constraints)
-        lb2, xc, fc, rlo, rhi = evaluate(rlo, rhi, with_obbt=True)
+        lb2, xc, fc, rlo, rhi, rxr = evaluate(rlo, rhi, with_obbt=True)
         lb = np.maximum(lb, lb2)
         update_incumbent(xc, fc, lb)
-    open_lo, open_hi, open_lb = rlo, rhi, lb
+    open_lo, open_hi, open_lb, open_xr = rlo, rhi, lb, rxr
+    sumL, sumR, cnt = np.zeros(lo.size), np.zeros(lo.size), np.zeros(lo.size)  # pseudocost sums, observations
+
+    def pseudo_scores(relw, free):
+        """Product-rule scores per (box, variable), -1 for non-candidates; and whether any pseudocost is known."""
+        cand = branchable & free
+        cand = np.where(cand.any(axis=1, keepdims=True), cand, branchable)
+        seen = cnt > 0
+        if not seen.any():
+            return np.where(cand, relw, -1.0), False
+        mL, mR = (sumL[seen] / cnt[seen]).mean(), (sumR[seen] / cnt[seen]).mean()
+        # a variable whose early splits gained nothing would otherwise never be tried again
+        psiL = np.where(seen, np.maximum(sumL / np.maximum(cnt, 1), _FLOOR * mL), mL)
+        psiR = np.where(seen, np.maximum(sumR / np.maximum(cnt, 1), _FLOOR * mR), mR)
+        eps = 1e-6 * (1 + abs(ub)) if np.isfinite(ub) else 1e-6
+        r2 = relw**2
+        sc = np.maximum(psiL * r2, eps) * np.maximum(psiR * r2, eps) * (1 + 1e-3 * relw)  # width breaks ties
+        return np.where(cand & np.isfinite(sc), sc, np.where(cand, 0.0, -1.0)), True
+
     pruned_lb = np.inf  # smallest lower bound among fathomed boxes
     nodes, history = 1, []
     it = 0
@@ -399,7 +480,7 @@ def minimize(
         keep = open_lb < ub - tol()
         if not keep.all():
             pruned_lb = min(pruned_lb, float(open_lb[~keep].min()))
-        open_lo, open_hi, open_lb = open_lo[keep], open_hi[keep], open_lb[keep]
+        open_lo, open_hi, open_lb, open_xr = open_lo[keep], open_hi[keep], open_lb[keep], open_xr[keep]
         glb = min(float(open_lb.min()) if len(open_lb) else np.inf, pruned_lb, ub)
         history.append((it, nodes, glb, ub, len(open_lb)))
         if verbose and (it == 1 or it % 25 == 0):
@@ -412,27 +493,96 @@ def minimize(
 
         k = min(batch // 2, len(open_lb))
         sel = np.argpartition(open_lb, k - 1)[:k] if k < len(open_lb) else np.arange(k)
+        if branch_var == "reliability":
+            sel = sel[np.argsort(open_lb[sel], kind="stable")]
+        plo, phi, pxr, plb = open_lo[sel], open_hi[sel], open_xr[sel], open_lb[sel]
+        relw = (phi - plo) / width0  # relative width (0 for variables never split)
+
+        if branch_var == "width":
+            pp = np.arange(k)
+            pv = np.argmax(np.where(branchable, relw, -1.0), axis=1)
+            groups = [[i] for i in range(k)]
+        else:
+            score, _ = pseudo_scores(relw, phi > plo)
+            if branch_var == "pseudocost":
+                pv = np.argmax(score, axis=1)
+                pp = np.arange(k)
+                groups = [[i] for i in range(k)]
+            else:
+                pp_l, pv_l, groups, used = [], [], [], 0
+                for i in range(k):
+                    cand = score[i] >= 0
+                    unrel = np.flatnonzero(cand & (cnt < _ETA))
+                    unrel = unrel[np.argsort(-relw[i, unrel], kind="stable")][:_M]
+                    best = int(np.argmax(score[i]))
+                    vs = [best] + [int(v) for v in unrel if v != best] if cnt[best] >= _ETA else [int(v) for v in unrel]
+                    if not vs:
+                        vs = [best]
+                    if used and used + 2 * len(vs) > batch:
+                        break
+                    vs = vs[: max(batch // 2, 1)]
+                    groups.append(list(range(len(pp_l), len(pp_l) + len(vs))))
+                    pp_l += [i] * len(vs)
+                    pv_l += vs
+                    used += 2 * len(vs)
+                pp, pv = np.array(pp_l), np.array(pv_l)
+            if len(groups) < k:  # batch budget: take fewer parents this iteration
+                k = len(groups)
+                sel, plo, phi, pxr, plb, relw = sel[:k], plo[:k], phi[:k], pxr[:k], plb[:k], relw[:k]
         rest = np.ones(len(open_lb), bool)
         rest[sel] = False
-        plo, phi = open_lo[sel], open_hi[sel]
 
-        d = np.argmax(np.where(branchable, (phi - plo) / width0, -1.0), axis=1)
-        mid = 0.5 * (plo[np.arange(k), d] + phi[np.arange(k), d])
-        left_hi, right_lo = phi.copy(), plo.copy()
-        left_hi[np.arange(k), d] = mid
-        right_lo[np.arange(k), d] = mid
-        clo = np.concatenate([plo, right_lo])
-        chi = np.concatenate([left_hi, phi])
+        M = len(pp)
+        ar = np.arange(M)
+        lov, hiv = plo[pp, pv], phi[pp, pv]
+        pt = 0.5 * (lov + hiv)
+        if branch_point == "relax":
+            w = hiv - lov
+            pt = np.clip(_LAM * pxr[pp, pv] + (1 - _LAM) * pt, lov + _BETA * w, hiv - _BETA * w)
+        left_hi, right_lo = phi[pp].copy(), plo[pp].copy()
+        left_hi[ar, pv] = pt
+        right_lo[ar, pv] = pt
+        clo = np.concatenate([plo[pp], right_lo])
+        chi = np.concatenate([left_hi, phi[pp]])
 
-        clb, cx, cf, clo, chi = evaluate(clo, chi, with_obbt=obbt == "tree")
-        nodes += 2 * k
-        # children cannot be worse than their parent's bound
-        clb = np.maximum(clb, np.concatenate([open_lb[sel], open_lb[sel]]))
+        clb, cx, cf, clo, chi, cxr = evaluate(clo, chi, with_obbt=obbt == "tree")
         update_incumbent(cx, cf, clb)
+        if branch_var != "width":
+            # pseudocost observations: bound gain per squared relative width
+            gl, gr = np.maximum(clb[:M] - plb[pp], 0.0), np.maximum(clb[M:] - plb[pp], 0.0)
+            if np.isfinite(ub):
+                cap = np.maximum(ub - plb[pp], 0.0)
+                gl, gr = np.minimum(gl, cap), np.minimum(gr, cap)
+            else:  # no scale for a huge gain (an infeasible child) without an incumbent: skip it
+                big = 1e12 * (1 + np.abs(plb[pp]))
+                gl, gr = np.where(gl <= big, gl, np.inf), np.where(gr <= big, gr, np.inf)
+            r2 = relw[pp, pv] ** 2
+            good = np.isfinite(gl) & np.isfinite(gr) & (r2 > 1e-24)
+            np.add.at(sumL, pv[good], gl[good] / r2[good])
+            np.add.at(sumR, pv[good], gr[good] / r2[good])
+            np.add.at(cnt, pv[good], 1)
+        lbl, lbr = clb[:M], clb[M:]
+        if M > k:  # strong branching: keep the best candidate of each parent
+            eps = 1e-6 * (1 + abs(ub)) if np.isfinite(ub) else 1e-6
+            gl, gr = np.maximum(lbl - plb[pp], 0.0), np.maximum(lbr - plb[pp], 0.0)
+            gl, gr = np.where(np.isfinite(gl), gl, 1e150), np.where(np.isfinite(gr), gr, 1e150)
+            strong = np.maximum(gl, eps) * np.maximum(gr, eps)
+            chosen = np.array([g[np.lexsort((relw[pp[g], pv[g]], strong[g]))[-1]] for g in groups])
+            pmax = np.array([np.max(np.minimum(lbl[g], lbr[g])) for g in groups])
+        else:
+            chosen = np.arange(M)
+            pmax = np.minimum(lbl, lbr)
+        rows = np.concatenate([chosen, chosen + M])
+        nodes += 2 * k
+        # children cannot be worse than their parent's bound, nor than the
+        # weaker side of any tried split of it
+        raised = np.maximum(plb, pmax)
+        clb = np.maximum(clb[rows], np.concatenate([raised, raised]))
 
-        open_lo = np.concatenate([open_lo[rest], clo])
-        open_hi = np.concatenate([open_hi[rest], chi])
+        open_lo = np.concatenate([open_lo[rest], clo[rows]])
+        open_hi = np.concatenate([open_hi[rest], chi[rows]])
         open_lb = np.concatenate([open_lb[rest], clb])
+        open_xr = np.concatenate([open_xr[rest], cxr[rows]])
 
     glb = min(float(open_lb.min()) if len(open_lb) else np.inf, pruned_lb, ub)
     if converged:
@@ -448,6 +598,7 @@ def minimize(
         converged=converged,
         iterations=it,
         nodes=nodes,
+        evaluations=evaluations,
         time=time.perf_counter() - t0,
         history=history,
         status=status,

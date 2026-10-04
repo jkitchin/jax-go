@@ -88,7 +88,7 @@ r = minimize(f, [-512, -512], [512, 512])
 <div class="arrow">→</div>
 <div><b>3. Bound</b>convex cuts via <code>jax.grad</code> → LP + duality certificate</div>
 <div class="arrow">→</div>
-<div><b>4. Branch</b>batched spatial B&B; <code>jit(vmap)</code> over 256 boxes</div>
+<div><b>4. Branch</b>batched spatial B&B; <code>jit(vmap)</code> over a batch of boxes</div>
 </div>
 
 <br>
@@ -252,6 +252,86 @@ $$
 
 ---
 
+## Search: four decisions per iteration
+
+<div class="cols"><div>
+
+1. **Which boxes**: batched best-bound, the lowest-LB half of the batch
+2. **Which variable** to split
+3. **Where** to split it
+4. **Upper bounds**: local solves started from relaxation minimizers
+
+</div><div>
+
+All children of the batch are bounded in **one** `jit(vmap)` call.
+
+Wall time ≈ iterations × per-iteration kernel cost.
+
+</div></div>
+
+<div class="take">For a batched solver the metric is <b>iterations</b>, not nodes: a node is cheap, a kernel launch is not.</div>
+
+---
+
+## Where to split: the midpoint, or the relaxation minimizer?
+
+![w:900](anim/split.svg)
+
+$$p = \mathrm{clip}\big(0.75\,x_{relax} + 0.25\,\mathrm{mid},\ lo + 0.2w,\ hi - 0.2w\big)$$
+
+<p class="small">Cut where the bound is decided, but never so close to an edge that one child is the parent. One example, computed by the animation script.</p>
+
+---
+
+## Which variable: three rules
+
+<div class="cols"><div>
+
+**Widest relative width** (default)
+- No state, no cost
+
+**Pseudocosts**
+- Per variable: mean bound gain $\Delta L / r^2$, $\Delta R / r^2$ ($r$ = relative width)
+- Score $\max(\psi_L r^2, \epsilon)\cdot\max(\psi_R r^2, \epsilon)$
+
+</div><div>
+
+**Reliability branching**
+- Variables with < 2 observations are strong-branched, inside the same batch
+- Then trust the pseudocosts
+
+<div class="take">Strong branching rides along in the batched kernel, so no extra launches.</div>
+
+</div></div>
+
+---
+
+## A pitfall: a pseudocost of zero is not "useless"
+
+- A variable whose first split gained 0 scored 0 forever: it was never chosen again
+- `holder_table`: **191 → 17,739 nodes**
+- Fix: floor every pseudocost at **5 %** of the mean
+
+<div class="take">Little data about a variable is not evidence that splitting it is useless.</div>
+
+---
+
+## Search: iterations to a certified optimum
+
+| strategy | all 21 problems | 7 constrained |
+|---|---|---|
+| default (width, midpoint) | 268 | 73 |
+| relaxation split | 257 | 56 |
+| pseudocost | 266 | – |
+| reliability | 259 | – |
+
+- Relaxation split helps constrained problems (`reactor` 36 → 24 iterations), slightly hurts multimodal unconstrained ones (`shubert` 14 → 22)
+- 2–9 variables is too small to separate branching rules
+
+<div class="take">Defaults unchanged. The 50–100-variable synthetic benchmark will decide.</div>
+
+---
+
 ## Example: 14 nonconvex test functions
 
 ![height:400px](../figures/convergence.png)
@@ -340,7 +420,7 @@ BENCHMARK_TAKEAWAYS
 | upper bound (local solve) | scipy L-BFGS-B / SLSQP + JAX gradients | ✗ |
 | B&B loop: queue, pruning, bisection | numpy on host | ✗ |
 
-<div class="take">No external global solver: bounding is one <code>jit(vmap)</code> kernel over 256 boxes; local solves and bookkeeping still run on the CPU host.</div>
+<div class="take">No external global solver: bounding is one <code>jit(vmap)</code> kernel over a padded batch of boxes; local solves and bookkeeping still run on the CPU host.</div>
 
 ---
 
@@ -364,7 +444,33 @@ BENCHMARK_TAKEAWAYS
 
 ## Measured: batching and where the time goes
 
-THROUGHPUT_FIGURE
+<div class="cols"><div>
+
+**Kernel cost is linear in boxes** (`haverly`)
+
+| boxes | ms per call |
+|---|---|
+| 8 | 15 |
+| 32 | 53 |
+| 128 | 201 |
+| 256 | 389 |
+
+Pad each batch to 16, 64 or 256 boxes: repeat solves of the built-ins **17.2 → 3.3 s** (`haverly` 3.6 → 0.34 s); first solve 130 → about 111 s.
+
+</div><div>
+
+**Multi-core**: 10 forced CPU devices (M4 Pro) make a 256-box batch 2–7× faster
+
+| problem | 1 device | 10 devices |
+|---|---|---|
+| `haverly` | 381 ms | 52 |
+| `reactor` | 228 ms | 40 |
+| `G08` | 82 ms | 30 |
+| `shubert` | 49 ms | 23 |
+
+</div></div>
+
+<p class="small">No end-to-end gain on the small built-ins: most batches have ≤ 64 boxes. The Apple GPU is not usable (jax-metal has no float64).</p>
 
 ---
 
@@ -373,7 +479,7 @@ THROUGHPUT_FIGURE
 <div class="cols"><div>
 
 **Costs today**
-- JIT compile: often most of a small solve
+- JIT compile: often most of a small solve; kernel cache, 2 kernels and a scanned Kelley loop cut the first solve 206 → 130 s and a repeat 173 → 18 s
 - Fixed shapes: padding, fixed iteration counts
 - Host ↔ device sync every B&B iteration
 
@@ -395,7 +501,8 @@ THROUGHPUT_FIGURE
 - Dense LP per node, fixed iteration count
 - Not rigorous in floating point (no outward rounding)
 - Small problems only (≤ 9 variables in the test set)
-- Next: rerun MINLPLib, smarter branching and diving (phase 3), GPU batches
+- Branching: relaxation split and pseudocosts are in but off by default; not yet tested beyond 9 variables
+- Next: rerun MINLPLib, 50–100-variable benchmark, diving, GPU batches (needs float64)
 
 ---
 

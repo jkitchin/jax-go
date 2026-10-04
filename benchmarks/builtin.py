@@ -9,6 +9,7 @@ Usage:
   python benchmarks/builtin.py --out before.json
   python benchmarks/builtin.py --out after.json --compare before.json
   python benchmarks/builtin.py --only gramacy_lee,G04
+  python benchmarks/builtin.py --opts '{"batch_sizes": [16, 64]}'
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ ROOT = HERE.parent
 TAG = "BUILTIN-RESULT "
 
 
-def worker(name):
+def worker(name, opts):
     sys.path.insert(0, str(ROOT))
     from jaxglobal import minimize
     from jaxglobal.problems import CONSTRAINED_PROBLEMS, PROBLEMS
@@ -36,7 +37,7 @@ def worker(name):
     out = dict(name=name)
     for key in ("cold", "warm"):
         t = time.perf_counter()
-        r = minimize(f, lo, hi, ineq=g, eq=h)
+        r = minimize(f, lo, hi, ineq=g, eq=h, **opts)
         out[key] = time.perf_counter() - t
     out.update(status=r.status, nodes=r.nodes, fun=r.fun, lower_bound=r.lower_bound)
     print(TAG + json.dumps(out), flush=True)
@@ -48,9 +49,10 @@ def main():
     ap.add_argument("--only", default="")
     ap.add_argument("--out", default="")
     ap.add_argument("--compare", default="")
+    ap.add_argument("--opts", default="{}", help="JSON dict of extra minimize options")
     a = ap.parse_args()
     if a.worker:
-        return worker(a.worker)
+        return worker(a.worker, json.loads(a.opts))
 
     sys.path.insert(0, str(ROOT))
     from jaxglobal.problems import CONSTRAINED_PROBLEMS, PROBLEMS
@@ -65,7 +67,7 @@ def main():
     rows = []
     print(f"{'problem':20s} {'cold':>7s} {'warm':>7s} {'nodes':>6s}  status     gap" + ("   (ref cold / warm / nodes)" if ref else ""))
     for n in names:
-        p = subprocess.run([sys.executable, __file__, "--worker", n], capture_output=True, text=True)
+        p = subprocess.run([sys.executable, __file__, "--worker", n, "--opts", a.opts], capture_output=True, text=True)
         line = next((ln for ln in p.stdout.splitlines() if ln.startswith(TAG)), None)
         if line is None:
             print(f"{n:20s} ERROR {p.stderr.strip()[-300:]}")
