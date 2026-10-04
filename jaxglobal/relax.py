@@ -30,9 +30,11 @@ Rules come in four kinds:
   ``jax.grad(jax.grad(primitive))`` and interpreting *that* jaxpr in interval
   mode.
 
-This is a proof of concept: arithmetic is ordinary floating point, not
-outward-rounded, so the bounds are not rigorous in the verified-computing
-sense.
+Arithmetic is ordinary floating point. With ``Ctx.safe`` every rule's result
+is widened outward by a few ulps of its error scale (``widen``: lo and cv down,
+hi and cc up), which makes the bounds valid up to the assumption that XLA's
+transcendentals are within a few ulps; see ``docs/ROADMAP.md`` for what that
+does and does not guarantee.
 """
 
 from __future__ import annotations
@@ -41,6 +43,7 @@ from typing import Callable, NamedTuple
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jax import lax
 from jax.extend import core as jcore
 
@@ -66,6 +69,7 @@ class Unknown(NamedTuple):
 class Ctx(NamedTuple):
     interval_only: bool = False
     multivariate: bool = False  # Tsoukalas-Mitsos products (tighter, slower to compile)
+    safe: bool = False  # widen every rule's result outward by a few ulps (see ``widen``)
 
 
 def is_mc(v):
@@ -192,7 +196,7 @@ def alphabb_rule(ctx: Ctx, f, x: MC, rng, d2rng) -> MC:
     return tighten(MC(flo, fhi, cv, cc))
 
 
-def d2_interval(prim, params, x: MC):
+def d2_interval(prim, params, x: MC, safe=False):
     """Interval bounds of f'' over x's box, for f = the elementwise primitive.
 
     f'' is obtained by autodiff, traced to a jaxpr, and evaluated with this
@@ -206,7 +210,7 @@ def d2_interval(prim, params, x: MC):
     shape = jnp.shape(x.lo)
     closed = jax.make_jaxpr(d2)(jnp.zeros(max(1, x.lo.size), x.lo.dtype))
     flat = MC(*(jnp.reshape(c, (-1,)) for c in (x.lo, x.hi, x.lo, x.hi)))
-    (out,) = eval_jaxpr_mc(closed.jaxpr, closed.consts, [flat], Ctx(True))
+    (out,) = eval_jaxpr_mc(closed.jaxpr, closed.consts, [flat], Ctx(True, safe=safe))
     out = as_mc(out)
     return jnp.reshape(out.lo, shape), jnp.reshape(out.hi, shape)
 
@@ -531,6 +535,9 @@ def _ipow(ctx, eqn, x):
     conv = convex_rule(f, x, x.lo)
     conc = concave_rule(f, x, x.hi)
     d2 = (n * (n - 1) * x.lo ** (n - 2), n * (n - 1) * x.hi ** (n - 2))
+    if ctx.safe:  # closed-form f'' bounds: round outward like every other rule
+        pad = SAFE_K * float(jnp.finfo(x.lo.dtype).eps) * (jnp.abs(d2[0]) + jnp.abs(d2[1]))
+        d2 = (d2[0] - pad, d2[1] + pad)
     mixed = alphabb_rule(ctx, f, x, (x.lo**n, x.hi**n), d2)
     return select_mc(x.lo >= 0, conv, select_mc(x.hi <= 0, conc, mixed))
 
@@ -644,7 +651,7 @@ AUTO_UNIVARIATE = {
 
 def _auto_rule(ctx, eqn, x):
     rng = AUTO_UNIVARIATE[eqn.primitive.name](x.lo, x.hi)
-    d2 = (None, None) if ctx.interval_only else d2_interval(eqn.primitive, eqn.params, x)
+    d2 = (None, None) if ctx.interval_only else d2_interval(eqn.primitive, eqn.params, x, ctx.safe)
 
     def f(z):
         return eqn.primitive.bind(z, **eqn.params)
@@ -719,6 +726,134 @@ def _select(ctx, eqn, pred, *cases):
 
 
 # ---------------------------------------------------------------------------
+# Outward rounding ("safe" mode)
+# ---------------------------------------------------------------------------
+
+SAFE_K = 4.0  # ulps: correctly rounded +,-,*,/ need 1; XLA's exp/log/tanh/sin are assumed within a few
+# Data movement and exact selection: no rounding happens, so nothing to widen.
+NOROUND = {
+    "slice", "squeeze", "reshape", "broadcast_in_dim", "transpose", "concatenate", "pad", "dynamic_slice",
+    "dynamic_update_slice", "gather", "rev", "convert_element_type", "copy", "copy_p", "expand_dims",
+    "reduce_precision", "stack", "unstack", "split", "select_n", "neg",
+}  # fmt: skip
+# Sums of n terms: the error scales with n times the sum of the |terms|, not with |result|.
+SUMS = {"reduce_sum", "cumsum", "dot_general"}
+# Outputs that are mathematically >= 0 (always, or when every operand is): widening must not push lo below 0,
+# or sqrt / log of a box that touches 0 (``x**2 + y**2`` near the origin) turns into NaN / -inf.
+NONNEG = {"square", "abs", "exp", "exp2", "sqrt", "rsqrt", "cosh"}
+NONNEG_IF = {"add", "add_any", "mul", "div", "reduce_sum", "cumsum", "dot_general", "max"}
+
+
+def _nonneg(eqn, invals, out):
+    """Elementwise mask where the true result is >= 0 and the rule's own lo already says so."""
+    name = eqn.primitive.name
+    if name in NONNEG or (name == "integer_pow" and eqn.params["y"] % 2 == 0):
+        return out.lo >= 0
+    if name in NONNEG_IF:
+        ok = jnp.asarray(True)
+        for v in invals:
+            lo = v.lo if is_mc(v) else None if isinstance(v, Unknown) else jnp.asarray(v)
+            if lo is None or not jnp.issubdtype(jnp.asarray(lo).dtype, jnp.floating):
+                return None
+            ok = ok & jnp.all(jnp.asarray(lo) >= 0)
+        return (out.lo >= 0) & ok
+    return None
+
+
+def _scale(v):
+    """Box-constant magnitude of an operand (None if not numeric); non-finite entries count as 0."""
+    if is_mc(v):
+        m = jnp.maximum(jnp.abs(v.lo), jnp.abs(v.hi))
+    elif isinstance(v, Unknown):
+        return None
+    else:
+        a = jnp.asarray(v)
+        if not jnp.issubdtype(a.dtype, jnp.floating):
+            return None
+        m = jnp.abs(a)
+    return jnp.where(jnp.isfinite(m), m, 0.0)
+
+
+def _fit(s, shape):
+    """``s`` broadcast to ``shape`` when it is elementwise-compatible, else its max (coarser, still valid)."""
+    if jnp.shape(s) == tuple(shape):
+        return s
+    try:
+        return jnp.broadcast_to(s, shape)
+    except ValueError:
+        return jnp.max(s)
+
+
+def _sum_count(eqn, x):
+    name = eqn.primitive.name
+    if name == "reduce_sum":
+        axes = eqn.params["axes"]
+        return int(np.prod([x.shape[a] for a in axes])) if axes else 1
+    if name == "cumsum":
+        return int(x.shape[eqn.params["axis"]])
+    (ca, _), _ = eqn.params["dimension_numbers"]
+    return int(np.prod([x.shape[a] for a in ca])) if ca else 1
+
+
+def _fabs(v):
+    """Finite magnitude of a (possibly infinite) array."""
+    a = jnp.abs(v)
+    return jnp.where(jnp.isfinite(a), a, 0.0)
+
+
+def widen(eqn, invals, out):
+    """Outward-rounded ``out``: lo, cv down and hi, cc up by ``SAFE_K`` ulps of the rule's error scale.
+
+    The margin is a function of the box only (``lo``/``hi`` of the result and
+    of the operands), not of the evaluation point, so cv stays a convex
+    function of the point with unchanged subgradients and only its value
+    moves. The error scale is the magnitude of the result plus the sum and the
+    product of the operand magnitudes (the terms a McCormick facet combines;
+    their cancellation is what the result's own magnitude would miss), and the
+    square of a unary operand's (alphaBB shifts by ``a (z - L)(z - U)``).
+    Sums of n terms use n times the sum of the magnitudes of the terms.
+    """
+    name = eqn.primitive.name
+    if not is_mc(out) or name in NOROUND:
+        return out
+    dt = out.lo.dtype
+    if not jnp.issubdtype(dt, jnp.floating):
+        return out
+    eps = float(jnp.finfo(dt).eps)
+    shape = jnp.shape(out.lo)
+    s_out = jnp.maximum(_fabs(out.lo), _fabs(out.hi))
+    ss = [s for s in map(_scale, invals) if s is not None]
+    if name in SUMS and ss and len(ss) == len(invals):
+        x0 = invals[0].lo if is_mc(invals[0]) else jnp.asarray(invals[0])
+        S = (_sum_count(eqn, x0) + 1) * _fit(eqn.primitive.bind(*ss, **eqn.params), shape)
+    elif ss:
+        fit = [_fit(s, shape) for s in ss]
+        S = sum(fit)
+        prod = fit[0]
+        for s in fit[1:]:
+            prod = prod * s
+        S = S + prod + (fit[0] ** 2 if len(fit) == 1 else 0.0)
+    else:
+        S = 0.0
+    m = lax.stop_gradient(SAFE_K * eps * (s_out + S))
+    dn = lambda v: jnp.where(jnp.isfinite(v), v - m, v)  # noqa: E731
+    up = lambda v: jnp.where(jnp.isfinite(v), v + m, v)  # noqa: E731
+    lo, cv = dn(out.lo), dn(out.cv)
+    nn = _nonneg(eqn, invals, out)
+    if nn is not None:
+        lo, cv = jnp.where(nn, jnp.maximum(lo, 0.0), lo), jnp.where(nn, jnp.maximum(cv, 0.0), cv)
+    return MC(lo, up(out.hi), cv, up(out.cc))
+
+
+def apply_rule(ctx, eqn, invals):
+    """``RULES[primitive](ctx, eqn, *invals)``, outward-widened when ``ctx.safe``."""
+    outs = RULES[eqn.primitive.name](ctx, eqn, *invals)
+    if not ctx.safe or eqn.primitive.multiple_results:
+        return outs
+    return widen(eqn, invals, outs)
+
+
+# ---------------------------------------------------------------------------
 # The interpreter
 # ---------------------------------------------------------------------------
 
@@ -746,7 +881,7 @@ def eval_jaxpr_mc(jaxpr, consts, args, ctx: Ctx = Ctx()):
         if not any(_relaxable(v) for v in invals):
             outs = eqn.primitive.bind(*invals, **eqn.params)
         elif name in RULES:
-            outs = RULES[name](ctx, eqn, *invals)
+            outs = apply_rule(ctx, eqn, invals)
         else:
             sub = next((eqn.params[p] for p in SUBJAXPR_PARAMS if p in eqn.params), None)
             if sub is None:
@@ -762,12 +897,13 @@ def eval_jaxpr_mc(jaxpr, consts, args, ctx: Ctx = Ctx()):
     return [read(v) for v in jaxpr.outvars]
 
 
-def relax(f, multivariate=False):
+def relax(f, multivariate=False, safe=False):
     """Return ``rf(x, lo, hi) -> MC``: relaxations of ``f`` on the box [lo, hi] at x.
 
-    ``multivariate=True`` relaxes products with the multivariate McCormick rule.
+    ``multivariate=True`` relaxes products with the multivariate McCormick rule;
+    ``safe=True`` rounds every result outward (``widen``).
     """
-    ctx = Ctx(multivariate=multivariate)
+    ctx = Ctx(multivariate=multivariate, safe=safe)
 
     def rf(x, lo, hi):
         closed = jax.make_jaxpr(f)(x)
@@ -777,9 +913,9 @@ def relax(f, multivariate=False):
     return rf
 
 
-def interval(f):
+def interval(f, safe=False):
     """Return ``fi(lo, hi) -> (lo, hi)``: natural interval extension of ``f``."""
-    rf = relax(f)
+    rf = relax(f, safe=safe)
 
     def fi(lo, hi):
         out = rf(0.5 * (lo + hi), lo, hi)

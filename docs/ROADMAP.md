@@ -508,7 +508,39 @@ as a branching point (it is a box vertex).
 
 - **Integer variables:** branch on integrality alongside spatial branching,
   giving MINLP. Mostly B&B bookkeeping; relaxations are unchanged.
-- **Rigorous mode:** directed rounding in interval and LP-bound computations.
+- **Correctness status (implemented):** `minimize(..., safe=True)` rounds every
+  quantity that feeds a lower bound outward by one mechanism at the
+  primitive-dispatch level (`relax.apply_rule` widens each primitive's
+  `lo`/`hi`/`cv`/`cc` by a few ulps scaled to the operands; sums by `n` times
+  the magnitude sum). The same wrapper serves intervals, McCormick, FBBT's
+  forward pass, univariate envelopes (grid values are enclosures, hull lines
+  lowered), alphaBB (Hessian enclosure, enlarged alpha, shifted values) and the
+  lifted rule cuts; LP cut constants, row normalization, the change of
+  variables and the weak-duality certificate carry explicit margins; CROWN lines
+  carry a heuristic margin. Cuts stay valid because margins only lower a
+  minorant's constant. Measured on five built-in problems the node count is
+  unchanged and warm solves cost about the same, but tracing and compiling the
+  extra ops makes cold solves about 1.7x slower (about 3.7x without the XLA
+  disk cache), so it is **opt-in** (`bnb.SAFE_DEFAULT`). Independently of
+  `safe`, the incumbent is re-evaluated outside jit in float64 after every
+  search (`Result.verified`, `Result.max_violation`; a failed check turns
+  `optimal` into `unverified`), and `tests/test_fuzz.py` plus
+  `benchmarks/check_wrong.py` compare bounds with dense samples and MINLPLib
+  references.
+  *Guaranteed (modulo the assumptions):* a returned point is checked to
+  `feas_tol` in float64; with `safe`, a bound is not undercut by operation
+  rounding in the arithmetic above. *Assumed:* XLA transcendentals are accurate
+  to a few ulps (the margin is `SAFE_K` = 4 eps relative, not a proof); autodiff
+  subgradients are used only through margins on the constant, so their own
+  rounding is covered only by that factor; local NLP solvers are untrusted and
+  verified a posteriori. *Not rigorous:* plain-float evaluation of tangent
+  lines in CROWN and of grid points where a heuristic margin stands in for
+  interval evaluation, FBBT's relative 1e-10 padding, the IPM duals (safe by
+  weak duality only up to the certificate's float evaluation), constants of
+  the affine composition in the lifted LP, `reduce_ranges`' absolute 1e-9
+  slack, and feasibility is to `feas_tol`, not exact. A fully rigorous mode
+  still needs verified transcendental enclosures and an exact LP-dual check.
+- **Rigorous mode (remaining):** directed rounding in interval and LP-bound computations.
   JAX has no rounding-mode control, so this means outward-rounding by 1 ulp per
   operation (`nextafter`) and a Neumaier–Shcherbina correction of the LP bound.
 

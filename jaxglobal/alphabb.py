@@ -36,9 +36,10 @@ import jax
 import jax.numpy as jnp
 
 from .fbbt import Const, make_tape, tape_cache
-from .relax import MC, Ctx, eval_jaxpr_mc, is_mc
+from .relax import MC, SAFE_K, Ctx, eval_jaxpr_mc, is_mc
 
 INTERVAL_CTX = Ctx(interval_only=True)
+SAFE_INTERVAL_CTX = Ctx(interval_only=True, safe=True)
 
 
 def is_smooth(tape):
@@ -56,13 +57,22 @@ def is_smooth(tape):
     return True
 
 
-def make_alphabb(fn, eigen=True):
+def make_alphabb(fn, eigen=True, safe=False):
     """Return ``prepare(lo, hi) -> (a, b)`` and ``apply(x, lo, hi, data) -> (cv, cc)``.
+
+    With ``safe`` the interval Hessian is outward-rounded, alpha is enlarged by
+    the rounding of the Gershgorin sums, and ``apply`` lowers (raises) cv (cc)
+    by the rounding of ``f(x)`` (an interval evaluation at the point, so the
+    value is rigorous while the subgradient stays that of the plain ``f``) and
+    of the shift terms.
 
     ``fn`` maps a 1-D array to an array; outputs are flattened to ``(m,)``,
     ``a`` and ``b`` have shape ``(m, n)``. ``prepare`` returns ``None`` when
     ``fn`` is not smooth (then ``apply`` is never needed).
     """
+
+    ictx = SAFE_INTERVAL_CTX if safe else INTERVAL_CTX
+    eps = float(jnp.finfo(jnp.float64).eps)
 
     def flat(x):
         return jnp.reshape(fn(x), (-1,))
@@ -79,7 +89,7 @@ def make_alphabb(fn, eigen=True):
             return None
         try:
             closed = jax.make_jaxpr(jax.jacfwd(jax.jacfwd(flat)))(lo)
-            (H,) = eval_jaxpr_mc(closed.jaxpr, closed.consts, [MC(lo, hi, lo, hi)], INTERVAL_CTX)
+            (H,) = eval_jaxpr_mc(closed.jaxpr, closed.consts, [MC(lo, hi, lo, hi)], ictx)
         except NotImplementedError:
             return None
         H = H if is_mc(H) else MC(H, H, H, H)
@@ -100,13 +110,21 @@ def make_alphabb(fn, eigen=True):
         diag_hi = jnp.diagonal(hhi, axis1=1, axis2=2)
         a = jnp.maximum(0.0, -0.5 * (diag_lo - rad))
         b = jnp.maximum(0.0, 0.5 * (diag_hi + rad))
+        if safe:  # rounding of the Gershgorin sums: a slightly too small alpha would break convexity
+            pad = SAFE_K * eps * (n + 2)
+            a = a * (1 + pad) + pad * (jnp.abs(diag_lo) + rad)
+            b = b * (1 + pad) + pad * (jnp.abs(diag_hi) + rad)
         # a zero-width coordinate contributes nothing whatever its alpha
         a = jnp.where(dpos[None, :], a, 0.0)
         b = jnp.where(dpos[None, :], b, 0.0)
 
         # exact quadratic: a point interval Hessian Q; shift only the negative
         # (positive) curvature eigen-directions, by exactly |lambda|
-        quad = jnp.all((hlo == hhi) & jnp.isfinite(hlo), axis=(1, 2)) & eigen
+        if safe:  # outward-rounded Hessian of a quadratic is a few ulps wide; the eigen margin below covers it
+            point = (hhi - hlo) <= 1e-12 * (jnp.abs(hlo) + jnp.abs(hhi))
+        else:
+            point = hlo == hhi
+        quad = jnp.all(point & jnp.isfinite(hlo) & jnp.isfinite(hhi), axis=(1, 2)) & eigen
         Q = jnp.where(quad[:, None, None], 0.5 * (hlo + hhi), 0.0)
         lam, V = jnp.linalg.eigh(Q)  # V[:, :, k] is the k-th eigenvector
         tol = 1e-9 * jnp.max(jnp.abs(lam), axis=1, keepdims=True)
@@ -115,6 +133,9 @@ def make_alphabb(fn, eigen=True):
         Vt = jnp.swapaxes(V, 1, 2)  # (m, k, n)
         tlo = jnp.sum(jnp.minimum(Vt * lo, Vt * hi), axis=2)
         thi = jnp.sum(jnp.maximum(Vt * lo, Vt * hi), axis=2)
+        if safe:  # the range of t = V^T x must contain the true one
+            tm = SAFE_K * eps * (n + 1) * jnp.sum(jnp.abs(Vt) * jnp.maximum(jnp.abs(lo), jnp.abs(hi)), axis=2)
+            tlo, thi = tlo - tm, thi + tm
         return a, b, (quad, Vt, wcv, wcc, tlo, thi)
 
     def apply(x, lo, hi, data):
@@ -129,6 +150,24 @@ def make_alphabb(fn, eigen=True):
         fa, fb = jnp.all(jnp.isfinite(a), axis=1), jnp.all(jnp.isfinite(b), axis=1)
         cv = fx + jnp.sum(jnp.where(jnp.isfinite(a), a, 0.0) * q, axis=1) + jnp.where(fa, 0.0, -jnp.inf)
         cc = fx - jnp.sum(jnp.where(jnp.isfinite(b), b, 0.0) * q, axis=1) + jnp.where(fb, 0.0, jnp.inf)
+        if safe:
+            # rigorous value of f(x); gradients stay those of the plain evaluation
+            closed = jax.make_jaxpr(flat)(x)
+            (iv,) = eval_jaxpr_mc(closed.jaxpr, closed.consts, [MC(x, x, x, x)], SAFE_INTERVAL_CTX)
+            iv = iv if is_mc(iv) else MC(iv, iv, iv, iv)
+            flo, fhi = jnp.broadcast_to(iv.lo, fx.shape), jnp.broadcast_to(iv.hi, fx.shape)
+            n = x.size
+            pad = SAFE_K * eps * (n + 2)
+            sa = jnp.sum(jnp.abs(jnp.where(jnp.isfinite(a), a, 0.0) * q), axis=1)
+            sb = jnp.sum(jnp.abs(jnp.where(jnp.isfinite(b), b, 0.0) * q), axis=1)
+            tsc = jnp.maximum(jnp.abs(tlo), jnp.abs(thi))
+            se = jnp.sum(0.5 * wcv * 4 * tsc**2, axis=1)
+            sc = jnp.sum(0.5 * wcc * 4 * tsc**2, axis=1)
+            sg = jax.lax.stop_gradient
+            cv = cv + sg(flo - fx) - sg(pad * (jnp.abs(fx) + sa))
+            cc = cc + sg(fhi - fx) + sg(pad * (jnp.abs(fx) + sb))
+            ecv = ecv + sg(flo - fx) - sg(pad * (jnp.abs(fx) + se))
+            ecc = ecc + sg(fhi - fx) + sg(pad * (jnp.abs(fx) + sc))
         cv = jnp.maximum(jnp.where(jnp.isnan(cv), -jnp.inf, cv), jnp.where(jnp.isnan(ecv), -jnp.inf, ecv))
         cc = jnp.minimum(jnp.where(jnp.isnan(cc), jnp.inf, cc), jnp.where(jnp.isnan(ecc), jnp.inf, ecc))
         return cv, cc

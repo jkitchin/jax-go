@@ -40,7 +40,7 @@ import numpy as np
 
 from .fbbt import Const, joint_tape, output_bounds, propagate, tape_cache
 from .lp import EPS, _parts_fn, _safe_costs, ipm, reduce_ranges
-from .relax import MC, RULES, STRUCTURAL, Ctx, Unknown, is_mc
+from .relax import MC, SAFE_K, STRUCTURAL, Ctx, Unknown, apply_rule, is_mc
 
 
 AFFINE = set(STRUCTURAL) | {"neg", "sub"}
@@ -82,7 +82,7 @@ def _pattern(r):
 
 
 def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_rounds=3, tol=0.0,
-                        univariate=True, alphabb=True, multivariate=False):
+                        univariate=True, alphabb=True, multivariate=False, safe=False):
     """Return ``bound(lo, hi, cutoff) -> (lb, x_lp, infeasible, lo', hi')`` for one box.
 
     Same contract as ``lp.make_constrained_bounder`` (``ineq``/``eq`` may be
@@ -91,8 +91,10 @@ def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_ro
     univariate hull envelopes and alphaBB) on the ``x`` columns, so it is at
     least as tight as both formulations.
     """
-    prepare_parts, parts, (rel_f, _, _) = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate)
+    prepare_parts, parts, (rel_f, _, _) = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate, safe)
     n_f = 1
+    sctx = Ctx(multivariate=multivariate, safe=safe)
+    ceps = SAFE_K * EPS if safe else 0.0  # per-operation relative rounding allowance of the LP rows
     tape_of = tape_cache(lambda x: (joint_tape(f, ineq, eq, x),))
 
     def bound(lo, hi, cutoff=jnp.inf):
@@ -100,7 +102,7 @@ def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_ro
         dt = lo.dtype
         (tape,) = tape_of(lo)
         ob = output_bounds(tape, ineq, eq, jnp.asarray(cutoff, dt), tol)
-        vals, empty = propagate(tape, lo, hi, ob, fbbt_rounds)
+        vals, empty = propagate(tape, lo, hi, ob, fbbt_rounds, safe)
 
         # --- structure: which nodes are lifted, and the LP columns ---------
         lifts, N = [], n
@@ -130,6 +132,8 @@ def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_ro
         chi = jnp.where(jnp.isfinite(chi), chi, 1.0)
         chi = jnp.maximum(chi, clo)
         scale = jnp.maximum(chi - clo, 1e-9 * (1 + jnp.abs(clo)))  # v = clo + scale * u
+        scale = scale * (1 + 2 * ceps) + ceps * (jnp.abs(clo) + jnp.abs(chi))  # clo + scale >= chi in floats
+        vmag = jnp.maximum(jnp.abs(clo), jnp.abs(clo + scale))  # magnitude of every column
 
         # --- affine expressions of every MC slot: (E, c), E has a trailing N axis
         aff = {0: (jnp.eye(n, N, dtype=dt), jnp.zeros(n, dt))}
@@ -194,7 +198,7 @@ def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_ro
                 args = list(ins)
                 for i, p in zip(L.mc_pos, ps):
                     args[i] = MC(ins[i].lo, ins[i].hi, p, p)
-                out = RULES[eqn.primitive.name](Ctx(multivariate=multivariate), eqn, *args)
+                out = apply_rule(sctx, eqn, args)
                 outs = out if eqn.primitive.multiple_results else [out]
                 cv = jnp.concatenate([jnp.reshape(jnp.broadcast_to(o.cv, tape.shapes[s][0]), (-1,))
                                       for o, s in zip(outs, L.out_slots)])  # fmt: skip
@@ -207,6 +211,8 @@ def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_ro
             W = jnp.zeros((L.size, N), dt).at[jnp.arange(L.size), L.offset + jnp.arange(L.size)].set(1.0)
             A_lo, b_lo = -W, -cv
             A_hi, b_hi = W, cc
+            mA_lo, mb_lo = jnp.abs(W), jnp.abs(cv)  # magnitudes of the terms, for rounding margins
+            mA_hi, mb_hi = jnp.abs(W), jnp.abs(cc)
             for p, slot, Jl, Jh in zip(pts, L.in_slots, Jcv, Jcc):
                 E, c = flat(slot)
                 Jl = jnp.reshape(Jl, (L.size, -1))
@@ -214,10 +220,15 @@ def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_ro
                 d = jnp.reshape(p, (-1,)) - c
                 # w >= cv + Jl (E v + c - p)  ->  Jl E v - w <= -cv + Jl (p - c)
                 A_lo, b_lo = A_lo + Jl @ E, b_lo + Jl @ d
+                mA_lo, mb_lo = mA_lo + jnp.abs(Jl) @ jnp.abs(E), mb_lo + jnp.abs(Jl) @ jnp.abs(d)
+                mA_hi, mb_hi = mA_hi + jnp.abs(Jh) @ jnp.abs(E), mb_hi + jnp.abs(Jh) @ jnp.abs(d)
                 # w <= cc + Jh (E v + c - p)  ->  w - Jh E v <= cc - Jh (p - c)
                 A_hi, b_hi = A_hi - Jh @ E, b_hi - Jh @ d
             A = jnp.concatenate([A_lo, A_hi])
             b = jnp.concatenate([b_lo, b_hi])
+            if safe:  # rounding of b and of A v over the column ranges (loosens the row)
+                mA, mb = jnp.concatenate([mA_lo, mA_hi]), jnp.concatenate([mb_lo, mb_hi])
+                b = b + ceps * (N + 3) * (mb + jnp.abs(b) + mA @ vmag)
             ok = jnp.isfinite(b) & jnp.all(jnp.isfinite(A), axis=1)
             return jnp.where(ok[:, None], A, 0.0), jnp.where(ok, b, jnp.inf)
 
@@ -239,6 +250,11 @@ def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_ro
             for t in _pattern(len(L.mc_pos)):
                 rows.append(node_cuts(L, safe_point(L, point(L, t))))
 
+        def _pad_row(E, b, c):
+            if safe:
+                b = b + ceps * (N + 3) * (jnp.abs(b) + jnp.abs(c) + abs(tol) + jnp.abs(E) @ vmag)
+            return E, b
+
         # objective and constraint rows
         Ef, cf = flat(tape.outs[0])
 
@@ -255,6 +271,11 @@ def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_ro
             A = A.at[:n_f].add(-Ef)
             b = J @ p - val
             b = b.at[:n_f].add(cf) + jnp.where(jnp.arange(val.size) < n_f, 0.0, tol)
+            if safe:
+                mEf = jnp.zeros((val.size, N), dt).at[:n_f].set(jnp.abs(Ef))
+                mA = jnp.zeros((val.size, N), dt).at[:, :n].set(jnp.abs(J)) + mEf
+                mb = jnp.abs(J) @ jnp.abs(p) + jnp.abs(val) + jnp.abs(b) + jnp.zeros(val.size).at[:n_f].set(jnp.abs(cf)) + abs(tol)
+                b = b + ceps * (N + 3) * (mb + mA @ vmag)
             ok = jnp.isfinite(b) & jnp.all(jnp.isfinite(A), axis=1)
             return jnp.where(ok[:, None], A, 0.0), jnp.where(ok, b, jnp.inf)
 
@@ -266,26 +287,32 @@ def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_ro
         if ineq is not None:
             if not isinstance(tape.outs[k], Const):
                 E, c = flat(tape.outs[k])
-                rows.append((E, tol - c))
+                rows.append(_pad_row(E, tol - c, c))
             k += 1
         if eq is not None:
             if not isinstance(tape.outs[k], Const):
                 E, c = flat(tape.outs[k])
-                rows += [(E, tol - c), (-E, tol + c)]
+                rows += [_pad_row(E, tol - c, c), _pad_row(-E, tol + c, c)]
 
         # --- LP in unit coordinates u in [0, 1]^N ---------------------------
         def unit(A, b):
+            mb = jnp.abs(b) + jnp.abs(A) @ jnp.abs(clo)
             b = b - A @ clo
             A = A * scale
             nrm = jnp.linalg.norm(A, axis=1)
             live = jnp.isfinite(b) & (nrm > 0)
             nrm = jnp.where(live, nrm, 1.0)
-            return jnp.where(live[:, None], A / nrm[:, None], 0.0), jnp.where(live, b / nrm, 1.0)
+            An = jnp.where(live[:, None], A / nrm[:, None], 0.0)
+            bn = jnp.where(live, b / nrm, 1.0)
+            if safe:  # rounding of the change of variables and of the row scaling
+                bn = jnp.where(live, bn + ceps * (N + 3) * (jnp.abs(bn) + (mb + jnp.abs(A).sum(axis=1)) / nrm), bn)
+            return An, bn
 
         cu = Ef[0] * scale
         cn = jnp.maximum(jnp.linalg.norm(cu), 1e-300)
         chat = cu / cn
         f0 = cf[0] + Ef[0] @ clo
+        fmag = jnp.abs(cf[0]) + jnp.abs(Ef[0]) @ jnp.abs(clo)
         box_A = jnp.concatenate([jnp.eye(N), -jnp.eye(N)])
         box_b = jnp.concatenate([jnp.ones(N), jnp.zeros(N)])
 
@@ -294,6 +321,10 @@ def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_ro
             coef = chat + A.T @ y
             val = jnp.sum(jnp.minimum(coef, 0.0)) - y @ b
             err = (A.shape[0] + N + 2) * EPS * (jnp.sum(1.0 + jnp.abs(A).T @ y) + jnp.abs(b) @ y)
+            if safe:  # float evaluation of the certificate, and of chat = cu / cn
+                err = SAFE_K * err + ceps * (N + 3) * jnp.sum(jnp.abs(chat))
+                lbv = f0 + cn * (val - err) - ceps * (N + 3) * (fmag + jnp.abs(f0) + cn * (jnp.abs(val) + err))
+                return lbv, _safe_costs(coef, A, y)
             return f0 + cn * (val - err), _safe_costs(coef, A, y)
 
         # interval lower bound of f (with the univariate hull) is a floor for the LP bound

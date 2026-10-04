@@ -36,6 +36,7 @@ from concurrent.futures import ThreadPoolExecutor
 HERE = pathlib.Path(__file__).resolve().parent
 LIB = HERE / "minlplib"
 REL_GAP, ABS_GAP, FEAS_TOL = 1e-4, 1e-6, 1e-6
+EXTRA = {"safe": True} if os.environ.get("JAXGLOBAL_SAFE") == "1" else {}  # check_wrong.py --safe
 FIELDS = ["solver", "name", "status", "time", "primal", "dual", "nodes", "message"]
 TAG = "JAXGLOBAL-RESULT "  # marks the worker's result line among solver log output
 COUENNE = shutil.which("couenne") or "/Applications/AMPL/couenne"
@@ -75,7 +76,7 @@ def worker(name, tl):
         return dict(status="unsupported", message=str(e))
     t0 = time.perf_counter()
     r = minimize(M.f, M.lo, M.hi, ineq=M.ineq, eq=M.eq, abs_tol=ABS_GAP, rel_tol=REL_GAP,
-                 feas_tol=FEAS_TOL, time_limit=tl)  # fmt: skip
+                 feas_tol=FEAS_TOL, time_limit=tl, **EXTRA)  # fmt: skip
     if r.status == "unbounded_domain":
         return dict(status="unsupported", message="unbounded variables: " + r.message)
     p, d = M.sense * r.fun, M.sense * r.lower_bound  # back to the model's objective sense

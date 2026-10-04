@@ -18,8 +18,10 @@ backward passes are ``vjp``-s of the affine nodes, so the whole bound is a pure
 function of fixed-shape arrays: it ``jit``-s and ``vmap``-s over boxes.
 
 Whether CROWN applies is decided when the tape is traced: any primitive on the
-path from x to f without a rule makes the bound ``-inf`` (no error). Floating
-point is ordinary, not outward rounded.
+path from x to f without a rule makes the bound ``-inf`` (no error). With
+``safe`` the forward intervals are outward rounded and every line and the
+accumulated constant carry a rounding margin (a heuristic multiple of eps, not
+a proof: the lines come from plain float evaluations of the activations).
 """
 
 from __future__ import annotations
@@ -29,9 +31,11 @@ import jax.numpy as jnp
 from jax import lax
 
 from .fbbt import Const, _forward, make_tape, tape_cache
-from .relax import is_mc
+from .relax import SAFE_K, is_mc
 
 INF = jnp.inf
+EPS = float(jnp.finfo(jnp.float64).eps)
+CROWN_K = 4 * SAFE_K  # extra factor over SAFE_K: the lines use plain transcendental evaluations
 
 
 class Unsupported(Exception):
@@ -279,9 +283,10 @@ def _bilinear(xl, xu, yl, yu):
 class _Pass:
     """One box: slot values, relaxations, and the backward pass over the plan."""
 
-    def __init__(self, tape, plan, lo, hi, deep, cap):
+    def __init__(self, tape, plan, lo, hi, deep, cap, safe=False):
         self.tape, self.plan, self.lo, self.hi, self.deep, self.cap = tape, plan, lo, hi, deep, cap
-        self.vals, _ = _forward(tape, (lo, hi), {})
+        self.safe = safe
+        self.vals, _ = _forward(tape, (lo, hi), {}, safe)
         self.rel, self.tight = {}, {}
         self.var = {0} | {s for node, _, _ in plan for s in node.outs}
 
@@ -308,6 +313,15 @@ class _Pass:
             self.tight[slot] = (l, u)
         return self.tight[slot]
 
+    def _pad(self, lines, mag):
+        """Weaken lines (a_l, b_l, a_u, b_u) by their evaluation rounding; ``mag`` bounds |z| on the input box."""
+        if not self.safe:
+            return lines
+        al, bl, au, bu = lines
+        ml = CROWN_K * EPS * (jnp.abs(bl) + jnp.abs(al) * mag)
+        mu = CROWN_K * EPS * (jnp.abs(bu) + jnp.abs(au) * mag)
+        return al, bl - ml, au, bu + mu
+
     def relax(self):
         """Fill ``rel`` for every nonlinear node, in tape order."""
         for node, kind, ex in self.plan:
@@ -315,22 +329,28 @@ class _Pass:
             shp = self.tape.shapes[o][0]
             if kind == "unary":
                 l, u = self.box(node.ins[0])
-                self.rel[o] = ex(l, u)
+                self.rel[o] = self._pad(ex(l, u), jnp.maximum(jnp.abs(l), jnp.abs(u)))
             elif kind == "maxc":
                 i, rule = ex
                 l, u = self.box(node.ins[i])
                 c = jnp.asarray(self.value(node.ins[1 - i]), l.dtype)
                 b = lambda v: jnp.broadcast_to(v, shp)  # noqa: E731
-                self.rel[o] = rule(b(l), b(u), b(c))
+                self.rel[o] = self._pad(rule(b(l), b(u), b(c)), jnp.maximum(jnp.abs(b(l)), jnp.abs(b(u))))
             elif kind == "bil":
                 (xl, xu), (yl, yu) = self.box(node.ins[0]), self.box(node.ins[1])
-                self.rel[o] = _bilinear(*(jnp.broadcast_to(v, shp) for v in (xl, xu, yl, yu)))
+                bl4 = [jnp.broadcast_to(v, shp) for v in (xl, xu, yl, yu)]
+                axl, ayl, bl, axu, ayu, bu = _bilinear(*bl4)
+                if self.safe:  # |b| ~ |x||y| bounds the rounding of the constant; the slopes are exact box ends
+                    mg = CROWN_K * EPS * (jnp.abs(bl4[0]) + jnp.abs(bl4[1])) * (jnp.abs(bl4[2]) + jnp.abs(bl4[3]))
+                    bl, bu = bl - mg, bu + mg
+                self.rel[o] = (axl, ayl, bl, axu, ayu, bu)
 
     def lower(self, lam, slot=None):
         """Affine lower bound of ``lam . value[slot]`` (slot None: the output): (bound, A, c)."""
         slot = self.out if slot is None else slot
         lams = {slot: lam}
         c = jnp.zeros((), self.lo.dtype)
+        cm = jnp.zeros((), self.lo.dtype)  # magnitude of the terms summed into c (rounding margin)
         add = lambda s, v: lams.__setitem__(s, lams[s] + v if s in lams else v)  # noqa: E731
         for node, kind, ex in reversed(self.plan):
             o = node.outs[0]
@@ -342,6 +362,7 @@ class _Pass:
                 pos = lm >= 0
                 b = jnp.where(pos, bl, bu)
                 c = c + jnp.sum(jnp.where(lm == 0, 0.0, lm * b))
+                cm = cm + jnp.sum(jnp.where(lm == 0, 0.0, jnp.abs(lm * b)))
                 g = lm * jnp.where(pos, al, au)
                 src = node.ins[0 if kind == "unary" else ex[0]]
                 add(src, _unb(g, self.tape.shapes[src][0]))
@@ -349,6 +370,7 @@ class _Pass:
                 axl, ayl, bl, axu, ayu, bu = self.rel[o]
                 pos = lm >= 0
                 c = c + jnp.sum(jnp.where(lm == 0, 0.0, lm * jnp.where(pos, bl, bu)))
+                cm = cm + jnp.sum(jnp.where(lm == 0, 0.0, jnp.abs(lm * jnp.where(pos, bl, bu))))
                 for k, (ax, ay) in enumerate([(axl, axu), (ayl, ayu)]):
                     src = node.ins[k]
                     add(src, _unb(lm * jnp.where(pos, ax, ay), self.tape.shapes[src][0]))
@@ -365,13 +387,18 @@ class _Pass:
 
                 out0, vjp = jax.vjp(F, *zs)
                 c = c + jnp.sum(lm * out0)
+                cm = cm + jnp.sum(jnp.abs(lm * out0))
                 for i, g in zip(vi, vjp(lm)):
                     add(node.ins[i], g)
         A = lams.get(0, jnp.zeros_like(self.lo))
-        return c + jnp.sum(jnp.minimum(A * self.lo, A * self.hi)), A, c
+        val = c + jnp.sum(jnp.minimum(A * self.lo, A * self.hi))
+        if self.safe:  # rounding of the backward sums and of the final minimization
+            mag = cm + jnp.sum(jnp.maximum(jnp.abs(A * self.lo), jnp.abs(A * self.hi))) + jnp.abs(c)
+            val = val - CROWN_K * (len(self.plan) + self.lo.size + 2) * EPS * mag
+        return val, A, c
 
 
-def make_crown(f, deep=True, cap=512):
+def make_crown(f, deep=True, cap=512, safe=False):
     """Return ``bound(lo, hi, return_x=False) -> lb`` for one box (``-inf`` if CROWN does not apply).
 
     ``f(x) >= lb`` on ``[lo, hi]`` from backward linear bound propagation. With
@@ -390,7 +417,7 @@ def make_crown(f, deep=True, cap=512):
             res = (jnp.sum(jnp.asarray(out.val, lo.dtype)), lo)
             return res if return_x else res[0]
         try:
-            ps = _Pass(tape, plan, lo, hi, deep, cap)
+            ps = _Pass(tape, plan, lo, hi, deep, cap, safe)
             if out not in ps.var:  # f does not depend on x
                 return (jnp.sum(ps.vals[out]), lo) if return_x else jnp.sum(ps.vals[out])
             ps.out = out
