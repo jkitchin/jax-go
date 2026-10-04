@@ -197,8 +197,10 @@ Any AMPL `.nl` model (text or binary) can be loaded with
 * Bounds are first-order McCormick/αBB plus interval arithmetic. Tightened
   intermediate ranges from FBBT are not yet fed back into the relaxations
   (Wechsung-style reverse McCormick), and there is no probing.
-* Bound tightening adds compile time (the FBBT tape and the OBBT LPs are
-  separate kernels), which dominates wall time on the small test problems.
+* The first solve of a problem is mostly compilation on the small test
+  problems. Compiled kernels are cached, so repeat solves of the same
+  functions (on any box) are much faster; `jaxglobal.bnb.clear_cache()`
+  empties the cache.
 
 ## Natural next steps
 

@@ -35,7 +35,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from .fbbt import Const, make_tape
+from .fbbt import Const, make_tape, tape_cache
 from .relax import MC, Ctx, eval_jaxpr_mc, is_mc
 
 INTERVAL_CTX = Ctx(interval_only=True)
@@ -67,9 +67,14 @@ def make_alphabb(fn, eigen=True):
     def flat(x):
         return jnp.reshape(fn(x), (-1,))
 
-    def prepare(lo, hi):
+    @tape_cache
+    def smoothness(x):
+        tape = make_tape(fn, x)
         with jax.ensure_compile_time_eval():
-            smooth = is_smooth(make_tape(fn, lo))
+            return tape, is_smooth(tape)
+
+    def prepare(lo, hi):
+        _, smooth = smoothness(lo)
         if not smooth:
             return None
         try:

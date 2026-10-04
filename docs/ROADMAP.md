@@ -289,6 +289,42 @@ gaps on small boxes. Node counts against phase 1, with no regressions:
   problem has a trilinear term to validate against; trilinear terms are
   relaxed as nested bilinear McCormick (and lifted, with `lifted=True`).
 
+### Compile time
+
+After phase 2, wall time on most built-in problems was XLA compilation, not
+search. Changes:
+
+- **Kernel cache.** `minimize` keeps an LRU of compiled kernels keyed on the
+  functions and options (as `jit` keys on the function), so a repeat solve of
+  the same problem, on any box, skips tracing and compilation. Relaxation
+  tapes are also cached per input shape, so each kernel traces `f` once.
+- **Two kernels, not four.** FBBT, the node bound and DBBT are one kernel;
+  root (or tree) OBBT plus its leading FBBT is a second. The node sequence is
+  unchanged: FBBT, OBBT, FBBT, bound. Merging everything into one kernel
+  with `lax.cond` was about 2× slower, because `cond` under `vmap` runs
+  both branches.
+- **Kelley rounds as `lax.scan`** over a fixed-size cut buffer (unused slots
+  are dead rows), so the bound's LP is compiled once, not `n_kelley + 1`
+  times. The OBBT rounds stay unrolled: with the default 2 rounds a scan
+  saves little, and its dead rows moved the IPM's box bounds at the 1e-7
+  level, which on haverly roughly doubled the node count (the search is that
+  sensitive: `feas_tol` 1e-5 / 1e-6 / 1e-7 gives 19 / 45 / 87 nodes).
+
+`benchmarks/builtin.py` (each problem in a fresh process, solved twice):
+
+| | before | after |
+|---|---:|---:|
+| total, first solve | 206 s | 130 s |
+| total, repeat solve | 173 s | 18 s |
+| gramacy_lee, first / repeat | 4.8 / 3.9 s | 4.0 / 0.06 s |
+| G08, first / repeat | 28.4 / 25.4 s | 13.0 / 0.8 s |
+
+Node counts are unchanged except reactor (1007 → 797) and michalewicz_2d
+(11 → 13). The first solve is still mostly compilation, now dominated by
+the size of the relaxation jaxpr (`prepare` emits thousands of equations for
+an 8-equation `f`). A persistent compilation cache and leaner `prepare`
+tracing are the remaining options.
+
 ### Phase 3 — search (4 weeks)
 
 - **Branching.** Choose the variable by violation-weighted or pseudocost
@@ -340,8 +376,8 @@ gaps on small boxes. Node counts against phase 1, with no regressions:
 ## Risks
 
 - **JIT compile time** grows with jaxpr size and the number of rule variants.
-  Mitigation: cache compiled kernels per problem structure, and use
-  `jax.lax.scan` in place of unrolled loops.
+  Mitigated by the kernel cache and scanned Kelley rounds (see *Compile
+  time*); the first solve of a new problem still pays it.
 - **Fixed shapes.** Masks and padding waste work when the batch is
   half-empty. Use a few size buckets.
 - **The extended formulation on GPU** produces large sparse LPs. First-order

@@ -38,7 +38,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from .fbbt import Const, joint_tape, output_bounds, propagate
+from .fbbt import Const, joint_tape, output_bounds, propagate, tape_cache
 from .lp import EPS, _parts_fn, _safe_costs, ipm, reduce_ranges
 from .relax import MC, RULES, STRUCTURAL, Ctx, Unknown, is_mc
 
@@ -93,11 +93,12 @@ def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_ro
     """
     prepare_parts, parts, (rel_f, _, _) = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate)
     n_f = 1
+    tape_of = tape_cache(lambda x: (joint_tape(f, ineq, eq, x),))
 
     def bound(lo, hi, cutoff=jnp.inf):
         n = lo.size
         dt = lo.dtype
-        tape = joint_tape(f, ineq, eq, lo)
+        (tape,) = tape_of(lo)
         ob = output_bounds(tape, ineq, eq, jnp.asarray(cutoff, dt), tol)
         vals, empty = propagate(tape, lo, hi, ob, fbbt_rounds)
 

@@ -24,6 +24,7 @@ Children are created from the tightened box.
 from __future__ import annotations
 
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 
 import jax
@@ -80,20 +81,130 @@ def make_bounder(f, n_fw=20, univariate=False, alphabb=False, multivariate=False
     return bound
 
 
-def nonlinear_variables(fns, lo, hi, n_samples=3, seed=0):
+def _hessian(fn):
+    return jax.jit(jax.hessian(lambda x: jnp.atleast_1d(fn(x))))
+
+
+def nonlinear_variables(fns, lo, hi, n_samples=3, seed=0, hessians=None):
     """Variables with a nonzero Hessian row in any function (sampled at random points).
 
     Branching on a variable that only enters linearly does not tighten
     McCormick relaxations, so B&B only splits the nonlinear ones.
+    ``hessians`` are prebuilt ``_hessian(fn)`` for ``fns`` (reused across calls).
     """
     rng = np.random.default_rng(seed)
     nl = np.zeros(lo.size, bool)
-    for fn in fns:
-        hess = jax.jit(jax.hessian(lambda x: jnp.atleast_1d(fn(x))))
+    for fn, hess in zip(fns, hessians or [_hessian(fn) for fn in fns]):
         for _ in range(n_samples):
             H = np.asarray(hess(jnp.asarray(rng.uniform(lo, hi))))  # (m, n, n)
             nl |= np.any(H != 0, axis=(0, 2)) | ~np.all(np.isfinite(H), axis=(0, 2))
     return nl if nl.any() else np.ones(lo.size, bool)
+
+
+# Compiled B&B kernels, reused by later ``minimize`` calls on the same
+# functions and options (most of a small solve is tracing and XLA compilation).
+# Functions are keyed by identity, as ``jax.jit`` does, so a function whose
+# behavior changes through mutable globals is not recompiled; call
+# ``clear_cache()`` after such a change.
+_CACHE = OrderedDict()
+_CACHE_SIZE = 32
+
+
+def clear_cache():
+    """Forget the compiled kernels kept across ``minimize`` calls."""
+    _CACHE.clear()
+
+
+def _cached(key, build):
+    """LRU lookup of ``key`` in the kernel cache; unhashable keys are not cached."""
+    try:
+        hit = key in _CACHE
+    except TypeError:
+        return build()
+    if hit:
+        _CACHE.move_to_end(key)
+        return _CACHE[key]
+    val = _CACHE[key] = build()
+    while len(_CACHE) > _CACHE_SIZE:
+        _CACHE.popitem(last=False)
+    return val
+
+
+class _Kernels:
+    """Everything ``minimize`` compiles for one problem, independent of the box.
+
+    ``bound(lo, hi, cutoff)`` tightens a batch of boxes by FBBT and bounds them;
+    ``obbt(lo, hi, cutoff)`` tightens a batch by OBBT then FBBT. They are
+    separate kernels that share no code, so neither the bounder nor the OBBT
+    LPs are compiled twice (a single kernel that switches OBBT on and off with
+    ``lax.cond`` compiles about twice as slowly: batching control flow around
+    the OBBT body processes it several times).
+    """
+
+    def __init__(self, f, ineq, eq, *, n_fw, n_kelley, fbbt, fbbt_rounds, dbbt, obbt, obbt_rounds,
+                 univariate, alphabb, multivariate, lifted, feas_tol):  # fmt: skip
+        constrained = ineq is not None or eq is not None
+        g, h = _vec(ineq), _vec(eq)
+
+        def violation(x):
+            return jnp.maximum(jnp.max(jnp.maximum(g(x), 0.0), initial=0.0), jnp.max(jnp.abs(h(x)), initial=0.0))
+
+        if lifted:
+            lb_lifted = make_lifted_bounder(f, ineq, eq, n_kelley=n_kelley, fbbt_rounds=fbbt_rounds, tol=feas_tol,
+                                            univariate=univariate, alphabb=alphabb,
+                                            multivariate=multivariate)
+
+            def raw_bound(blo, bhi, cutoff):
+                lb, x, _, rlo, rhi = lb_lifted(blo, bhi, cutoff)
+                fx = jnp.where(violation(x) <= feas_tol, f(x), jnp.inf)
+                return lb, x, fx, rlo, rhi
+        elif constrained:
+            cb = make_constrained_bounder(f, ineq, eq, n_kelley=n_kelley, tol=feas_tol, univariate=univariate,
+                                          alphabb=alphabb, multivariate=multivariate)
+
+            def raw_bound(blo, bhi, cutoff):
+                lb, x, _, rlo, rhi = cb(blo, bhi, cutoff)
+                fx = jnp.where(violation(x) <= feas_tol, f(x), jnp.inf)
+                return lb, x, fx, rlo, rhi
+        else:
+            raw_bound = make_bounder(f, n_fw, univariate=univariate, alphabb=alphabb, multivariate=multivariate)
+        tighten = make_fbbt(f, ineq, eq, rounds=fbbt_rounds, feas_tol=feas_tol) if fbbt else None
+        lp_tighten = make_obbt(f, ineq, eq, rounds=obbt_rounds, tol=feas_tol, univariate=univariate,
+                                alphabb=alphabb, multivariate=multivariate) if obbt else None
+
+        def node(blo, bhi, cutoff):
+            """Tighten, then bound one box. Returns (lb, x, f(x), lo', hi')."""
+            empty = jnp.array(False)
+            if tighten is not None:
+                blo, bhi, empty = tighten(blo, bhi, cutoff)
+            lb, x, fx, rlo, rhi = raw_bound(blo, bhi, cutoff)
+            if not dbbt:
+                rlo, rhi = blo, bhi
+            # an empty box holds no feasible point with f <= cutoff
+            return (jnp.where(empty, cutoff, lb), x, jnp.where(empty, jnp.inf, fx),
+                    jnp.where(empty, blo, rlo), jnp.where(empty, bhi, rhi))  # fmt: skip
+
+        def node_obbt(blo, bhi, cutoff):
+            """FBBT, then OBBT on the result. Returns (lo', hi', empty).
+
+            ``node`` runs FBBT again on the OBBT box, so the sequence is
+            FBBT, OBBT, FBBT, bound."""
+            empty = jnp.array(False)
+            if tighten is not None:
+                blo, bhi, empty = tighten(blo, bhi, cutoff)
+            blo, bhi, e = lp_tighten(blo, bhi, cutoff)
+            return blo, bhi, empty | e
+
+        self.bound = jax.jit(jax.vmap(node, in_axes=(0, 0, None)))
+        self.obbt = jax.jit(jax.vmap(node_obbt, in_axes=(0, 0, None))) if obbt else None
+        self.viol = jax.jit(jax.vmap(violation))
+        self.fvals = jax.jit(jax.vmap(f))
+        self.fns = [fn for fn in (f, ineq, eq) if fn is not None]
+        self.hessians = [_hessian(fn) for fn in self.fns]
+
+
+def _vec(fn):
+    return lambda x: jnp.atleast_1d(fn(x)) if fn is not None else jnp.zeros(0)
 
 
 @dataclass
@@ -200,86 +311,48 @@ def minimize(
             )  # fmt: skip
     width0 = np.where(hi > lo, hi - lo, 1.0)
     constrained = ineq is not None or eq is not None
-    branchable = nonlinear_variables([fn for fn in (f, ineq, eq) if fn is not None], lo, hi)
-    width0 = np.where(branchable, width0, np.inf)  # never split linear variables
-
-    def vec(fn):
-        return lambda x: jnp.atleast_1d(fn(x)) if fn is not None else jnp.zeros(0)
-
-    g, h = vec(ineq), vec(eq)
-
-    def violation(x):
-        return jnp.maximum(jnp.max(jnp.maximum(g(x), 0.0), initial=0.0), jnp.max(jnp.abs(h(x)), initial=0.0))
-
     if obbt not in (False, None, "root", "tree"):
         raise ValueError(f"obbt must be False, 'root' or 'tree', not {obbt!r}")
-    if lifted:
-        lb_lifted = make_lifted_bounder(f, ineq, eq, n_kelley=n_kelley, fbbt_rounds=fbbt_rounds, tol=feas_tol,
-                                        univariate=univariate, alphabb=alphabb,
-                                        multivariate=multivariate)
+    opts = dict(n_fw=n_fw, n_kelley=n_kelley, fbbt=bool(fbbt), fbbt_rounds=fbbt_rounds, dbbt=bool(dbbt),
+                obbt=bool(obbt), obbt_rounds=obbt_rounds, univariate=univariate, alphabb=alphabb,
+                multivariate=multivariate, lifted=lifted, feas_tol=feas_tol)  # fmt: skip
+    K = _cached(("kernels", f, ineq, eq, tuple(sorted(opts.items()))), lambda: _Kernels(f, ineq, eq, **opts))
+    branchable = nonlinear_variables(K.fns, lo, hi, hessians=K.hessians)
+    width0 = np.where(branchable, width0, np.inf)  # never split linear variables
 
-        def raw_bound(blo, bhi, cutoff):
-            lb, x, _, rlo, rhi = lb_lifted(blo, bhi, cutoff)
-            fx = jnp.where(violation(x) <= feas_tol, f(x), jnp.inf)
-            return lb, x, fx, rlo, rhi
-    elif constrained:
-        cb = make_constrained_bounder(f, ineq, eq, n_kelley=n_kelley, tol=feas_tol, univariate=univariate,
-                                      alphabb=alphabb, multivariate=multivariate)
-
-        def raw_bound(blo, bhi, cutoff):
-            lb, x, _, rlo, rhi = cb(blo, bhi, cutoff)
-            fx = jnp.where(violation(x) <= feas_tol, f(x), jnp.inf)
-            return lb, x, fx, rlo, rhi
-    else:
-        raw_bound = make_bounder(f, n_fw, univariate=univariate, alphabb=alphabb, multivariate=multivariate)
-    tighten = make_fbbt(f, ineq, eq, rounds=fbbt_rounds, feas_tol=feas_tol) if fbbt else None
-    lp_tighten = make_obbt(f, ineq, eq, rounds=obbt_rounds, tol=feas_tol, univariate=univariate,
-                            alphabb=alphabb, multivariate=multivariate) if obbt else None
-
-    def node(blo, bhi, cutoff, with_obbt=False):
-        """Tighten, then bound one box. Returns (lb, x, f(x), lo', hi')."""
-        empty = jnp.array(False)
-        if tighten is not None:
-            blo, bhi, e = tighten(blo, bhi, cutoff)
-            empty |= e
-        if with_obbt:
-            blo, bhi, e = lp_tighten(blo, bhi, cutoff)
-            empty |= e
-            if tighten is not None:
-                blo, bhi, e = tighten(blo, bhi, cutoff)
-                empty |= e
-        lb, x, fx, rlo, rhi = raw_bound(blo, bhi, cutoff)
-        if not dbbt:
-            rlo, rhi = blo, bhi
-        # an empty box holds no feasible point with f <= cutoff
-        return (jnp.where(empty, cutoff, lb), x, jnp.where(empty, jnp.inf, fx),
-                jnp.where(empty, blo, rlo), jnp.where(empty, bhi, rhi))  # fmt: skip
-
-    bound = jax.jit(jax.vmap(node, in_axes=(0, 0, None)))
-    bound_obbt = jax.jit(jax.vmap(lambda a, b, c: node(a, b, c, True), in_axes=(0, 0, None))) if obbt else None
-
-    viol = jax.jit(violation)
-    solve_local = make_local(f, ineq, eq, lo, hi, local_solver)
+    solve_local = _cached(("local", f, ineq, eq, local_solver, lo.tobytes(), hi.tobytes()),
+                          lambda: make_local(f, ineq, eq, lo, hi, local_solver))
 
     def local(starts):
         """Local solves from each start; returns (x, f) of the best feasible result."""
         X = np.clip(np.asarray(solve_local(np.asarray(starts, dtype=np.float64))), lo, hi)
-        F = np.asarray(jax.vmap(f)(jnp.asarray(X)), dtype=np.float64)
+        F = np.asarray(K.fvals(jnp.asarray(X)), dtype=np.float64)
         if constrained:
-            F = np.where(np.asarray(jax.vmap(viol)(jnp.asarray(X))) <= feas_tol, F, np.inf)
+            F = np.where(np.asarray(K.viol(jnp.asarray(X))) <= feas_tol, F, np.inf)
         F = np.where(np.isnan(F), np.inf, F)
         i = int(np.argmin(F))
         return X[i], float(F[i])
 
+    def padded(blo, bhi):
+        pad = batch - len(blo)
+        return (jnp.asarray(np.concatenate([blo, np.repeat(blo[:1], pad, 0)])),
+                jnp.asarray(np.concatenate([bhi, np.repeat(bhi[:1], pad, 0)])))  # fmt: skip
+
     def evaluate(blo, bhi, with_obbt=False):
         """Tighten and bound a batch of boxes: (lb, x, f(x), lo', hi')."""
         k = len(blo)
-        pad = batch - k
-        plo = np.concatenate([blo, np.repeat(blo[:1], pad, 0)])
-        phi = np.concatenate([bhi, np.repeat(bhi[:1], pad, 0)])
-        fn = bound_obbt if with_obbt else bound
-        out = fn(jnp.asarray(plo), jnp.asarray(phi), jnp.asarray(ub, dtype=jnp.float64))
-        return tuple(np.asarray(a)[:k] for a in out)
+        cutoff = jnp.asarray(ub, dtype=jnp.float64)
+        empty = np.zeros(k, bool)
+        if with_obbt:
+            # the root OBBT pass runs on one box: do not pad it to a full batch
+            # (padding would compile the OBBT kernel at the batch shape as well)
+            args = padded(blo, bhi) if obbt == "tree" else (jnp.asarray(blo), jnp.asarray(bhi))
+            olo, ohi, oe = (np.asarray(a)[:k] for a in K.obbt(*args, cutoff))
+            blo, bhi, empty = np.where(oe[:, None], blo, olo), np.where(oe[:, None], bhi, ohi), oe
+        lb, x, fx, rlo, rhi = (np.asarray(a)[:k] for a in K.bound(*padded(blo, bhi), cutoff))
+        # an empty box holds no feasible point with f <= cutoff
+        return (np.where(empty, ub, lb), x, np.where(empty, np.inf, fx),
+                np.where(empty[:, None], blo, rlo), np.where(empty[:, None], bhi, rhi))  # fmt: skip
 
     ub, xbest = np.inf, 0.5 * (lo + hi)
     if seed_x is not None:  # feasible point found while bounding the domain

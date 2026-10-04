@@ -34,7 +34,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from .fbbt import Const, make_tape
+from .fbbt import Const, make_tape, tape_cache
 from .relax import AUTO_UNIVARIATE, MC, RULES, STRUCTURAL, Ctx, Unknown, eval_jaxpr_mc, is_mc, tighten
 
 INTERVAL_CTX = Ctx(interval_only=True)
@@ -219,6 +219,7 @@ def make_univariate(f, K=65, multivariate=False):
     """Return ``prepare(lo, hi) -> data`` and ``relax_with(x, lo, hi, data) -> MC``."""
     ctx = Ctx(interval_only=False, multivariate=multivariate)
 
+    @tape_cache
     def setup(x):
         tape = make_tape(f, x)
         with jax.ensure_compile_time_eval():  # structure only: no tracing
