@@ -16,8 +16,13 @@ def f(x):                       # Eggholder: very rugged, optimum on the boundar
            - a * jnp.sin(jnp.sqrt(jnp.abs(a - (b + 47))))
 
 r = minimize(f, [-512, -512], [512, 512])
-# Result(fun=-959.64066, lower_bound=-959.64144, x=[512. 404.231805], converged=True, nodes=153, ...)
+# Result(status='optimal', fun=-959.64066, lower_bound=-959.64066, gap=2.06e-07,
+#        x=[512. 404.23181], nodes=47, iterations=10, time=4.82s)
 ```
+
+Narrated, executed notebooks in [`examples/`](examples/README.md) walk through
+the relaxations, branch and bound, the test problems, the comparison with
+equation-based solvers, and batched throughput.
 
 ## How it works
 
@@ -74,7 +79,7 @@ r = minimize(f, [-512, -512], [512, 512])
 
 ![relaxations](figures/relaxations.png)
 
-## Results (`python examples/benchmark.py`)
+## Results ([`examples/03-test-problems.ipynb`](examples/03-test-problems.ipynb))
 
 Tolerance: gap ≤ max(1e-5, 1e-6·|f|). *Root LB* is plain interval arithmetic
 on the whole box. *mstart* is the fraction of 20 random L-BFGS-B starts that
@@ -82,23 +87,25 @@ reach f\*, which shows how multimodal each problem is.
 
 | problem | n | f\* (lit.) | found | proven LB | root LB | mstart | nodes | time |
 |---|---|---|---|---|---|---|---|---|
-| gramacy_lee | 1 | −0.869011 | −0.869011 | −0.869016 | −1 | 15% | 23 | 0.4s |
-| six_hump_camel | 2 | −1.031628 | −1.031628 | −1.031638 | −156 | 95% | 407 | 0.4s |
-| mccormick | 2 | −1.913223 | −1.913223 | −1.913228 | −13.5 | 55% | 41 | 0.2s |
-| goldstein_price | 2 | 3 | 3.000000 | 2.999990 | −8.8e7 | 60% | 8883 | 0.6s |
-| shubert | 2 | −186.7309 | −186.7309 | −186.7311 | −225 | 0% | 2399 | 0.5s |
-| michalewicz_2d | 2 | −1.801303 | −1.801303 | −1.801308 | −2 | 5% | 65 | 0.5s |
-| holder_table | 2 | −19.20850 | −19.20850 | −19.20851 | −33.2 | 0% | 415 | 0.7s |
-| eggholder | 2 | −959.6407 | −959.6407 | −959.6414 | −1070 | 0% | 153 | 0.5s |
-| hartmann3 | 3 | −3.862782 | −3.862780 | −3.862790 | −8.4 | 50% | 1769 | 0.3s |
-| styblinski_tang_3d | 3 | −117.4985 | −117.4985 | −117.4986 | −638 | 15% | 451 | 0.2s |
-| shekel10_4d | 4 | −10.536443† | −10.536443 | −10.536452 | −35.4 | 25% | 133 | 0.5s |
-| hartmann6 | 6 | −3.322368 | −3.322368 | −3.322378 | −8.4 | 55% | 6515 | 0.3s |
-| piecewise_2d (where/abs/max) | 2 | — | −0.823199 | −0.823201 | −3.7 | 25% | 87 | 0.5s |
-| tanh_net_2d (16-unit MLP) | 2 | — | −0.553102 | −0.553111 | −2.8 | 30% | 387 | 0.3s |
+| gramacy_lee | 1 | −0.869011 | −0.869011 | −0.869011 | −1 | 15% | 5 | 3.7s |
+| six_hump_camel | 2 | −1.031628 | −1.031628 | −1.031630 | −156 | 95% | 23 | 4.2s |
+| mccormick | 2 | −1.913223 | −1.913223 | −1.913225 | −13.5 | 55% | 11 | 2.0s |
+| goldstein_price | 2 | 3.000000 | 3.000000 | 3.000000 | −8.79e7 | 60% | 1445 | 13.3s |
+| shubert | 2 | −186.730909 | −186.730909 | −186.731063 | −225 | 0% | 303 | 5.5s |
+| michalewicz_2d | 2 | −1.801303 | −1.801297 | −1.801303 | −2 | 5% | 11 | 3.6s |
+| holder_table | 2 | −19.208503 | −19.208503 | −19.208519 | −33.2 | 0% | 191 | 7.7s |
+| eggholder | 2 | −959.640663 | −959.640663 | −959.640663 | −1.07e3 | 0% | 47 | 3.4s |
+| hartmann3 | 3 | −3.862782 | −3.862780 | −3.862786 | −8.4 | 50% | 155 | 3.7s |
+| styblinski_tang_3d | 3 | −117.498497 | −117.498497 | −117.498551 | −638 | 15% | 9 | 2.1s |
+| shekel10_4d | 4 | −10.536443† | −10.536443 | −10.536445 | −35.4 | 25% | 83 | 3.1s |
+| hartmann6 | 6 | −3.322368 | −3.322368 | −3.322378 | −8.4 | 55% | 1083 | 4.2s |
+| piecewise_2d (where/abs/max) | 2 | — | −0.823199 | −0.823206 | −3.7 | 25% | 27 | 5.0s |
+| tanh_net_2d (16-unit MLP) | 2 | — | −0.553102 | −0.553110 | −2.8 | 30% | 287 | 2.7s |
 
 † The usual −10.5364 is f(4,4,4,4); the true minimizer is slightly off that point.
-Times are wall-clock on a laptop CPU and include JIT compilation. For the two
+Times are wall-clock on a laptop CPU for a first (cold) call, so they are
+mostly JIT compilation; a second solve of the same function reuses the
+compiled kernels and takes a small fraction of that (see notebook 04). For the two
 problems without a published optimum, the tests check the certificate against
 a 401×401 brute-force grid.
 
@@ -130,13 +137,13 @@ relaxations.
 
 | problem | n | f\* | found | proven LB | nodes | time |
 |---|---|---|---|---|---|---|
-| G06 | 2 | −6961.81388 | −6961.81388 | −6961.8200 | 61 | 2.2s |
-| G08 | 2 | −0.0958250 | −0.0958250 | −0.0958257 | 99 | 3.8s |
-| G11 (equality) | 2 | 0.75 | 0.7499996 | 0.7499989 | 127 | 1.3s |
-| G24 (disconnected feasible set) | 2 | −5.508013 | −5.508013 | −5.508016 | 43 | 1.7s |
-| G04 | 5 | −30665.539 | −30665.539 | −30665.552 | 67 | 5.8s |
-| Haverly pooling | 9 | −400 | −400 | −400.0004 | 157 | 20s |
-| Reactor network | 6 | −0.388811 | −0.3888114 | −0.3888124 | 1935 | 12.7s |
+| G06 | 2 | −6961.813876 | −6961.813899 | −6961.818238 | 5 | 5.3s |
+| G08 | 2 | −0.095825 | −0.095825 | −0.095829 | 17 | 10.6s |
+| G11 (equality) | 2 | 0.750000 | 0.750000 | 0.749996 | 19 | 3.0s |
+| G24 (disconnected feasible set) | 2 | −5.508013 | −5.508013 | −5.508014 | 3 | 4.7s |
+| G04 | 5 | −30665.538672 | −30665.538709 | −30665.541579 | 7 | 10.1s |
+| Haverly pooling | 9 | −400.000000 | −400.000007 | −400.000116 | 43 | 7.9s |
+| Reactor network | 6 | −0.388811 | −0.388812 | −0.388814 | 821 | 15.0s |
 
 Equality optima can sit slightly below f\* because of `feas_tol` (1e-6).
 
@@ -147,8 +154,11 @@ using a `jnp`→Pyomo shim on numpy object arrays. It then runs SCIP and Couenne
 (via `.nl` files) and BARON and LindoGlobal (via GAMS). `where`/`maximum` and
 `tanh` had to be reformulated by hand. BARON rejects every model containing
 `sin`/`cos` ("Cannot handle function 'sin'"). Results go to
-`examples/compare_results.json`, and `examples/compare_plot.py` draws
-`figures/benchmark.png`. The slides in `slides/jaxglobal.md` summarize this.
+`examples/compare_results.json`. The notebook
+[`examples/04-equation-based-solvers.ipynb`](examples/04-equation-based-solvers.ipynb)
+walks through the shim and the reformulations, re-measures jaxglobal (cold,
+including compilation, and compiled), and draws `figures/benchmark.png`. The
+slides in `slides/jaxglobal.md` summarize this.
 
 **Pyomo side by side.** The notebooks in [`notebooks/`](notebooks/README.md)
 write each model twice, in Pyomo and as a plain JAX function, and solve both:
@@ -176,8 +186,7 @@ nonzero on any wrong or unverified MINLPLib answer.
 ```bash
 pip install -e '.[dev]'
 pytest -q                      # soundness, cut validity, global optima (57 tests, ~30 s)
-python examples/benchmark.py
-python examples/figures.py
+cd examples && ./run_nb.sh 03-test-problems && cd ..   # see examples/README.md
 
 # MINLPLib benchmark (phase 0 of docs/ROADMAP.md)
 python benchmarks/minlplib/fetch.py          # 322 continuous instances, ≤ 50 variables
