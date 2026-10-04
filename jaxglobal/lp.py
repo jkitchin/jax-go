@@ -236,16 +236,20 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
             err = (A.shape[0] + n + 2) * EPS * (jnp.sum(1.0 + jnp.abs(A).T @ y) + jnp.abs(bvec) @ y)
             return tlo_s + T * (val - err), _safe_costs(coef[:n], A[:, :n], y)
 
-        const, coef = const0, coef0
-        best = jnp.where(bad_t, -jnp.inf, tlo)
-        u = jnp.full(n, 0.5)
-        rlo, rhi = lo, hi
-        for k in range(n_kelley + 1):
+        # Kelley rounds as one lax.scan over a fixed-size cut buffer: slots for
+        # cuts not generated yet hold const = -inf, which rows() turns into
+        # dead rows (0 <= 1), so every round has the same LP shape.
+        P0 = const0.shape[0]
+        const = jnp.concatenate([const0, jnp.full((n_kelley,) + const0.shape[1:], -jnp.inf)])
+        coef = jnp.concatenate([coef0, jnp.zeros((n_kelley,) + coef0.shape[1:])])
+
+        def kelley(carry, k):
+            const, coef, best, rlo, rhi, _ = carry
             A, bvec = rows(const, coef)
             nA = A.shape[0]
             z, y, lb = ipm(
                 cobj, jnp.concatenate([A, box_A]), jnp.concatenate([bvec, box_b]), ipm_iters,
-                cert=lambda y, A=A, bvec=bvec, nA=nA: dual(A, bvec, y[:nA])[0],
+                cert=lambda y: dual(A, bvec, y[:nA])[0],
             )  # fmt: skip
             lb = jnp.where(jnp.isnan(lb) | bad_t, -jnp.inf, lb)
             best = jnp.maximum(best, lb)
@@ -254,10 +258,16 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
             klo, khi = reduce_ranges(lo, hi, lb, T * r / jnp.where(w > 0, w, 1.0), cutoff)
             rlo, rhi = jnp.maximum(rlo, klo), jnp.minimum(rhi, khi)
             u = jnp.clip(z[:n], 0.0, 1.0)
-            if k < n_kelley:  # Kelley: add cuts at the LP solution
+            # Kelley: add cuts at the LP solution (not after the last round)
+            def add(cc):
                 ck, gk = cuts_at(lo + w * u)
-                const = jnp.concatenate([const, ck[None]])
-                coef = jnp.concatenate([coef, gk[None]])
+                return cc[0].at[P0 + k].set(ck), cc[1].at[P0 + k].set(gk)
+
+            const, coef = jax.lax.cond(k < n_kelley, add, lambda cc: cc, (const, coef))
+            return (const, coef, best, rlo, rhi, u), None
+
+        init = (const, coef, jnp.where(bad_t, -jnp.inf, tlo), lo, hi, jnp.full(n, 0.5))
+        (_, _, best, rlo, rhi, u), _ = jax.lax.scan(kelley, init, jnp.arange(n_kelley + 1))
 
         lb = jnp.where(infeasible, jnp.inf, best)
         return lb, lo + w * u, infeasible, rlo, rhi
@@ -330,7 +340,7 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
             Z, B = jax.vmap(solve, (0, None, None))(C, A, bvec)
             ulo = jnp.maximum(ulo, jnp.where(jnp.isfinite(B[:n]), B[:n], 0.0))
             uhi = jnp.minimum(uhi, jnp.where(jnp.isfinite(B[n:]), -B[n:], 1.0))
-            if k < rounds - 1:
+            if k < rounds - 1:  # cuts at this round's 2n LP solutions
                 ck, gk = jax.vmap(cuts_at)(lo + w * Z)
                 const, coef = jnp.concatenate([const, ck]), jnp.concatenate([coef, gk])
 

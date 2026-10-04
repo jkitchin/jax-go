@@ -100,6 +100,35 @@ def make_tape(fn, x):
     return Tape(nodes, shapes, outs)
 
 
+def _has_tracer(tape):
+    """True if a constant of the tape is a tracer of some enclosing transformation."""
+    consts = [a.val for node in tape.nodes for a in node.ins if isinstance(a, Const)]
+    consts += [a.val for a in tape.outs if isinstance(a, Const)]
+    return any(isinstance(c, jax.core.Tracer) for c in consts)
+
+
+def tape_cache(build):
+    """Memoize ``build(x) -> (tape, ...)`` on the shape and dtype of ``x``.
+
+    The relaxers and FBBT rebuild the same tape (and its structural analysis)
+    every time they are traced; this keeps one per input shape. A tape whose
+    constants are tracers (``fn`` closes over a value being transformed, e.g.
+    a parameter under ``vmap``) belongs to that one trace and is not kept.
+    """
+    cache = {}
+
+    def get(x):
+        key = (tuple(jnp.shape(x)), jnp.result_type(x))
+        if key not in cache:
+            out = build(x)
+            if _has_tracer(out[0]):
+                return out
+            cache[key] = out
+        return cache[key]
+
+    return get
+
+
 # ---------------------------------------------------------------------------
 # Interval helpers
 # ---------------------------------------------------------------------------
@@ -646,8 +675,10 @@ def make_fbbt(f, ineq=None, eq=None, rounds=5, feas_tol=1e-6):
     ``infeasible`` means no such point exists.
     """
 
+    tape_of = tape_cache(lambda x: (joint_tape(f, ineq, eq, x),))
+
     def fbbt(lo, hi, cutoff=INF):
-        tape = joint_tape(f, ineq, eq, lo)
+        (tape,) = tape_of(lo)
         ob = output_bounds(tape, ineq, eq, jnp.asarray(cutoff, lo.dtype), feas_tol)
         vals, empty = propagate(tape, lo, hi, ob, rounds)
         x = vals[0]
