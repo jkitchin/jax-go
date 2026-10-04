@@ -56,7 +56,7 @@ def is_smooth(tape):
     return True
 
 
-def make_alphabb(fn):
+def make_alphabb(fn, eigen=True):
     """Return ``prepare(lo, hi) -> (a, b)`` and ``apply(x, lo, hi, data) -> (cv, cc)``.
 
     ``fn`` maps a 1-D array to an array; outputs are flattened to ``(m,)``,
@@ -101,7 +101,7 @@ def make_alphabb(fn):
 
         # exact quadratic: a point interval Hessian Q; shift only the negative
         # (positive) curvature eigen-directions, by exactly |lambda|
-        quad = jnp.all((hlo == hhi) & jnp.isfinite(hlo), axis=(1, 2))
+        quad = jnp.all((hlo == hhi) & jnp.isfinite(hlo), axis=(1, 2)) & eigen
         Q = jnp.where(quad[:, None, None], 0.5 * (hlo + hhi), 0.0)
         lam, V = jnp.linalg.eigh(Q)  # V[:, :, k] is the k-th eigenvector
         tol = 1e-9 * jnp.max(jnp.abs(lam), axis=1, keepdims=True)

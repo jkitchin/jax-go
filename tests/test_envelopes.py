@@ -186,7 +186,7 @@ def _eigen_check(seed):
     from jaxglobal.alphabb import make_alphabb
 
     q = _rand_quadratic(seed)
-    prep, apply = make_alphabb(lambda x: jnp.atleast_1d(q(x)))
+    prep, apply = make_alphabb(lambda x: jnp.atleast_1d(q(x)), eigen=True)
     rng = np.random.default_rng(seed)
     lo, hi = jnp.asarray(-rng.uniform(0.5, 2, 4)), jnp.asarray(rng.uniform(0.5, 2, 4))
     a, b, eig = prep(lo, hi)

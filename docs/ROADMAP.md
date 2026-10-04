@@ -201,8 +201,17 @@ relaxations, choosing tree-OBBT variables by impact, and probing.
   No problem got worse. Nonsmooth functions (holder_table, eggholder,
   piecewise) are skipped.
 
+- *Quadratic-form detection with eigenvalue cuts* (`alphabb="eigen"`,
+  opt-in): a point interval Hessian means an exact quadratic
+  `Q = V diag(λ) V^T`; each negative-curvature direction `λₖ tₖ²`
+  (`t = Vᵀx`) is replaced by its secant over the range of `tₖ`. It is sound
+  and convex, and tightens about 4 in 10 random indefinite quadratics. On the
+  21 problems it changes no root bound (their quadratics are separable or
+  bilinear, where the eigen-secant equals McCormick). It made reactor worse
+  (439 → 761 nodes, from different cut points), so it is off by default.
+
 Not yet done: multivariate McCormick, trilinear/fractional envelopes,
-and quadratic-form detection with eigenvalue cuts. The pooling
+and the lifted LP using the new envelopes. The pooling
 half of the exit criterion (Adhya, Ben-Tal) cannot be measured in this
 environment, because MINLPLib is not reachable. Separable bilinear pooling
 constraints gain nothing from either piece so far (haverly's root bound is

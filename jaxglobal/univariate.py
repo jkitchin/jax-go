@@ -342,7 +342,8 @@ class Relaxer(NamedTuple):
 def make_relaxer(fn, univariate=True, alphabb=False, K=65):
     """Relaxation of ``fn``: McCormick, optionally tightened by univariate hull
     envelopes (``univariate``) and whole-function scaled-Gershgorin alphaBB
-    (``alphabb``, smooth ``fn`` only)."""
+    (``alphabb``, smooth ``fn`` only; ``alphabb="eigen"`` adds the eigenvalue
+    relaxation of exact quadratics)."""
     from .alphabb import make_alphabb
     from .relax import relax
 
@@ -353,7 +354,7 @@ def make_relaxer(fn, univariate=True, alphabb=False, K=65):
         uprep, ucall = (lambda lo, hi: None), (lambda x, lo, hi, data: rf(x, lo, hi))
     if not alphabb:
         return Relaxer(uprep, ucall)
-    aprep, aapply = make_alphabb(fn)
+    aprep, aapply = make_alphabb(fn, eigen=alphabb == "eigen")
 
     def prepare(lo, hi):
         return uprep(lo, hi), aprep(lo, hi)

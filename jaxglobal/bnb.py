@@ -167,7 +167,8 @@ def minimize(
     sub-expression of a single variable by a grid-hull envelope
     (``univariate.py``); ``alphabb`` adds whole-function alphaBB with
     scaled-Gershgorin alpha from an interval Hessian for smooth functions
-    (``alphabb.py``); ``lifted`` bounds nodes with the extended-space LP
+    (``alphabb.py``; ``alphabb="eigen"`` adds the eigenvalue relaxation of
+    exact quadratics); ``lifted`` bounds nodes with the extended-space LP
     (``lifted.py``) instead of the reduced-space cuts.
     """
     t0 = time.perf_counter()
