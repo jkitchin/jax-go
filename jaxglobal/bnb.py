@@ -32,6 +32,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from .local import make_local
+from .crown import crown_auto, crown_supported, make_crown
 from .domain import bound_domain
 from .fbbt import make_fbbt
 from .lifted import make_lifted_bounder
@@ -144,7 +145,7 @@ class _Kernels:
     """
 
     def __init__(self, f, ineq, eq, *, n_fw, n_kelley, fbbt, fbbt_rounds, dbbt, obbt, obbt_rounds,
-                 univariate, alphabb, multivariate, lifted, feas_tol):  # fmt: skip
+                 univariate, alphabb, multivariate, lifted, crown, feas_tol):  # fmt: skip
         constrained = ineq is not None or eq is not None
         g, h = _vec(ineq), _vec(eq)
 
@@ -175,12 +176,16 @@ class _Kernels:
         lp_tighten = make_obbt(f, ineq, eq, rounds=obbt_rounds, tol=feas_tol, univariate=univariate,
                                 alphabb=alphabb, multivariate=multivariate) if obbt else None
 
+        crown_lb = make_crown(f) if crown else None
+
         def node(blo, bhi, cutoff):
             """Tighten, then bound one box. Returns (lb, x, f(x), lo', hi', xr)."""
             empty = jnp.array(False)
             if tighten is not None:
                 blo, bhi, empty = tighten(blo, bhi, cutoff)
             lb, x, fx, rlo, rhi, xr = raw_bound(blo, bhi, cutoff)
+            if crown_lb is not None:  # both bounds are valid on the box: take the larger
+                lb = jnp.maximum(jnp.where(jnp.isnan(lb), -jnp.inf, lb), crown_lb(blo, bhi))
             if not dbbt:
                 rlo, rhi = blo, bhi
             # an empty box holds no feasible point with f <= cutoff
@@ -300,6 +305,7 @@ def minimize(
     alphabb=True,
     multivariate=False,
     lifted=False,
+    crown=False,
     time_limit=np.inf,
     verbose=False,
 ):
@@ -332,7 +338,12 @@ def minimize(
     exact quadratics); ``multivariate`` relaxes products by the multivariate
     McCormick rule of Tsoukalas & Mitsos, written as up to two extra facets
     from its dual (tighter where a factor's interval straddles zero); ``lifted`` bounds nodes with the extended-space LP
-    (``lifted.py``) instead of the reduced-space cuts.
+    (``lifted.py``) instead of the reduced-space cuts. ``crown`` adds the CROWN
+    backward linear bound of ``f`` (``crown.py``) to every node bound (the
+    larger of the two is used): ``False``, ``True``, or ``"auto"`` (on when
+    every primitive of ``f`` has a CROWN rule and ``f`` has a smooth
+    saturating activation or ReLU; otherwise off). With ``True`` and an
+    unsupported ``f`` the CROWN bound is ``-inf``, i.e. no effect.
 
     Branching: ``branch_point`` is ``"mid"`` (bisect) or ``"relax"`` (split at
     the relaxation minimizer, pulled toward the midpoint and kept away from the
@@ -375,9 +386,15 @@ def minimize(
         raise ValueError(f"branch_var must be 'width', 'pseudocost' or 'reliability', not {branch_var!r}")
     if obbt not in (False, None, "root", "tree"):
         raise ValueError(f"obbt must be False, 'root' or 'tree', not {obbt!r}")
+    if crown not in (False, None, True, "auto"):
+        raise ValueError(f"crown must be False, True or 'auto', not {crown!r}")
+    if crown == "auto":
+        crown = crown_auto(f, lo)
+    elif crown:
+        crown = crown_supported(f, lo)  # an unsupported f gets no CROWN kernel
     opts = dict(n_fw=n_fw, n_kelley=n_kelley, fbbt=bool(fbbt), fbbt_rounds=fbbt_rounds, dbbt=bool(dbbt),
                 obbt=bool(obbt), obbt_rounds=obbt_rounds, univariate=univariate, alphabb=alphabb,
-                multivariate=multivariate, lifted=lifted, feas_tol=feas_tol)  # fmt: skip
+                multivariate=multivariate, lifted=lifted, crown=bool(crown), feas_tol=feas_tol)  # fmt: skip
     K = _cached(("kernels", f, ineq, eq, tuple(sorted(opts.items()))), lambda: _Kernels(f, ineq, eq, **opts))
     branchable = nonlinear_variables(K.fns, lo, hi, hessians=K.hessians)
     width0 = np.where(branchable, width0, np.inf)  # never split linear variables
