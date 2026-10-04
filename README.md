@@ -45,6 +45,30 @@ r = minimize(f, [-512, -512], [512, 512])
 4. **Batched spatial branch-and-bound.** Each iteration bisects the 128
    lowest-bound boxes and bounds all 256 children in one `jit(vmap(...))` call.
    L-BFGS-B (with `jax.grad`) polishes the incumbent.
+5. **Bound tightening against the incumbent** (`f <= UB`), all batched:
+   * *FBBT* (`jaxglobal/fbbt.py`): the jaxpr is flattened into a tape and swept
+     forward (interval rules) and backward (inverse rules: `x ∈ Z − Y` for
+     add, `x ∈ log Z` for exp, the two-sided root for `x²ⁿ` and `|x|`, …) to
+     a fixed number of rounds before every node is bounded;
+   * *duality-based range reduction*: the cut / LP-dual certificate
+     `f ≥ lb + Σ r_j (x_j − lo_j)` confines each variable to where it could
+     still beat the incumbent, at no extra cost;
+   * *OBBT* (`lp.make_obbt`): min and max of every variable over the
+     outer-approximation LP, as 2n `vmap`-ed LPs with weak-duality-certified
+     results; on the root by default (`obbt="tree"` for every node).
+   Children are split from the tightened box.
+6. **Univariate envelopes** (`jaxglobal/univariate.py`, on by default). Every
+   smooth sub-expression whose elements each depend on one variable (found
+   structurally on the jaxpr: separable sums, polynomial factors,
+   `sin(x)·sin(x²)^20`, ...) is sampled on a 65-point grid. The samples are
+   lowered by `max(g″, 0)·h²/8`, with `g″` bounded per cell by interval
+   evaluation of `jvp(jvp(g))`, and their lower convex hull is a nearly exact
+   convex envelope (symmetrically for the concave one). It is intersected
+   with the McCormick relaxation, so it never loosens it. On Styblinski–Tang
+   the root bound goes from −612 to −118.6 (f* = −117.5).
+   An extended-space LP bound (`jaxglobal/lifted.py`, `lifted=True`) is also
+   available: one LP column per nonlinear jaxpr node, cut from that node's own
+   McCormick rule at FBBT-tightened bounds.
 
 ![relaxations](figures/relaxations.png)
 
@@ -164,14 +188,22 @@ Any AMPL `.nl` model (text or binary) can be loaded with
   `lax.cond`/`while`/`scan` with variable-dependent control flow are not
   supported; Python control flow on static values is fine.
 * Unsupported primitives raise `NotImplementedError` naming the primitive.
-* Bounds are first-order McCormick/αBB plus interval arithmetic. There is no
-  bound tightening, no reduced-cost or optimality-based tightening, and no LP
-  over multiple cuts, so node counts are far from the state of the art.
+* Variables may be declared unbounded (`±inf`). Finite bounds are derived
+  first (`jaxglobal/domain.py`): FBBT from the declared box, unused variables
+  fixed, then FBBT against `f <= UB` once a local solve finds a feasible
+  point. A variable that nothing bounds gives status `"unbounded_domain"`
+  rather than a guessed box; FBBT cannot prove bounds that need joint
+  reasoning over several constraints (e.g. G24 without its upper bounds).
+* Bounds are first-order McCormick/αBB plus interval arithmetic. Tightened
+  intermediate ranges from FBBT are not yet fed back into the relaxations
+  (Wechsung-style reverse McCormick), and there is no probing.
+* Bound tightening adds compile time (the FBBT tape and the OBBT LPs are
+  separate kernels), which dominates wall time on the small test problems.
 
 ## Natural next steps
 
 * Harder constrained sets (larger pooling problems, MINLPLib `ex8_*`).
-* Feasibility-based bound tightening by backward propagation over the jaxpr.
+* Feed FBBT's intermediate ranges into the McCormick rules.
 * Multivariate McCormick / tighter envelopes for common patterns
   (x·exp(x), x·log(x), bilinear `dot_general`).
 * Outward rounding (e.g. `nextafter`) for rigorous bounds.

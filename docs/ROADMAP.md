@@ -21,7 +21,7 @@ seriously.
 | area | today | state of the art (BARON, SCIP, Couenne, MAiNGO, EAGO) |
 |---|---|---|
 | relaxations | reduced-space McCormick plus per-primitive αBB | extended formulations with auxiliary variables; multivariate McCormick; convex/concave envelopes of bilinear, trilinear, fractional and edge-concave terms |
-| bound tightening | interval infeasibility only | FBBT every node; OBBT at the root and selectively in the tree; duality-based (marginals) range reduction; probing |
+| bound tightening | FBBT every node; OBBT at the root; duality-based range reduction | FBBT every node; OBBT at the root and selectively in the tree; duality-based (marginals) range reduction; probing |
 | cuts | Frank–Wolfe/Kelley linearizations | outer approximation, RLT, SDP/eigenvalue cuts for QCQP, perspective cuts |
 | LP | dense IPM, fixed iterations | warm-started sparse simplex (dual simplex in the tree) |
 | branching | widest nonlinear variable, bisection | violation-weighted, pseudocost/reliability branching, branching at the relaxation solution |
@@ -66,6 +66,14 @@ The rest of the plan cannot be judged without this.
 - **Exit:** a reproducible baseline table. Expect jaxglobal to fail on most
   instances with more than 10 variables; that is the point of measuring.
 
+**Unbounded variables (after phase 2).** The phase-0 baseline skipped 150 of
+322 instances for unbounded variables. `minimize` now derives finite bounds
+itself (`jaxglobal/domain.py`): FBBT from the declared box, fixing unused
+variables, and FBBT against the value of a feasible point from local solves.
+It reports `unbounded_domain` only when a variable stays unbounded.
+`benchmarks/run.py` no longer rejects these instances up front. How many of
+the 150 become solvable has to be measured on MINLPLib.
+
 ### Phase 1 — bound tightening (4–6 weeks; the largest single gain)
 
 Mature solvers attribute a large share of their performance to domain
@@ -82,6 +90,45 @@ reduction.
   every node to shrink variable ranges, at almost no cost.
 - **Exit:** node counts on the current 21 problems drop at least 3×; at least
   half of the ≤ 10-variable MINLPLib subset is solved.
+
+**Status (implemented).** `jaxglobal/fbbt.py` (FBBT on the flattened jaxpr,
+5 rounds per node in a `fori_loop`), duality-based range reduction in both
+bounders (`lp.reduce_ranges`), and batched OBBT (`lp.make_obbt`, root by
+default, `obbt="tree"` for every node). Node counts on the 21 problems
+(defaults, same tolerances as `examples/benchmark.py` and the tests):
+
+| problem | before | after | ratio |
+|---|---:|---:|---:|
+| gramacy_lee | 23 | 5 | 4.6× |
+| six_hump_camel | 407 | 167 | 2.4× |
+| mccormick | 41 | 11 | 3.7× |
+| goldstein_price | 8883 | 7309 | 1.2× |
+| shubert | 2399 | 1781 | 1.3× |
+| michalewicz_2d | 65 | 9 | 7.2× |
+| holder_table | 391 | 183 | 2.1× |
+| eggholder | 153 | 47 | 3.3× |
+| hartmann3 | 1769 | 515 | 3.4× |
+| styblinski_tang_3d | 451 | 333 | 1.4× |
+| shekel10_4d | 133 | 83 | 1.6× |
+| hartmann6 | 6515 | 2261 | 2.9× |
+| piecewise_2d | 87 | 31 | 2.8× |
+| tanh_net_2d | 387 | 323 | 1.2× |
+| G06 | 119 | 25 | 4.8× |
+| G08 | 99 | 33 | 3.0× |
+| G11 | 127 | 35 | 3.6× |
+| G24 | 43 | 37 | 1.2× |
+| G04 | 67 | 5 | 13.4× |
+| haverly | 229 | 21 | 10.9× |
+| reactor | 2587 | 541 | 4.8× |
+
+Geometric mean 3.0×; 11 of 21 reach 3×. The constrained problems gain most
+(geometric mean 4.6×). Unconstrained problems with a flat objective
+landscape (Goldstein–Price, Shubert, tanh net) barely change: there the
+cutoff `f <= UB` removes little until the gap is already small. Wall time is
+currently higher on these small problems because the extra kernels must be
+compiled. The MINLPLib half of the exit criterion has not been measured yet.
+Remaining phase-1 items: feeding FBBT's intermediate ranges back into the
+relaxations, choosing tree-OBBT variables by impact, and probing.
 
 ### Phase 2 — stronger relaxations (6–8 weeks)
 
@@ -102,6 +149,145 @@ reduction.
   only per primitive.
 - **Exit:** root gaps close at least 2× on the pooling and polynomial
   instances; Adhya and Ben-Tal pooling instances solve.
+
+**Status (started).** Two pieces are implemented.
+
+- *Univariate envelopes* (`jaxglobal/univariate.py`, default on): a structural
+  per-element dependency analysis of the jaxpr finds smooth sub-expressions of
+  a single variable that are built from more than one exactly relaxed
+  operation. Each one gets a grid-hull envelope: the samples are lowered by a
+  per-cell curvature bound from interval `jvp(jvp(g))`, then the lower convex
+  hull is taken. That envelope is intersected with McCormick. This covers the
+  "sums of univariate terms" structure and "tighter univariate envelopes"
+  above. Root lower bounds (whole box, no tightening):
+
+  | problem | f* | McCormick | + univariate |
+  |---|---:|---:|---:|
+  | styblinski_tang_3d | −117.50 | −612 | −118.64 |
+  | six_hump_camel | −1.032 | −156.1 | −7.08 |
+  | michalewicz_2d | −1.801 | −2.000 | −1.823 |
+  | goldstein_price | 3 | −8.79e7 | −7.48e7 |
+
+  Node counts change only where such blocks exist (phase-1 tightening on in
+  both columns; other problems are unchanged):
+
+  | problem | without | with |
+  |---|---:|---:|
+  | styblinski_tang_3d | 333 | 9 |
+  | six_hump_camel | 167 | 31 |
+  | shubert | 1781 | 305 |
+  | michalewicz_2d | 9 | 1 |
+  | G24 | 39 | 3 |
+  | G08 | 33 | 31 |
+
+- *Lifted LP* (`jaxglobal/lifted.py`, `lifted=True`): one column per
+  nonlinear jaxpr node, linked to its inputs by cuts from the node's own
+  McCormick rule (bilinear terms get the four McCormick facets) at FBBT
+  bounds, with Kelley rounds and the same safe certificate. With FBBT bounds
+  for both, the root bound is at most ~8% tighter than reduced space on the
+  21 problems. Node counts are mixed: G11 47 → 31, but reactor 747 → 2491.
+  So it stays opt-in until it also uses the univariate envelopes and
+  structure-specific cuts.
+
+- *Scaled-Gershgorin alphaBB* (`jaxglobal/alphabb.py`, default on): for every
+  function built only from smooth primitives, the interval Hessian
+  (`jacfwd(jacfwd(g))` evaluated by the interval interpreter, once per box)
+  gives per-variable α by the scaled Gershgorin rule, and
+  `g + Σ αᵢ(xᵢ−lᵢ)(xᵢ−uᵢ)` / `g − Σ βᵢ(...)` are combined with McCormick
+  by max/min. Its gap shrinks with the square of the box width, so it pays
+  off deep in the tree. Node counts (univariate envelopes on in both):
+
+  | problem | without | with |
+  |---|---:|---:|
+  | goldstein_price | 7309 | 1445 |
+  | hartmann3 | 515 | 155 |
+  | hartmann6 | 2261 | 1083 |
+  | reactor | 747 | 439 |
+  | six_hump_camel | 31 | 23 |
+  | tanh_net_2d | 323 | 287 |
+
+  No problem got worse. Nonsmooth functions (holder_table, eggholder,
+  piecewise) are skipped.
+
+- *Quadratic-form detection with eigenvalue cuts* (`alphabb="eigen"`,
+  opt-in): a point interval Hessian means an exact quadratic
+  `Q = V diag(λ) V^T`; each negative-curvature direction `λₖ tₖ²`
+  (`t = Vᵀx`) is replaced by its secant over the range of `tₖ`. It is sound
+  and convex, and tightens about 4 in 10 random indefinite quadratics. On the
+  21 problems it changes no root bound (their quadratics are separable or
+  bilinear, where the eigen-secant equals McCormick). It made reactor worse
+  (439 → 761 nodes, from different cut points), so it is off by default.
+
+- *Lifted LP with the new envelopes* (`lifted=True`): the lifted LP also gets
+  the reduced-space cuts of the whole functions (univariate hull + αBB) on
+  the `x` columns, plus the hull's interval floor, so its root bound is at
+  least as tight as reduced space on all 21 problems. In the tree it is
+  mixed against the default:
+
+  | problem | default | lifted |
+  |---|---:|---:|
+  | goldstein_price | 1445 | 561 |
+  | gramacy_lee | 5 | 1 |
+  | six_hump_camel | 23 | 59 |
+  | shubert | 305 | 681 |
+  | hartmann3 | 155 | 313 |
+  | reactor | 439 | 897 |
+
+  It is also 2–30× slower per solve (dense IPM over the extra columns), so it
+  stays opt-in.
+- *Fractional envelope* (`relax.mc_frac`): for `a/b` with `a ≥ 0`, `b > 0`,
+  the Tawarmalani–Sahinidis convex envelope
+  `((a + √(aᴸaᵁ))/(√aᴸ + √aᵁ))² / b`, composed with `a.cv` and `b.cc`,
+  tightens McCormick of `a·(1/b)`. On `x/y` over `[0.5,4]×[1,3]` it cuts
+  the mean relaxation gap by about a third. None of the 21 problems has a
+  nonnegative-over-positive quotient, so their node counts do not change.
+
+- *Multivariate McCormick for products* (`relax.mc_mul`, opt-in
+  `multivariate=True`). The Tsoukalas–Mitsos bound
+  `min over [a.cv, a.cc] × [b.cv, b.cc] of max(F₁, F₂)` is evaluated through
+  its dual: `max over λ` of the single facet `λF₁ + (1−λ)F₂` minimized over
+  the rectangle. That is concave piecewise-linear in λ, with breakpoints
+  where a combined coefficient changes sign; these depend only on the box.
+  So the rule is the two standard facets plus at most two extra facets
+  (only when a factor's interval straddles zero), and the cv is a max of
+  convex facets with ordinary autodiff subgradients.
+
+  A first version selected the primal minimizer among corner and edge
+  candidates. It failed cut-validity tests twice. First, autodiff through the
+  argmin mixed in the concave `a.cc` slope where the rectangle degenerates.
+  Second, with `custom_jvp` subgradients, XLA under `jit` with reverse mode
+  re-evaluated knife-edge comparisons differently in the forward and backward
+  passes. The dual form has neither problem. Node counts with it:
+  shubert 305 → 159, reactor 439 → 353, piecewise 31 → 29, six_hump_camel
+  23 → 25, others unchanged. Wall time is 10–70% higher (mostly compilation),
+  so it stays opt-in.
+
+**Phase 2 outcome.** Root gaps on the polynomial problems close far more
+than 2×: styblinski_tang −612 → −118.6 (f* −117.5) and six_hump_camel
+−156 → −7.1 (f* −1.03). On goldstein_price, αBB gives about 2.7× smaller
+gaps on small boxes. Node counts against phase 1, with no regressions:
+
+| problem | phase 1 | phase 2 |
+|---|---:|---:|
+| styblinski_tang_3d | 333 | 9 |
+| goldstein_price | 7309 | 1445 |
+| shubert | 1781 | 305 |
+| six_hump_camel | 167 | 23 |
+| hartmann3 | 515 | 155 |
+| hartmann6 | 2261 | 1083 |
+| reactor (post-main baseline 747) | 541 | 439 |
+| G24 | 37 | 3 |
+
+**Not done:**
+- *Pooling exit criterion (Adhya, Ben-Tal).* Not measured: MINLPLib is
+  unreachable from the development environment. Nothing implemented here
+  tightens the root bound of separable bilinear pooling constraints:
+  haverly stays at −1550 under every relaxation. Pooling needs
+  formulation-level structure (pq-cuts, RLT on the flow balances), which
+  belongs with structure detection in a later phase.
+- *Trilinear envelopes* (Meyer–Floudas facets): not implemented. No test
+  problem has a trilinear term to validate against; trilinear terms are
+  relaxed as nested bilinear McCormick (and lifted, with `lifted=True`).
 
 ### Phase 3 — search (4 weeks)
 
