@@ -73,11 +73,11 @@ def worker(name, tl):
         M = read_nl(LIB / "nl" / f"{name}.nl")
     except NLError as e:
         return dict(status="unsupported", message=str(e))
-    if not M.bounded:
-        return dict(status="unsupported", message="unbounded variables")
     t0 = time.perf_counter()
     r = minimize(M.f, M.lo, M.hi, ineq=M.ineq, eq=M.eq, abs_tol=ABS_GAP, rel_tol=REL_GAP,
                  feas_tol=FEAS_TOL, time_limit=tl)  # fmt: skip
+    if r.status == "unbounded_domain":
+        return dict(status="unsupported", message="unbounded variables: " + r.message)
     p, d = M.sense * r.fun, M.sense * r.lower_bound  # back to the model's objective sense
     status = {"optimal": "optimal", "infeasible": "infeasible", "time_limit": "time_limit"}.get(r.status, "error")
     return dict(status=status, time=time.perf_counter() - t0, primal=_num(p), dual=_num(d),

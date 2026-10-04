@@ -66,6 +66,14 @@ The rest of the plan cannot be judged without this.
 - **Exit:** a reproducible baseline table. Expect jaxglobal to fail on most
   instances with more than 10 variables; that is the point of measuring.
 
+**Unbounded variables (after phase 2).** The phase-0 baseline skipped 150 of
+322 instances for unbounded variables. `minimize` now derives finite bounds
+itself (`jaxglobal/domain.py`): FBBT from the declared box, fixing unused
+variables, and FBBT against the value of a feasible point from local solves.
+It reports `unbounded_domain` only when a variable stays unbounded.
+`benchmarks/run.py` no longer rejects these instances up front. How many of
+the 150 become solvable has to be measured on MINLPLib.
+
 ### Phase 1 — bound tightening (4–6 weeks; the largest single gain)
 
 Mature solvers attribute a large share of their performance to domain

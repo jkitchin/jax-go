@@ -188,6 +188,12 @@ Any AMPL `.nl` model (text or binary) can be loaded with
   `lax.cond`/`while`/`scan` with variable-dependent control flow are not
   supported; Python control flow on static values is fine.
 * Unsupported primitives raise `NotImplementedError` naming the primitive.
+* Variables may be declared unbounded (`±inf`). Finite bounds are derived
+  first (`jaxglobal/domain.py`): FBBT from the declared box, unused variables
+  fixed, then FBBT against `f <= UB` once a local solve finds a feasible
+  point. A variable that nothing bounds gives status `"unbounded_domain"`
+  rather than a guessed box; FBBT cannot prove bounds that need joint
+  reasoning over several constraints (e.g. G24 without its upper bounds).
 * Bounds are first-order McCormick/αBB plus interval arithmetic. Tightened
   intermediate ranges from FBBT are not yet fed back into the relaxations
   (Wechsung-style reverse McCormick), and there is no probing.

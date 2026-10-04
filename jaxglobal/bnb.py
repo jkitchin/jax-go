@@ -31,6 +31,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from .local import make_local
+from .domain import bound_domain
 from .fbbt import make_fbbt
 from .lifted import make_lifted_bounder
 from .lp import make_constrained_bounder, make_obbt, reduce_ranges
@@ -106,6 +107,7 @@ class Result:
     time: float
     history: list = field(default_factory=list)
     status: str = ""
+    message: str = ""
 
     @property
     def gap(self):
@@ -157,6 +159,11 @@ def minimize(
     The search stops with status ``"time_limit"`` after ``time_limit`` seconds
     (checked between batches, so compile time counts).
 
+    Bounds may be infinite: finite ones are derived first from the constraints,
+    unused variables, and FBBT against a feasible point found by local solves
+    (``domain.py``). If some variable stays unbounded the result has status
+    ``"unbounded_domain"`` and ``message`` names the variables.
+
     Bound tightening against the incumbent: ``fbbt`` (forward-backward interval
     propagation over the jaxpr, ``fbbt_rounds`` sweeps per node), ``dbbt``
     (duality-based range reduction from each node's bound certificate), and
@@ -174,6 +181,20 @@ def minimize(
     t0 = time.perf_counter()
     lo = np.asarray(lo, dtype=np.float64)
     hi = np.asarray(hi, dtype=np.float64)
+    seed_x, seed_f = None, np.inf
+    if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
+        # derive finite bounds from the constraints and a feasible point (domain.py)
+        lo, hi, infeasible0, seed_x, seed_f = bound_domain(f, ineq, eq, lo, hi, feas_tol=feas_tol)
+        if infeasible0 or not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
+            free = np.flatnonzero(~(np.isfinite(lo) & np.isfinite(hi)))
+            status = "infeasible" if infeasible0 else "unbounded_domain"
+            return Result(
+                x=np.asarray(seed_x if seed_x is not None else np.clip(0.0, lo, hi)),
+                fun=float(seed_f) if not infeasible0 else np.inf,
+                lower_bound=np.inf if infeasible0 else -np.inf,
+                converged=bool(infeasible0), iterations=0, nodes=0, time=time.perf_counter() - t0,
+                status=status, message="" if infeasible0 else f"no finite bounds found for variables {free.tolist()}",
+            )  # fmt: skip
     width0 = np.where(hi > lo, hi - lo, 1.0)
     constrained = ineq is not None or eq is not None
     branchable = nonlinear_variables([fn for fn in (f, ineq, eq) if fn is not None], lo, hi)
@@ -257,6 +278,8 @@ def minimize(
         return tuple(np.asarray(a)[:k] for a in out)
 
     ub, xbest = np.inf, 0.5 * (lo + hi)
+    if seed_x is not None:  # feasible point found while bounding the domain
+        ub, xbest = float(seed_f), np.asarray(seed_x)
 
     def update_incumbent(xc, fc, lb):
         """Improve the incumbent from candidate points and local solves."""
