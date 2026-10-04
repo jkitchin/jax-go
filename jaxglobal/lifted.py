@@ -39,7 +39,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from .fbbt import Const, joint_tape, output_bounds, propagate
-from .lp import EPS, _safe_costs, ipm, reduce_ranges
+from .lp import EPS, _parts_fn, _safe_costs, ipm, reduce_ranges
 from .relax import MC, RULES, STRUCTURAL, Ctx, Unknown, is_mc
 
 RELAX_CTX = Ctx(interval_only=False)
@@ -82,12 +82,18 @@ def _pattern(r):
     return np.concatenate([np.full((1, r), 0.5), 0.5 + ax])
 
 
-def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_rounds=3, tol=0.0):
+def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_rounds=3, tol=0.0,
+                        univariate=True, alphabb=True):
     """Return ``bound(lo, hi, cutoff) -> (lb, x_lp, infeasible, lo', hi')`` for one box.
 
     Same contract as ``lp.make_constrained_bounder`` (``ineq``/``eq`` may be
-    ``None``), using the lifted LP.
+    ``None``), using the lifted LP. With ``univariate``/``alphabb`` the LP also
+    gets the reduced-space cuts of the whole functions (McCormick tightened by
+    univariate hull envelopes and alphaBB) on the ``x`` columns, so it is at
+    least as tight as both formulations.
     """
+    prepare_parts, parts, (rel_f, _, _) = _parts_fn(f, ineq, eq, univariate, alphabb)
+    n_f = 1
 
     def bound(lo, hi, cutoff=jnp.inf):
         n = lo.size
@@ -235,6 +241,27 @@ def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_ro
 
         # objective and constraint rows
         Ef, cf = flat(tape.outs[0])
+
+        # reduced-space cuts of the whole functions on the x columns:
+        #   cv_f(p) + J (x - p) <= f = Ef v + cf,   cv_g(p) + J (x - p) <= tol, ...
+        bx_lo, bx_hi = vals[0].lo, vals[0].hi
+        pdata = prepare_parts(bx_lo, bx_hi)
+
+        def reduced_cuts(p):
+            p = jnp.clip(p, bx_lo, bx_hi)
+            val = parts(p, bx_lo, bx_hi, pdata)
+            J = jax.jacfwd(parts)(p, bx_lo, bx_hi, pdata)
+            A = jnp.zeros((val.size, N), dt).at[:, :n].set(J)
+            A = A.at[:n_f].add(-Ef)
+            b = J @ p - val
+            b = b.at[:n_f].add(cf) + jnp.where(jnp.arange(val.size) < n_f, 0.0, tol)
+            ok = jnp.isfinite(b) & jnp.all(jnp.isfinite(A), axis=1)
+            return jnp.where(ok[:, None], A, 0.0), jnp.where(ok, b, jnp.inf)
+
+        cx = 0.5 * (bx_lo + bx_hi)
+        ax = jnp.concatenate([jnp.eye(n), -jnp.eye(n)]) * ((bx_hi - bx_lo) / 4)
+        for pnt in jnp.concatenate([cx[None], cx + ax]):
+            rows.append(reduced_cuts(pnt))
         k = 1
         if ineq is not None:
             if not isinstance(tape.outs[k], Const):
@@ -269,7 +296,9 @@ def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_ro
             err = (A.shape[0] + N + 2) * EPS * (jnp.sum(1.0 + jnp.abs(A).T @ y) + jnp.abs(b) @ y)
             return f0 + cn * (val - err), _safe_costs(coef, A, y)
 
-        best = jnp.array(-jnp.inf, dt)
+        # interval lower bound of f (with the univariate hull) is a floor for the LP bound
+        flo = rel_f(0.5 * (bx_lo + bx_hi), bx_lo, bx_hi, pdata[0]).lo[0]
+        best = jnp.where(finite & ~jnp.isnan(flo), flo, -jnp.inf).astype(dt)
         xl, xh = clo[:n], clo[:n] + scale[:n]  # the box the certificate is over
         rlo, rhi = jnp.maximum(lo, vals[0].lo), jnp.minimum(hi, vals[0].hi)
         v = 0.5 * (clo + chi)
@@ -291,6 +320,7 @@ def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_ro
                         E, c = aff[a]
                         ps.append(jnp.tensordot(E, v, axes=1) + c)
                     rows.append(node_cuts(L, safe_point(L, ps)))
+                rows.append(reduced_cuts(v[:n]))
 
         x = jnp.clip(v[:n], lo, hi)
         lb = jnp.where(empty, jnp.inf, best)

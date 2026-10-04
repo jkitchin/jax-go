@@ -190,7 +190,8 @@ def minimize(
     if obbt not in (False, None, "root", "tree"):
         raise ValueError(f"obbt must be False, 'root' or 'tree', not {obbt!r}")
     if lifted:
-        lb_lifted = make_lifted_bounder(f, ineq, eq, n_kelley=n_kelley, fbbt_rounds=fbbt_rounds, tol=feas_tol)
+        lb_lifted = make_lifted_bounder(f, ineq, eq, n_kelley=n_kelley, fbbt_rounds=fbbt_rounds, tol=feas_tol,
+                                        univariate=univariate, alphabb=alphabb)
 
         def raw_bound(blo, bhi, cutoff):
             lb, x, _, rlo, rhi = lb_lifted(blo, bhi, cutoff)
