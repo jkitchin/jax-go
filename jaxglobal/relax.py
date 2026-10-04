@@ -691,6 +691,18 @@ def _cmp(ctx, eqn, a, b):
     return Unknown(point, apart) if name == "eq" else Unknown(apart, point)
 
 
+@rule("convert_element_type")
+def _convert(ctx, eqn, x):
+    if not isinstance(x, Unknown):
+        return _bind_fields(eqn, (x,))
+    if eqn.params["new_dtype"] == jnp.bool_:
+        return x
+    # bool -> number (e.g. the derivative of a select): 1 where decided true, 0 where decided false, else [0, 1]
+    t = x.sure_true.astype(eqn.params["new_dtype"])
+    hi = (~x.sure_false).astype(eqn.params["new_dtype"])
+    return MC(t, hi, t, hi)
+
+
 @rule("and")
 def _and(ctx, eqn, a, b):
     a, b = _as_unknown(a), _as_unknown(b)
