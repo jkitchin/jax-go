@@ -424,13 +424,18 @@ def _b_abs(eqn, Z, x):
     return [_hole(Z, _iv(x), Z[1], jnp.maximum(Z[0], 0.0))]
 
 
+def _bto(z, shape):
+    """Broadcast z to ``shape``; a smaller (constant) operand's candidate is never used, so z stays as is."""
+    return jnp.broadcast_to(z, shape) if len(shape) >= jnp.ndim(z) else z
+
+
 @back("max")
 def _b_max(eqn, Z, a, b):
     A, B = _iv(a), _iv(b)
     # both <= Zhi; the one that cannot reach Zlo forces the other above it
     return [
-        (jnp.where(B[1] < Z[0], Z[0], -INF), jnp.broadcast_to(Z[1], jnp.shape(A[0]))),
-        (jnp.where(A[1] < Z[0], Z[0], -INF), jnp.broadcast_to(Z[1], jnp.shape(B[0]))),
+        (jnp.where(B[1] < Z[0], Z[0], -INF), _bto(Z[1], jnp.shape(A[0]))),
+        (jnp.where(A[1] < Z[0], Z[0], -INF), _bto(Z[1], jnp.shape(B[0]))),
     ]
 
 
@@ -438,8 +443,8 @@ def _b_max(eqn, Z, a, b):
 def _b_min(eqn, Z, a, b):
     A, B = _iv(a), _iv(b)
     return [
-        (jnp.broadcast_to(Z[0], jnp.shape(A[0])), jnp.where(B[0] > Z[1], Z[1], INF)),
-        (jnp.broadcast_to(Z[0], jnp.shape(B[0])), jnp.where(A[0] > Z[1], Z[1], INF)),
+        (_bto(Z[0], jnp.shape(A[0])), jnp.where(B[0] > Z[1], Z[1], INF)),
+        (_bto(Z[0], jnp.shape(B[0])), jnp.where(A[0] > Z[1], Z[1], INF)),
     ]
 
 

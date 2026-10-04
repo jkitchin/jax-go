@@ -471,6 +471,39 @@ non-compiled Python. Timings are from a loaded machine.
 - **Exit:** at least one application paper-quality result where jaxglobal is
   the only tool that certifies the optimum, or is at least 10× faster.
 
+**CROWN bounds (Phase 5).** `crown.py` adds backward linear bound
+propagation (CROWN, Zhang et al. 2018) as an extra node lower bound,
+`minimize(..., crown=True)`; the node bound is the max of it and the existing
+one. Every nonlinear tape node gets linear lower/upper relaxations on the
+interval of its input (tanh, sigmoid, erf, atan, asinh by convexity region with
+tangents from bisection; relu/`max`/`min` with a constant; exp, log, sqrt,
+even powers, abs; bilinear x*y by the McCormick plane tighter at the box
+center); affine nodes are exact (`vjp`). A backward pass from the output gives
+`f >= A.x + c`, bounded in closed form over the box. Intermediate bounds are
+CROWN's own (a backward pass from every neuron of a layer, vmapped; `deep`).
+An unsupported primitive makes the bound `-inf`, decided at trace time.
+`crown="auto"` is on when `f` is fully supported and contains an activation.
+The default stays `False`: it is evidence-limited (below), and it adds compile
+time and a few percent per node.
+
+| problem | root lb existing | root lb CROWN | nodes off | nodes on |
+|---|---|---|---|---|
+| tanh_net_2d | -2.80 | -2.09 | 291 | 191 |
+| nn_tanh 2x8x2 | -2.74 | -2.12 | 243 | 87 |
+| nn_tanh 5x8x2 | -3.86 | -2.75 | 883,471 | 13,411 |
+| nn_tanh 10x8x2 | -1.79 | -3.76 | 30 s, gap 0.123 | 30 s, gap 0.123 |
+| nn_relu 5x8x2 | -14.62 | -12.88 | 559 | 135 |
+| six_hump_camel | -7.02 | -168 (unused) | 25 | 25 |
+
+(Root bounds are of the single root box before OBBT; nodes are full solves
+with the other options at their defaults.) On the 5-input net CROWN is worth
+65x in nodes. At 10 inputs the existing whole-function alphaBB root bound is
+already tighter than CROWN, so CROWN does nothing there: the remaining gap is a
+search problem. Polynomial benchmarks are supported but CROWN is far looser than
+the existing relaxations (`auto` leaves it off). Not done: alpha-CROWN
+(optimized lower slopes), and the affine underestimator's minimizer is not used
+as a branching point (it is a box vertex).
+
 ### Phase 6 — integers and rigor (later)
 
 - **Integer variables:** branch on integrality alongside spatial branching,
