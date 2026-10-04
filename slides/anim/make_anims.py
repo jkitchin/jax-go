@@ -414,7 +414,83 @@ def alphabb():
     return svg("".join(b) + caps, "alphaBB animation")
 
 
+# ---------------------------------------------------------------------------
+# Branch point: split at the midpoint vs at the relaxation minimizer
+# ---------------------------------------------------------------------------
+
+
+def split():
+    T = 14.0
+    tl = Timeline(T)
+    lo, hi = 0.0, 4.0
+    LAM, BETA = 0.75, 0.2  # the constants in bnb.py
+
+    def f(x):
+        return np.sin(1.5 * x) + 0.2 * x
+
+    def alpha(a, c):
+        z = np.linspace(a, c, 2000)
+        return max(0.0, float(-(-2.25 * np.sin(1.5 * z)).min()))  # f'' = -2.25 sin(1.5 x)
+
+    def cv(z, a, c):
+        return f(z) + 0.5 * alpha(a, c) * (z - a) * (z - c)
+
+    def vmin(a, c):
+        z = np.linspace(a, c, 4001)
+        v = cv(z, a, c)
+        i = int(v.argmin())
+        return z[i], v[i]
+
+    xr, _ = vmin(lo, hi)
+    w, mid = hi - lo, 0.5 * (lo + hi)
+    pt = float(np.clip(LAM * xr + (1 - LAM) * mid, lo + BETA * w, hi - BETA * w))
+    fmin = float(f(np.linspace(lo, hi, 4001)).min())
+    Y0, sy, sx = 210, 70, 100
+
+    b = [text(30, 30, f"one split of x ∈ [0, 4]: where to cut?   (f* = {fmin:.3f}; children use their own αBB)",
+              17, INK, weight="bold")]  # fmt: skip
+    for X0, name, s, color, t0 in [(50, "midpoint", mid, ORANGE, 2.0), (520, "relaxation point", pt, BLUE, 2.0)]:
+        def P(x, y, X0=X0):
+            return X0 + sx * x, Y0 - sy * y
+
+        z = np.linspace(lo, hi, 161)
+        b.append(f"<clipPath id='clip{int(X0)}'><rect x='{X0 - 10}' y='95' width='{4 * sx + 20}' height='190'/></clipPath>")
+        b.append(text(X0 + 2 * sx, 62, f"split at the {name}", 19, color, "middle", "bold"))
+        b.append(f"<line x1='{P(lo, 0)[0]}' y1='{P(0, 0)[1]}' x2='{P(hi, 0)[0]}' y2='{P(0, 0)[1]}' stroke='{GREY}'/>")
+        b.append(f"<path d='{poly_path([P(x, y) for x, y in zip(z, f(z))])}' fill='none' stroke='{INK}' stroke-width='2.5'/>")
+        # parent underestimator and its minimizer
+        par = poly_path([P(x, y) for x, y in zip(z, cv(z, lo, hi))])
+        b.append(f"<path d='{par}' clip-path='url(#clip{int(X0)})' fill='none' stroke='{GREY}' stroke-width='2' stroke-dasharray='6 4'>"
+                 f"{tl.anim('opacity', 0.45, [(0, 0), (0.3, 0), (0.9, 1), (3.9, 1), (4.6, 0.45)])}</path>")
+        xm, ym = vmin(lo, hi)
+        b.append(text(X0 + 2 * sx, 82, f"box bound {ym:.2f} (below the plot)", 15, GREY, "middle", extra=tl.show(1.2)))
+        # split line
+        b.append(f"<line x1='{P(s, 0)[0]:.1f}' y1='{P(0, 1.3)[1]:.1f}' x2='{P(s, 0)[0]:.1f}' y2='{P(0, -1.6)[1]:.1f}' "
+                 f"stroke='{color}' stroke-width='2.5' stroke-dasharray='6 4' opacity='1'>{tl.show(t0 + 0.5)}</line>")
+        b.append(text(P(s, 0)[0], P(0, 1.55)[1], f"p = {s:.2f}", 17, color, "middle", "bold", extra=tl.show(t0 + 0.5)))
+        # children
+        for a, c, off in [(lo, s, 0.0), (s, hi, 0.4)]:
+            zc = np.linspace(a, c, 81)
+            b.append(f"<path d='{poly_path([P(x, y) for x, y in zip(zc, cv(zc, a, c))])}' fill='none' stroke='{color}' "
+                     f"stroke-width='3.2' opacity='1'>{tl.show(t0 + 2.8 + off)}</path>")
+        lb = min(vmin(lo, s)[1], vmin(s, hi)[1])
+        b.append(f"<line x1='{P(lo, 0)[0]}' y1='{P(0, lb)[1]:.1f}' x2='{P(hi, 0)[0]}' y2='{P(0, lb)[1]:.1f}' stroke='{color}' "
+                 f"stroke-width='1.5' stroke-dasharray='3 3' opacity='1'>{tl.show(t0 + 5.4)}</line>")
+        b.append(text(X0 + 2 * sx, 330, f"new lower bound {lb:.3f}", 19, color, "middle", "bold", extra=tl.show(t0 + 5.4)))
+        b.append(text(X0 + 2 * sx, 356, f"gap to f*: {fmin - lb:.3f}", 19, color, "middle", extra=tl.show(t0 + 5.4)))
+    # the true minimum, shared
+    b.append(f"<line x1='{50}' y1='{Y0 - sy * fmin:.1f}' x2='{50 + 4 * sx}' y2='{Y0 - sy * fmin:.1f}' stroke='{GREEN}' stroke-width='1.5'/>")
+    b.append(f"<line x1='{520}' y1='{Y0 - sy * fmin:.1f}' x2='{520 + 4 * sx}' y2='{Y0 - sy * fmin:.1f}' stroke='{GREEN}' stroke-width='1.5'/>")
+    b.append(text(930, Y0 - sy * fmin - 6, "f*", 16, GREEN, "end"))
+    caps = captions(tl, [
+        (0.2, 3.0, "1 · bound the box: the minimizer of the convex underestimator (red) estimates where f is small"),
+        (3.1, 6.0, "2 · cut at the midpoint, or at p = clip(0.75·x_relax + 0.25·mid, lo + 0.2w, hi − 0.2w)"),
+        (6.1, T - HOLD - 0.5, "3 · each child is relaxed on its own: cutting near the minimizer tightens the bound there"),
+    ], "split point: the relaxation minimizer puts the cut where the bound is decided (one example)")  # fmt: skip
+    return svg("".join(b) + caps, "branch point animation")
+
+
 if __name__ == "__main__":
-    for name, fn in [("fbbt", fbbt), ("dbbt", dbbt), ("obbt", obbt), ("alphabb", alphabb)]:
+    for name, fn in [("fbbt", fbbt), ("dbbt", dbbt), ("obbt", obbt), ("alphabb", alphabb), ("split", split)]:
         (HERE / f"{name}.svg").write_text(fn())
         print("wrote", HERE / f"{name}.svg")
