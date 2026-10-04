@@ -35,22 +35,17 @@ from .fbbt import make_fbbt
 from .lifted import make_lifted_bounder
 from .lp import make_constrained_bounder, make_obbt, reduce_ranges
 from .relax import relax
-from .univariate import relax_univariate
+from .univariate import make_relaxer
 
 
-def make_bounder(f, n_fw=20, univariate=False):
+def make_bounder(f, n_fw=20, univariate=False, alphabb=False):
     """Return ``bound(lo, hi, cutoff) -> (lb, x, f(x), lo', hi')`` for one box.
 
     ``[lo', hi']`` is the box after duality-based range reduction: every
     Frank-Wolfe cut ``f(z) >= cv(x) + g.(z - x)`` with ``f(z) <= cutoff``
     confines each ``z_j`` to an interval.
     """
-    if univariate:
-        rfu = relax_univariate(f)
-    else:
-        rf0 = relax(f)
-        rfu = lambda x, lo, hi, data: rf0(x, lo, hi)  # noqa: E731
-        rfu.prepare = lambda lo, hi: None
+    rfu = make_relaxer(f, univariate, alphabb)
 
     def bound(blo, bhi, cutoff=jnp.inf):
         data = rfu.prepare(blo, bhi)
@@ -147,6 +142,7 @@ def minimize(
     obbt="root",
     obbt_rounds=2,
     univariate=True,
+    alphabb=True,
     lifted=False,
     time_limit=np.inf,
     verbose=False,
@@ -169,7 +165,9 @@ def minimize(
 
     Relaxations: ``univariate`` replaces the relaxation of every smooth
     sub-expression of a single variable by a grid-hull envelope
-    (``univariate.py``); ``lifted`` bounds nodes with the extended-space LP
+    (``univariate.py``); ``alphabb`` adds whole-function alphaBB with
+    scaled-Gershgorin alpha from an interval Hessian for smooth functions
+    (``alphabb.py``); ``lifted`` bounds nodes with the extended-space LP
     (``lifted.py``) instead of the reduced-space cuts.
     """
     t0 = time.perf_counter()
@@ -198,16 +196,18 @@ def minimize(
             fx = jnp.where(violation(x) <= feas_tol, f(x), jnp.inf)
             return lb, x, fx, rlo, rhi
     elif constrained:
-        cb = make_constrained_bounder(f, ineq, eq, n_kelley=n_kelley, tol=feas_tol, univariate=univariate)
+        cb = make_constrained_bounder(f, ineq, eq, n_kelley=n_kelley, tol=feas_tol, univariate=univariate,
+                                      alphabb=alphabb)
 
         def raw_bound(blo, bhi, cutoff):
             lb, x, _, rlo, rhi = cb(blo, bhi, cutoff)
             fx = jnp.where(violation(x) <= feas_tol, f(x), jnp.inf)
             return lb, x, fx, rlo, rhi
     else:
-        raw_bound = make_bounder(f, n_fw, univariate=univariate)
+        raw_bound = make_bounder(f, n_fw, univariate=univariate, alphabb=alphabb)
     tighten = make_fbbt(f, ineq, eq, rounds=fbbt_rounds, feas_tol=feas_tol) if fbbt else None
-    lp_tighten = make_obbt(f, ineq, eq, rounds=obbt_rounds, tol=feas_tol, univariate=univariate) if obbt else None
+    lp_tighten = make_obbt(f, ineq, eq, rounds=obbt_rounds, tol=feas_tol, univariate=univariate,
+                            alphabb=alphabb) if obbt else None
 
     def node(blo, bhi, cutoff, with_obbt=False):
         """Tighten, then bound one box. Returns (lb, x, f(x), lo', hi')."""

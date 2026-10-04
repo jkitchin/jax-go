@@ -181,8 +181,28 @@ relaxations, choosing tree-OBBT variables by impact, and probing.
   So it stays opt-in until it also uses the univariate envelopes and
   structure-specific cuts.
 
+- *Scaled-Gershgorin alphaBB* (`jaxglobal/alphabb.py`, default on): for every
+  function built only from smooth primitives, the interval Hessian
+  (`jacfwd(jacfwd(g))` evaluated by the interval interpreter, once per box)
+  gives per-variable α by the scaled Gershgorin rule, and
+  `g + Σ αᵢ(xᵢ−lᵢ)(xᵢ−uᵢ)` / `g − Σ βᵢ(...)` are combined with McCormick
+  by max/min. Its gap shrinks with the square of the box width, so it pays
+  off deep in the tree. Node counts (univariate envelopes on in both):
+
+  | problem | without | with |
+  |---|---:|---:|
+  | goldstein_price | 7309 | 1445 |
+  | hartmann3 | 515 | 155 |
+  | hartmann6 | 2261 | 1083 |
+  | reactor | 747 | 439 |
+  | six_hump_camel | 31 | 23 |
+  | tanh_net_2d | 323 | 287 |
+
+  No problem got worse. Nonsmooth functions (holder_table, eggholder,
+  piecewise) are skipped.
+
 Not yet done: multivariate McCormick, trilinear/fractional envelopes,
-quadratic-form detection with eigenvalue cuts, and scaled αBB. The pooling
+and quadratic-form detection with eigenvalue cuts. The pooling
 half of the exit criterion (Adhya, Ben-Tal) cannot be measured in this
 environment, because MINLPLib is not reachable. Separable bilinear pooling
 constraints gain nothing from either piece so far (haverly's root bound is

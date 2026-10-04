@@ -339,12 +339,34 @@ class Relaxer(NamedTuple):
         return self.call(x, lo, hi, data)
 
 
-def make_relaxer(fn, univariate=True, K=65):
-    """Relaxation of ``fn`` with (``univariate=True``) or without hull envelopes."""
-    if univariate:
-        prepare, relax_with = make_univariate(fn, K)
-        return Relaxer(prepare, relax_with)
+def make_relaxer(fn, univariate=True, alphabb=False, K=65):
+    """Relaxation of ``fn``: McCormick, optionally tightened by univariate hull
+    envelopes (``univariate``) and whole-function scaled-Gershgorin alphaBB
+    (``alphabb``, smooth ``fn`` only)."""
+    from .alphabb import make_alphabb
     from .relax import relax
 
-    rf = relax(fn)
-    return Relaxer(lambda lo, hi: None, lambda x, lo, hi, data: rf(x, lo, hi))
+    if univariate:
+        uprep, ucall = make_univariate(fn, K)
+    else:
+        rf = relax(fn)
+        uprep, ucall = (lambda lo, hi: None), (lambda x, lo, hi, data: rf(x, lo, hi))
+    if not alphabb:
+        return Relaxer(uprep, ucall)
+    aprep, aapply = make_alphabb(fn)
+
+    def prepare(lo, hi):
+        return uprep(lo, hi), aprep(lo, hi)
+
+    def call(x, lo, hi, data):
+        m = ucall(x, lo, hi, data[0])
+        if data[1] is None:
+            return m
+        shp = jnp.shape(m.cv)
+        acv, acc = aapply(x, lo, hi, data[1])
+        acv, acc = jnp.reshape(acv, shp), jnp.reshape(acc, shp)
+        cv = jnp.where(jnp.isnan(m.cv), acv, jnp.maximum(m.cv, acv))
+        cc = jnp.where(jnp.isnan(m.cc), acc, jnp.minimum(m.cc, acc))
+        return tighten(MC(m.lo, m.hi, cv, cc))
+
+    return Relaxer(prepare, call)

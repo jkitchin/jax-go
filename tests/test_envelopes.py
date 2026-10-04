@@ -125,3 +125,93 @@ def test_univariate_reduces_nodes(name):
     assert abs(on.fun - p.fstar) <= 1e-4 * (1 + abs(p.fstar))
     assert on.lower_bound <= p.fstar + 1e-5 * (1 + abs(p.fstar))
     assert on.nodes * 3 <= off.nodes, (on.nodes, off.nodes)
+
+
+SMOOTH = [c for c in FUNCS if c[0] not in ("holder_table", "eggholder", "piecewise_2d")]
+
+
+@pytest.mark.parametrize("case", SMOOTH, ids=[c[0] for c in SMOOTH])
+def test_alphabb_relaxation_sound(case):
+    """McCormick + univariate + scaled-Gershgorin alphaBB stays valid, on small boxes too."""
+    from jaxglobal.univariate import make_relaxer
+
+    name, f, lo0, hi0 = case
+    r = make_relaxer(lambda x: jnp.atleast_1d(f(x)), univariate=True, alphabb=True)
+    prep = jax.jit(r.prepare)
+    ev = jax.jit(jax.vmap(lambda x, lo, hi, d: r(x, lo, hi, d), in_axes=(0, None, None, None)))
+    fv = jax.jit(jax.vmap(lambda x: jnp.atleast_1d(f(x))))
+    rng = np.random.default_rng(4)
+    for lo, hi in boxes(lo0, hi0, rng, 8):
+        X = rng.uniform(lo, hi, (2000, lo.size))
+        d = prep(jnp.asarray(lo), jnp.asarray(hi))
+        m, F = ev(jnp.asarray(X), jnp.asarray(lo), jnp.asarray(hi), d), np.asarray(fv(jnp.asarray(X)))
+        ok = np.isfinite(F)
+        s = 1e-9 * (1 + np.abs(F[ok]).max(initial=0))
+        assert np.all(np.asarray(m.cv)[ok] <= F[ok] + s) and np.all(F[ok] <= np.asarray(m.cc)[ok] + s)
+
+
+def test_alphabb_tightens_small_boxes():
+    gp = next(p for p in PROBLEMS if p.name == "goldstein_price")
+    b0 = jax.jit(make_bounder(gp.f, univariate=True))
+    b1 = jax.jit(make_bounder(gp.f, univariate=True, alphabb=True))
+    rng = np.random.default_rng(0)
+    g0 = g1 = 0.0
+    for _ in range(6):
+        c = rng.uniform(gp.lo, gp.hi)
+        lo, hi = np.maximum(gp.lo, c - 0.08), np.minimum(gp.hi, c + 0.08)
+        fmin = float(np.min(jax.vmap(gp.f)(jnp.asarray(rng.uniform(lo, hi, (3000, 2))))))
+        l0, l1 = float(b0(lo, hi)[0]), float(b1(lo, hi)[0])
+        assert l0 <= l1 <= fmin + 1e-9
+        g0, g1 = g0 + fmin - l0, g1 + fmin - l1
+    assert g1 < 0.6 * g0
+
+
+def test_alphabb_skips_nonsmooth():
+    from jaxglobal.alphabb import make_alphabb
+
+    prep, _ = make_alphabb(lambda x: jnp.atleast_1d(jnp.abs(x[0]) + x[1] ** 2))
+    assert prep(jnp.zeros(2), jnp.ones(2)) is None
+
+
+def _rand_quadratic(seed, n=4):
+    rng = np.random.default_rng(seed)
+    A = rng.normal(size=(n, n))
+    Q = 0.5 * (A + A.T)
+    b = rng.normal(size=n)
+    return lambda x: x @ (jnp.asarray(Q) @ x) + jnp.asarray(b) @ x
+
+
+def _eigen_check(seed):
+    """Indefinite rotated quadratic: valid, convex, never looser; returns the mean gain."""
+    from jaxglobal.alphabb import make_alphabb
+
+    q = _rand_quadratic(seed)
+    prep, apply = make_alphabb(lambda x: jnp.atleast_1d(q(x)))
+    rng = np.random.default_rng(seed)
+    lo, hi = jnp.asarray(-rng.uniform(0.5, 2, 4)), jnp.asarray(rng.uniform(0.5, 2, 4))
+    a, b, eig = prep(lo, hi)
+    assert bool(eig[0][0])  # detected as quadratic
+    X = jnp.asarray(rng.uniform(lo, hi, (3000, 4)))
+    cv, cc = jax.vmap(lambda x: apply(x, lo, hi, (a, b, eig)))(X)
+    F = jax.vmap(q)(X)
+    assert np.all(np.asarray(cv[:, 0]) <= np.asarray(F) + 1e-9) and np.all(np.asarray(F) <= np.asarray(cc[:, 0]) + 1e-9)
+    # convexity of cv: midpoint inequality on random pairs
+    Y = jnp.asarray(rng.uniform(lo, hi, (3000, 4)))
+    cy, _ = jax.vmap(lambda x: apply(x, lo, hi, (a, b, eig)))(Y)
+    cm, _ = jax.vmap(lambda x: apply(x, lo, hi, (a, b, eig)))(0.5 * (X + Y))
+    assert np.all(np.asarray(cm) <= 0.5 * (np.asarray(cv) + np.asarray(cy)) + 1e-9)
+    # the eigen part never loosens (it is combined by max) and usually tightens
+    off = (jnp.zeros_like(eig[0]),) + tuple(eig[1:])
+    cv0, _ = jax.vmap(lambda x: apply(x, lo, hi, (a, b, off)))(X)
+    assert np.all(np.asarray(cv) >= np.asarray(cv0))
+    return float(jnp.mean(cv[:, 0]) - jnp.mean(cv0[:, 0]))
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_eigen_relaxation_sound(seed):
+    _eigen_check(seed)
+
+
+def test_eigen_relaxation_sometimes_tighter():
+    gains = [_eigen_check(seed) for seed in range(5, 15)]
+    assert sum(g > 1e-6 for g in gains) >= 2, gains
