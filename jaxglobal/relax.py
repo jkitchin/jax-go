@@ -417,7 +417,31 @@ def _div(ctx, eqn, a, b):
     if not is_mc(b):
         return mc_scale(a, 1.0 / b)
     r = mc_recip(b)
-    return mc_scale(r, a) if not is_mc(a) else mc_mul(a, r)
+    if not is_mc(a):
+        return mc_scale(r, a)
+    return mc_frac(a, b, mc_mul(a, r))
+
+
+def mc_frac(a: MC, b: MC, base: MC) -> MC:
+    """Tighten ``base`` (McCormick of a * (1/b)) with the convex envelope of a/b.
+
+    For a in [aL, aU] with aL >= 0 and b in [bL, bU] with bL > 0
+    (Tawarmalani & Sahinidis 2001):
+
+        a / b >= ((a + sqrt(aL aU)) / (sqrt(aL) + sqrt(aU)))^2 / b,
+
+    since ``(sqrt(a) - sqrt(aL))(sqrt(a) - sqrt(aU)) <= 0``. The right side is
+    convex (quadratic over linear), nondecreasing in a and nonincreasing in b,
+    so composing it with a.cv and b.cc keeps it convex.
+    """
+    ok = (a.lo >= 0) & (b.lo > 0) & jnp.isfinite(a.hi) & jnp.isfinite(b.hi)
+    sl = jnp.sqrt(jnp.where(ok, a.lo, 0.0))
+    su = jnp.sqrt(jnp.where(ok, a.hi, 1.0))
+    den = jnp.where(ok & (sl + su > 0), sl + su, 1.0)
+    num = (jnp.where(ok, a.cv, 0.0) + sl * su) / den
+    env = num**2 / jnp.where(ok, b.cc, 1.0)
+    cv = jnp.where(ok, jnp.maximum(base.cv, env), base.cv)
+    return tighten(MC(base.lo, base.hi, cv, base.cc))
 
 
 @rule("dot_general")

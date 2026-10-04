@@ -215,3 +215,41 @@ def test_eigen_relaxation_sound(seed):
 def test_eigen_relaxation_sometimes_tighter():
     gains = [_eigen_check(seed) for seed in range(5, 15)]
     assert sum(g > 1e-6 for g in gains) >= 2, gains
+
+
+FRACS = [
+    ("x/y", lambda x: x[0] / x[1], [0.5, 1.0], [4.0, 3.0]),
+    ("x/y from 0", lambda x: x[0] / x[1], [0.0, 0.2], [2.0, 5.0]),
+    ("composite", lambda x: (x[0] ** 2 + x[1]) / (jnp.exp(x[1]) + x[0]), [0.1, 0.0], [2.0, 1.5]),
+    ("mixed sign (fallback)", lambda x: x[0] / x[1], [-1.0, 1.0], [2.0, 3.0]),
+]
+
+
+@pytest.mark.parametrize("case", FRACS, ids=[c[0] for c in FRACS])
+def test_fractional_envelope_sound_and_cuts_valid(case):
+    from jaxglobal import relax
+
+    _, f, lo, hi = case
+    lo, hi = jnp.asarray(lo), jnp.asarray(hi)
+    rng = np.random.default_rng(6)
+    X = jnp.asarray(rng.uniform(lo, hi, (4000, 2)))
+    F = np.asarray(jax.vmap(f)(X))
+    cvf = jax.jit(lambda x: relax(f)(x, lo, hi).cv)
+    CV = np.asarray(jax.vmap(cvf)(X))
+    assert np.all(CV <= F + 1e-10)
+    vg = jax.jit(jax.value_and_grad(cvf))
+    for x0 in rng.uniform(lo, hi, (8, 2)):
+        v, g = vg(jnp.asarray(x0))
+        assert np.all(np.asarray(v + (X - x0) @ g) <= CV + 1e-9 * (1 + np.abs(CV)))
+
+
+def test_fractional_envelope_tighter():
+    from jaxglobal import relax
+    from jaxglobal.relax import MC, mc_mul, mc_recip
+
+    lo, hi = jnp.array([0.5, 1.0]), jnp.array([4.0, 3.0])
+    X = jnp.asarray(np.random.default_rng(7).uniform(lo, hi, (4000, 2)))
+    new = jax.vmap(lambda x: relax(lambda z: z[0] / z[1])(x, lo, hi).cv)(X)
+    old = jax.vmap(lambda x: mc_mul(MC(lo[0], hi[0], x[0], x[0]), mc_recip(MC(lo[1], hi[1], x[1], x[1]))).cv)(X)
+    assert np.all(np.asarray(new) >= np.asarray(old) - 1e-12)
+    assert float(jnp.mean(new - old)) > 0.03
