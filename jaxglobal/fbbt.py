@@ -63,7 +63,7 @@ class Tape(NamedTuple):
     outs: list  # output atoms
 
 
-def _flatten(jaxpr, consts, in_atoms, nodes, shapes):
+def _flatten(jaxpr, consts, in_atoms, nodes, shapes, seen):
     env = {}
 
     def read(v):
@@ -78,9 +78,15 @@ def _flatten(jaxpr, consts, in_atoms, nodes, shapes):
         name = eqn.primitive.name
         sub = next((eqn.params[p] for p in SUBJAXPR_PARAMS if p in eqn.params), None)
         if name not in RULES and sub is not None:
-            outs = _flatten(getattr(sub, "jaxpr", sub), getattr(sub, "consts", ()), ins, nodes, shapes)
+            outs = _flatten(getattr(sub, "jaxpr", sub), getattr(sub, "consts", ()), ins, nodes, shapes, seen)
             for v, o in zip(eqn.outvars, outs):
                 env[v] = o
+            continue
+        # common subexpressions (``x[0]`` written twice, a repeated term) are one node
+        key = _cse_key(eqn, ins)
+        if key is not None and key in seen:
+            for v, k in zip(eqn.outvars, seen[key]):
+                env[v] = k
             continue
         slots = []
         for v in eqn.outvars:
@@ -89,15 +95,41 @@ def _flatten(jaxpr, consts, in_atoms, nodes, shapes):
             env[v] = k
             slots.append(k)
         nodes.append(Node(eqn, ins, tuple(slots)))
+        if key is not None:
+            seen[key] = tuple(slots)
     return [read(v) for v in jaxpr.outvars]
+
+
+def _cse_key(eqn, ins):
+    """Hashable identity of an equation (primitive, params, inputs), or None."""
+    if eqn.effects:
+        return None
+    try:
+        args = tuple(("c", id(a.val)) if isinstance(a, Const) else ("s", a) for a in ins)
+        key = (eqn.primitive, tuple(sorted((k, repr(v)) for k, v in eqn.params.items())), args)
+        hash(key)
+        return key
+    except TypeError:
+        return None
+
+
+def _dce(nodes, outs):
+    """Drop nodes none of whose results reach the outputs."""
+    live = {a for a in outs if not isinstance(a, Const)}
+    keep = []
+    for node in reversed(nodes):
+        if any(s in live for s in node.outs):
+            keep.append(node)
+            live.update(a for a in node.ins if not isinstance(a, Const))
+    return keep[::-1]
 
 
 def make_tape(fn, x):
     closed = jax.make_jaxpr(fn)(x)
     shapes = {0: (x.shape, x.dtype)}
     nodes = []
-    outs = _flatten(closed.jaxpr, closed.consts, [0], nodes, shapes)
-    return Tape(nodes, shapes, outs)
+    outs = _flatten(closed.jaxpr, closed.consts, [0], nodes, shapes, {})
+    return Tape(_dce(nodes, outs), shapes, outs)
 
 
 def _has_tracer(tape):
@@ -150,11 +182,16 @@ def _empty(lo, hi):
     return lo > hi + EMPTY_TOL * (1 + scale)
 
 
-def _meet(a, b):
-    """Intersection; slightly crossed endpoints (rounding) are reordered."""
+def _meet2(a, b):
+    """Intersection and its emptiness flags; slightly crossed endpoints (rounding) are reordered."""
     lo, hi = jnp.maximum(a[0], b[0]), jnp.minimum(a[1], b[1])
     bad = _empty(lo, hi)
-    return jnp.where(bad, lo, jnp.minimum(lo, hi)), jnp.where(bad, hi, jnp.maximum(lo, hi))
+    return jnp.where(bad, lo, jnp.minimum(lo, hi)), jnp.where(bad, hi, jnp.maximum(lo, hi)), bad
+
+
+def _meet(a, b):
+    lo, hi, _ = _meet2(a, b)
+    return lo, hi
 
 
 def _iv(v):
@@ -569,8 +606,10 @@ def _forward(tape, x_bounds, prior):
                 shp, dt = tape.shapes[s]
                 lo, hi = _clean(*(jnp.broadcast_to(jnp.asarray(c, dt), shp) for c in (o.lo, o.hi)))
                 if s in prior:
-                    lo, hi = _meet((lo, hi), prior[s])
-                empty |= jnp.any(_empty(lo, hi))
+                    lo, hi, bad = _meet2((lo, hi), prior[s])  # a met interval is empty iff the meet was
+                else:
+                    bad = _empty(lo, hi)
+                empty |= jnp.any(bad)
                 vals[s] = MC(lo, hi, lo, hi)
             else:
                 vals[s] = o
@@ -579,9 +618,11 @@ def _forward(tape, x_bounds, prior):
 
 def _backward(tape, vals, out_bounds):
     b = {s: (v.lo, v.hi) for s, v in vals.items() if is_mc(v)}
+    empty = jnp.array(False)  # a met interval stays crossed (never reordered) iff some meet was empty
     for a, z in zip(tape.outs, out_bounds):
         if not isinstance(a, Const) and a in b and z is not None:
-            b[a] = _meet(b[a], z)
+            lo, hi, bad = _meet2(b[a], z)
+            b[a], empty = (lo, hi), empty | jnp.any(bad)
 
     def cur(a):
         if isinstance(a, Const):
@@ -604,8 +645,9 @@ def _backward(tape, vals, out_bounds):
                 continue
             c = _unbcast(_clean(*c), jnp.shape(b[a][0]))
             if c is not None:
-                b[a] = _meet(b[a], _pad(*c))
-    return b
+                lo, hi, bad = _meet2(b[a], _pad(*c))
+                b[a], empty = (lo, hi), empty | jnp.any(bad)
+    return b, empty
 
 
 def joint_tape(f, ineq, eq, x):
@@ -638,8 +680,13 @@ def propagate(tape, lo, hi, out_bounds, rounds):
     interval ``MC(lo, hi, lo, hi)``, an ``Unknown`` or a constant) from a last
     forward sweep, so every interval is consistent with the tightened box.
     """
-    vals, empty = _forward(tape, (lo, hi), {})
-    slots = sorted(s for s, v in vals.items() if is_mc(v))
+    # Which slots hold intervals is a property of the tape: find it by an
+    # abstract evaluation instead of tracing a first forward sweep whose
+    # result the first round would recompute (a round starts with a sweep
+    # against the earlier bounds, here none: the box and unbounded slots).
+    shapes = jax.eval_shape(lambda l, h: _forward(tape, (l, h), {})[0], lo, hi)
+    slots = sorted(s for s, v in shapes.items() if is_mc(v))
+    empty = jnp.array(False)
     # a constant output that violates its constraint makes every box infeasible
     for a, z in zip(tape.outs, out_bounds):
         if isinstance(a, Const):
@@ -655,12 +702,10 @@ def propagate(tape, lo, hi, out_bounds, rounds):
         bounds, empty = carry
         prior = dict(zip(slots, bounds))
         vals, e1 = _forward(tape, prior[0], prior)
-        b = _backward(tape, vals, live)
-        for s in slots:
-            empty |= jnp.any(_empty(*b[s]))
-        return tuple(fix(s, b[s]) for s in slots), empty | e1
+        b, e2 = _backward(tape, vals, live)
+        return tuple(fix(s, b[s]) for s in slots), empty | e1 | e2
 
-    init = tuple(fix(s, (vals[s].lo, vals[s].hi)) for s in slots)
+    init = tuple(fix(s, (lo, hi) if s == 0 else (-INF, INF)) for s in slots)
     bounds, empty = lax.fori_loop(0, rounds, body, (init, empty))
     prior = dict(zip(slots, bounds))
     vals, e = _forward(tape, prior[0], prior)
