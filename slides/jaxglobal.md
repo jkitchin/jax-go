@@ -159,6 +159,14 @@ $$
 
 ---
 
+## αBB on whole functions: shrinking boxes close the gap
+
+![w:900](anim/alphabb.svg)
+
+<p class="small">n variables: interval Hessian of the whole function from <code>jacfwd(jacfwd(f))</code> in interval mode, then a per-variable α by the scaled Gershgorin rule. Combined with McCormick by max. Goldstein–Price: 7309 → 1445 nodes.</p>
+
+---
+
 ## Relaxations tighten as boxes shrink
 
 ![height:430px](../figures/relaxations.png)
@@ -199,6 +207,48 @@ $$
 - Now a test checks every cut against sampled points
 
 <div class="take">Autodiff conventions matter when gradients become proofs.</div>
+
+---
+
+## Bound tightening: shrink the box before branching
+
+<div class="pipe">
+<div><b>FBBT</b>forward–backward interval propagation over the jaxpr, every node</div>
+<div class="arrow">+</div>
+<div><b>DBBT</b>range reduction from each node's bound certificate, at no extra cost</div>
+<div class="arrow">+</div>
+<div><b>OBBT</b>min / max of every variable over the relaxation LP, 2n LPs in one <code>vmap</code></div>
+</div>
+
+<br>
+
+- All three cut only points that are infeasible or **cannot beat the incumbent** `f ≤ UB`
+- All are pure JAX functions of the box: `jit` + `vmap` over the node batch
+- Node counts on the 21 test problems drop **3.0×** (geometric mean); constrained problems **4.6×**
+
+---
+
+## FBBT: propagate intervals forward, invert them backward
+
+![w:900](anim/fbbt.svg)
+
+<p class="small">Each primitive has a backward rule: <code>x ∈ Z − Y</code> for add, <code>x ∈ log Z</code> for exp, the two-sided root for <code>x²ⁿ</code> and <code>|x|</code>, … Missing rules just pass no information.</p>
+
+---
+
+## DBBT: the bound's certificate also bounds the variables
+
+![w:900](anim/dbbt.svg)
+
+<p class="small">Weak duality gives <code>f ≥ lb + Σ rⱼ(xⱼ − loⱼ)</code> with reduced costs r. Every r is shrunk by its rounding-error bound before use.</p>
+
+---
+
+## OBBT: ask the relaxation how far each variable can go
+
+![w:900](anim/obbt.svg)
+
+<p class="small">The new bounds are weak-duality certificates, like the node bound: an inexact LP solve gives a looser box, never a wrong one.</p>
 
 ---
 
@@ -341,11 +391,11 @@ THROUGHPUT_FIGURE
 
 ## Limitations and next steps
 
-- Plain McCormick + αBB; **no bound tightening (FBBT/OBBT) yet**
+- Bound tightening (FBBT, DBBT, OBBT), univariate hull envelopes and whole-function αBB are in; pooling relaxations are not
 - Dense LP per node, fixed iteration count
-- Upper bounds from scipy SLSQP: the main constrained-time cost
-- Small problems only (≤ 9 variables so far)
-- Next: FBBT on the jaxpr, GPU batches, harder pooling sets (Adhya, Ben-Tal)
+- Not rigorous in floating point (no outward rounding)
+- Small problems only (≤ 9 variables in the test set)
+- Next: rerun MINLPLib, smarter branching and diving (phase 3), GPU batches
 
 ---
 
