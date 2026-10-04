@@ -325,6 +325,38 @@ the size of the relaxation jaxpr (`prepare` emits thousands of equations for
 an 8-equation `f`). A persistent compilation cache and leaner `prepare`
 tracing are the remaining options.
 
+Second pass, on the .nl-read MINLPLib instances (first solve is trace plus
+XLA compile; load was heavy, so times are +-50%):
+
+- **Lean .nl tracing.** `ineq` evaluated every constraint and the objective
+  and then gathered; zero coefficients became `0.0*x` and sums began with
+  `0.0 +`. The reader now traces only the requested rows, drops zero terms
+  and caches variable reads.
+- **FBBT.** `propagate` used to trace the forward pass three times; it now
+  gets the slot structure from `eval_shape` and traces it twice. The meet
+  emptiness flags are folded into one reduction. The tape is CSE'd and
+  DCE'd (no measurable effect yet).
+- **Root OBBT skipped** when the root bound already closes the gap, which
+  avoids compiling the second kernel (about 1.5 s) on st_e01 and rbrock.
+
+| | before | after |
+|---|---:|---:|
+| st_e01, first / repeat | 6.9 / 0.006 s | 1.9-2.3 / 0.006 s |
+| rbrock, first / repeat | 4.1 / 0.007 s | 1.1-1.6 / 0.007 s |
+| ex4_1_7, first / repeat | 3.9 / 0.010 s | 3.5-3.6 / 0.010 s |
+| st_e01 FBBT eqns / all kernels | 11605 / 20.8k | 2549 / 9.2k |
+
+Nodes and bounds are unchanged on the three (1 node each). On a 5-problem
+guard (gramacy_lee, six_hump_camel, G08, G24, haverly) nodes and bounds are
+the same except haverly 45 -> 43 nodes and a 2e-7 shift in G08's lower
+bound. The builtin totals were not re-measured.
+
+Remaining: ex4_1_7 needs its root OBBT, so both kernels (about 0.7 s trace
+and 0.7 s compile each) still build; trace is about 45% and compile 55% of
+each kernel. Options are a persistent compilation cache, leaner `prepare`
+and alphaBB tracing, fewer padded batch sizes, and a lower XLA optimisation
+level (tried: small compile gain, about 5x slower solves).
+
 ### Scaling (synthetic benchmark)
 
 `jaxglobal/synthetic.py` generates seeded instances of four families

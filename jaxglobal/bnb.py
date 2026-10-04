@@ -446,9 +446,11 @@ def minimize(
 
     lb, xc, fc, rlo, rhi, rxr = evaluate(lo[None], hi[None])
     update_incumbent(xc, fc, lb)
-    if obbt and (constrained or np.isfinite(ub)):
+    if obbt and (constrained or np.isfinite(ub)) and not (ub - float(lb.min()) <= tol()):
         # root OBBT once an incumbent cutoff is known (it is useless without
-        # one when there are no constraints)
+        # one when there are no constraints), and not when the root bound has
+        # already closed the gap (the search ends at once; OBBT would only
+        # cost its own trace and compilation)
         lb2, xc, fc, rlo, rhi, rxr = evaluate(rlo, rhi, with_obbt=True)
         lb = np.maximum(lb, lb2)
         update_incumbent(xc, fc, lb)
