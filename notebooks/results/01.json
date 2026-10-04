@@ -1,0 +1,86 @@
+{
+ "six-hump camel": {
+  "loc_pyomo": 8,
+  "loc_jax": 3,
+  "pyomo_vars": 2,
+  "pyomo_cons": 0,
+  "rows": [
+   {
+    "solver": "scip",
+    "obj": -1.0316283126240289,
+    "bound": -1.03171115685791,
+    "time": 0.16587908379733562,
+    "status": "optimal"
+   },
+   {
+    "solver": "couenne",
+    "obj": -1.0316284534898774,
+    "bound": NaN,
+    "time": 0.2933306251652539,
+    "status": "optimal"
+   },
+   {
+    "solver": "baron",
+    "obj": -1.0316284534898774,
+    "bound": -1.0316284534898774,
+    "time": 0.9637175831012428,
+    "status": "optimal"
+   },
+   {
+    "solver": "jaxglobal",
+    "obj": -1.0316284534898774,
+    "bound": -1.031690958516066,
+    "time": 5.152641499880701,
+    "status": "optimal",
+    "nodes": 19
+   },
+   {
+    "solver": "jaxglobal (2nd call, cached)",
+    "obj": -1.0316284534898774,
+    "bound": -1.031690958516066,
+    "time": 0.03185462532564998,
+    "status": "optimal",
+    "nodes": 19
+   }
+  ],
+  "note": ""
+ },
+ "Haverly pooling": {
+  "loc_pyomo": 19,
+  "loc_jax": 9,
+  "pyomo_vars": 9,
+  "pyomo_cons": 6,
+  "rows": [
+   {
+    "solver": "scip",
+    "obj": -400.00000193984795,
+    "bound": -400.000001939848,
+    "time": 0.0698564168997109,
+    "status": "optimal"
+   },
+   {
+    "solver": "couenne",
+    "obj": -400.00005661955254,
+    "bound": NaN,
+    "time": 0.3711538342759013,
+    "status": "optimal"
+   },
+   {
+    "solver": "baron",
+    "obj": -400.0,
+    "bound": -400.0000000000001,
+    "time": 0.8449492081999779,
+    "status": "optimal"
+   },
+   {
+    "solver": "jaxglobal",
+    "obj": -399.99999306260236,
+    "bound": -400.0144145605257,
+    "time": 12.014295500237495,
+    "status": "optimal",
+    "nodes": 105
+   }
+  ],
+  "note": ""
+ }
+}

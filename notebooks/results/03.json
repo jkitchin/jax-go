@@ -1,0 +1,63 @@
+{
+ "RK4 kinetics (explicit)": {
+  "loc_pyomo": 24,
+  "loc_jax": 14,
+  "pyomo_vars": 10,
+  "pyomo_cons": 8,
+  "rows": [
+   {
+    "solver": "scip",
+    "obj": 5.743877508076167e-05,
+    "bound": 5.63753471171796e-05,
+    "time": 0.5313590839505196,
+    "status": "optimal"
+   },
+   {
+    "solver": "couenne",
+    "obj": 5.716689753463269e-05,
+    "bound": NaN,
+    "time": 0.8409888749010861,
+    "status": "optimal"
+   },
+   {
+    "solver": "baron",
+    "obj": 5.716689753504424e-05,
+    "bound": 5.716689566551041e-05,
+    "time": 1.2353186663240194,
+    "status": "optimal"
+   },
+   {
+    "solver": "jaxglobal",
+    "obj": 5.716689753463314e-05,
+    "bound": 5.672003821558852e-05,
+    "time": 26.31938754208386,
+    "status": "optimal",
+    "nodes": 177
+   }
+  ],
+  "note": "same RK4 discretization"
+ },
+ "pyomo.dae (collocation)": {
+  "loc_pyomo": 16,
+  "loc_jax": 14,
+  "pyomo_vars": 52,
+  "pyomo_cons": 50,
+  "rows": [
+   {
+    "solver": "scip (dae)",
+    "obj": 0.00010530109840395882,
+    "bound": 0.000104365179935186,
+    "time": 0.4121243329718709,
+    "status": "optimal"
+   },
+   {
+    "solver": "baron (dae)",
+    "obj": 0.00010519612407575482,
+    "bound": 0.00010519612407575417,
+    "time": 1.2708553750999272,
+    "status": "optimal"
+   }
+  ],
+  "note": "different discretization"
+ }
+}

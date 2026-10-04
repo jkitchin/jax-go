@@ -1,0 +1,163 @@
+{
+ "Colebrook fori_loop": {
+  "loc_pyomo": 11,
+  "loc_jax": 10,
+  "pyomo_vars": 3,
+  "pyomo_cons": 1,
+  "rows": [
+   {
+    "solver": "scip",
+    "obj": -2664.474806596214,
+    "bound": -2664.74123648408,
+    "time": 1.8155156248249114,
+    "status": "optimal"
+   },
+   {
+    "solver": "couenne",
+    "obj": -2664.4699161200583,
+    "bound": NaN,
+    "time": 0.7104504997842014,
+    "status": "optimal"
+   },
+   {
+    "solver": "baron",
+    "obj": -2664.471674171282,
+    "bound": -2664.4717054907505,
+    "time": 1.4760147496126592,
+    "status": "locallyOptimal"
+   },
+   {
+    "solver": "jaxglobal",
+    "obj": -2664.458519750391,
+    "bound": -2664.4834224256456,
+    "time": 27.867308374959975,
+    "status": "optimal",
+    "nodes": 11
+   }
+  ],
+  "note": "Pyomo: implicit equation; jaxglobal: 4 fixed iterations"
+ },
+ "library functions": {
+  "loc_pyomo": null,
+  "loc_jax": null,
+  "pyomo_vars": null,
+  "pyomo_cons": null,
+  "rows": [
+   {
+    "solver": "jnp.polyval",
+    "obj": NaN,
+    "bound": NaN,
+    "time": NaN,
+    "status": "unsupported (ValueError)"
+   },
+   {
+    "solver": "jax.nn.softplus",
+    "obj": 0.7731076007300555,
+    "bound": 0.7730778822612531,
+    "time": 3.7860358329489827,
+    "status": "optimal",
+    "nodes": 59
+   },
+   {
+    "solver": "jax.scipy.stats.norm.cdf",
+    "obj": NaN,
+    "bound": NaN,
+    "time": NaN,
+    "status": "unsupported (KeyError)"
+   }
+  ],
+  "note": "Pyomo cannot call jnp functions; jaxglobal works if primitives are supported"
+ },
+ "einsum quadratic + sin": {
+  "loc_pyomo": 6,
+  "loc_jax": 2,
+  "pyomo_vars": 3,
+  "pyomo_cons": 0,
+  "rows": [
+   {
+    "solver": "scip",
+    "obj": -2.7941306973831193,
+    "bound": -2.79417242305738,
+    "time": 0.11807495774701238,
+    "status": "optimal"
+   },
+   {
+    "solver": "couenne",
+    "obj": -2.794130737988682,
+    "bound": NaN,
+    "time": 0.31667662458494306,
+    "status": "optimal"
+   },
+   {
+    "solver": "baron",
+    "obj": NaN,
+    "bound": NaN,
+    "time": 0.7953133331611753,
+    "status": "noSolution"
+   },
+   {
+    "solver": "jaxglobal",
+    "obj": -2.794130737988682,
+    "bound": -2.794228278107737,
+    "time": 3.082453333772719,
+    "status": "optimal",
+    "nodes": 49
+   }
+  ],
+  "note": "3 variables"
+ },
+ "parametric family (3 values)": {
+  "loc_pyomo": 7,
+  "loc_jax": 3,
+  "pyomo_vars": 2,
+  "pyomo_cons": 0,
+  "rows": [
+   {
+    "solver": "scip p=0.0",
+    "obj": -1.0316283126240289,
+    "bound": -1.03171115685791,
+    "time": 0.19970458280295134,
+    "status": "optimal"
+   },
+   {
+    "solver": "scip p=0.5",
+    "obj": -1.3645697415487879,
+    "bound": -1.36462551475075,
+    "time": 0.14228537492454052,
+    "status": "optimal"
+   },
+   {
+    "solver": "scip p=1.0",
+    "obj": -1.739532136447073,
+    "bound": -1.73953287884095,
+    "time": 0.12297520879656076,
+    "status": "optimal"
+   },
+   {
+    "solver": "jaxglobal p=0.0",
+    "obj": -1.0316284534898774,
+    "bound": -1.031648066451715,
+    "time": 5.13457233319059,
+    "status": "optimal",
+    "nodes": 21
+   },
+   {
+    "solver": "jaxglobal p=0.5",
+    "obj": -1.3645697415487879,
+    "bound": -1.3645758223368212,
+    "time": 0.1421214579604566,
+    "status": "optimal",
+    "nodes": 15
+   },
+   {
+    "solver": "jaxglobal p=1.0",
+    "obj": -1.7395323548157449,
+    "bound": -1.739541146440935,
+    "time": 0.13502524979412556,
+    "status": "optimal",
+    "nodes": 17
+   }
+  ],
+  "note": "loop over parameter values; no batching"
+ }
+}

@@ -150,6 +150,27 @@ using a `jnp`→Pyomo shim on numpy object arrays. It then runs SCIP and Couenne
 `examples/compare_results.json`, and `examples/compare_plot.py` draws
 `figures/benchmark.png`. The slides in `slides/jaxglobal.md` summarize this.
 
+**Pyomo side by side.** The notebooks in [`notebooks/`](notebooks/README.md)
+write each model twice, in Pyomo and as a plain JAX function, and solve both:
+basic and pooling problems, `where`/`clip`/table lookups, RK4 kinetics, NN
+surrogates, and things Pyomo cannot express directly.
+
+**Flagship benchmark.** `jaxglobal.applications` holds code-defined models
+(ODE kinetics, regime-switching engineering models, tanh NN surrogates after
+[schweidtmann2019deterministic]), each with a hand-written Pyomo twin.
+`benchmarks/flagship.py` runs jaxglobal, SCIP, Couenne and BARON on them and
+judges each answer against the best known optimum.
+
+## Correctness checks
+
+`minimize(..., safe=True)` widens every relaxation outward by a few ulps so
+floating-point rounding cannot cut off the global minimum (off by default, about
+1.7× slower). Every result is re-evaluated in float64; a point that violates the
+constraints is reported with status `"unverified"` and its `max_violation`.
+`tests/test_fuzz.py` checks bounds against sampled points on random problems
+(`JAXGLOBAL_FUZZ=N` for more cases), and `benchmarks/check_wrong.py` exits
+nonzero on any wrong or unverified MINLPLib answer.
+
 ## Run
 
 ```bash
