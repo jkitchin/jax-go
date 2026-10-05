@@ -4,11 +4,12 @@ import sys
 from pathlib import Path
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 import pytest
 
 from jaxglobal import minimize
-from jaxglobal.bnb import _Padder
+from jaxglobal.bnb import _Padder, _Precompiled
 from jaxglobal.problems import CONSTRAINED_PROBLEMS, PROBLEMS
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -17,24 +18,36 @@ G24 = next(p for p in CONSTRAINED_PROBLEMS if p.name == "G24")
 
 
 @pytest.mark.parametrize(
-    "k, size", [(1, 16), (16, 16), (17, 64), (64, 64), (65, 256), (256, 256)]
+    "k, sizes", [(1, [16]), (16, [16]), (17, [64]), (64, [64]), (65, [64, 16]), (200, [64, 64, 64, 16])]
 )
-def test_padder_sizes_one_device(k, size):
+def test_padder_chunks_one_device(k, sizes):
     pad = _Padder(256, (16, 64), jax.devices()[:1])
     a = np.arange(k * 3, dtype=float).reshape(k, 3)
     b = np.arange(k, dtype=float) + 100
-    pa, pb = pad(a, b)
-    assert pa.shape == (size, 3) and pb.shape == (size,)
+    calls = pad(a, b)
+    assert [len(pa) for pa, _ in calls] == sizes
+    pa = np.concatenate([np.asarray(c[0]) for c in calls])
+    pb = np.concatenate([np.asarray(c[1]) for c in calls])
     np.testing.assert_array_equal(pa[:k], a)
     np.testing.assert_array_equal(pb[:k], b)
-    np.testing.assert_array_equal(pa[k:], np.broadcast_to(a[0], (size - k, 3)))
-    np.testing.assert_array_equal(pb[k:], np.full(size - k, b[0]))
+    last = k - 64 * (len(sizes) - 1)  # rows of the last call; its padding repeats its first row
+    np.testing.assert_array_equal(np.asarray(calls[-1][0])[last:], np.broadcast_to(a[k - last], (sizes[-1] - last, 3)))
 
 
 def test_padder_sizes_capped_by_batch():
     pad = _Padder(10, (16, 64), jax.devices()[:1])
     assert pad.sizes == [10]
-    assert pad(np.zeros((3, 2)))[0].shape == (10, 2)
+    assert pad(np.zeros((3, 2)))[0][0].shape == (10, 2)
+    assert [c[0].shape[0] for c in pad(np.zeros((25, 2)))] == [10, 10, 10]
+
+
+def test_precompiled_matches_jit():
+    k = _Precompiled(jax.jit(jax.vmap(lambda lo, hi, c: (lo * hi + c,), in_axes=(0, 0, None))), "t")
+    k.start(4, 3)
+    lo, hi, c = jnp.ones((4, 3)), jnp.full((4, 3), 2.0), jnp.asarray(1.0)
+    assert len(k.ready) == 1
+    np.testing.assert_array_equal(k(lo, hi, c)[0], k.jitted(lo, hi, c)[0])
+    np.testing.assert_array_equal(k(lo[:2], hi[:2], c)[0], 3.0)  # a shape not started goes through jit
 
 
 def _solve(p, **kw):

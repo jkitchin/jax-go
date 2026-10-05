@@ -229,10 +229,17 @@ Any AMPL `.nl` model (text or binary) can be loaded with
 * Bounds are first-order McCormick/αBB plus interval arithmetic. Tightened
   intermediate ranges from FBBT are not yet fed back into the relaxations
   (Wechsung-style reverse McCormick), and there is no probing.
-* The first solve of a problem is mostly compilation on the small test
-  problems. Compiled kernels are cached, so repeat solves of the same
-  functions (on any box) are much faster; `jaxglobal.bnb.clear_cache()`
-  empties the cache.
+* The first solve of a problem is mostly tracing and compiling the bounding
+  kernels on the small test problems. The kernels compile in background
+  threads while the rest of the setup runs, and they are cached at three levels:
+  in memory for repeat solves of the same functions (on any box;
+  `jaxglobal.bnb.clear_cache()` empties it), and on disk under
+  `~/.cache/jaxglobal` (`$JAXGLOBAL_CACHE_DIR`) for later processes: the traced
+  kernels as `jax.export` modules, keyed by a fingerprint of the problem's
+  jaxprs, plus JAX's persistent compilation cache unless one is already
+  configured. On eight of the built-in problems, a fresh
+  process takes about 0.3-1 s per problem with a warm disk cache, against
+  2-7 s on a first run. `JAXGLOBAL_CACHE=0` turns the disk caches off.
 
 ## Natural next steps
 
