@@ -23,6 +23,7 @@ Children are created from the tightened box.
 
 from __future__ import annotations
 
+import functools
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -34,6 +35,7 @@ import numpy as np
 from .local import make_local
 from .crown import crown_auto, crown_supported, make_crown
 from .domain import bound_domain
+from . import kcache
 from .fbbt import make_fbbt
 from .lifted import make_lifted_bounder
 from .lp import make_constrained_bounder, make_obbt, reduce_ranges
@@ -137,11 +139,85 @@ def _cached(key, build):
     return val
 
 
+_POOLS = []
+
+
+def _pools():
+    """(tracer, compiler) thread pools for ``_Precompiled``, created on first use."""
+    if not _POOLS:
+        from concurrent.futures import ThreadPoolExecutor
+
+        _POOLS.extend([ThreadPoolExecutor(1, thread_name_prefix="jaxglobal-trace"),
+                       ThreadPoolExecutor(4, thread_name_prefix="jaxglobal-compile")])  # fmt: skip
+    return _POOLS
+
+
+class _Precompiled:
+    """A jitted batch kernel plus executables compiled ahead of time in the background.
+
+    On its first call with a new shape ``jax.jit`` traces, lowers and compiles
+    on the calling thread, one kernel after another. ``start(b, n)`` instead
+    queues trace and lowering on a tracer thread and hands each lowered kernel
+    to a compiler pool. XLA compilation releases the GIL, so one kernel
+    compiles while the next is traced, and both overlap the rest of the setup
+    in ``minimize`` (Hessians, local solver). Calls with a started shape wait
+    for that executable; any other call goes through ``jax.jit``.
+
+    With a problem fingerprint (``kcache.py``) the lowered kernel is also
+    stored on disk with ``jax.export``, and a later process loads it instead
+    of tracing again.
+    """
+
+    def __init__(self, jitted, name):
+        self.jitted, self.name, self.ready = jitted, name, {}
+
+    @staticmethod
+    def _key(args):
+        return tuple((a.shape, a.dtype, getattr(a, "weak_type", False)) for a in args)
+
+    def start(self, b, n, fingerprint=None):
+        """Compile in the background for ``b`` boxes of dimension ``n`` (single device).
+
+        ``fingerprint()``, called on the tracer thread, names the problem for
+        the disk cache (None: do not cache)."""
+        args = (jax.ShapeDtypeStruct((b, n), jnp.float64),) * 2 + (jax.ShapeDtypeStruct((), jnp.float64),)
+        key = self._key(args)
+        if key not in self.ready:
+            tracer, compiler = _pools()
+            self.ready[key] = tracer.submit(lambda: compiler.submit(self._lower(args, fingerprint).compile))
+
+    def _lower(self, args, fingerprint):
+        """The lowered kernel, loaded from the disk cache when possible (and stored there when not)."""
+        fp = fingerprint() if fingerprint is not None else None
+        if fp is not None:
+            fp = f"{fp}-{self.name}-{args[0].shape[0]}"
+            exp = kcache.load(fp)
+            if exp is None:
+                try:
+                    exp = jax.export.export(self.jitted)(*args)
+                except Exception:  # e.g. a host callback in f: trace without the cache
+                    exp = None
+                kcache.save(fp, exp)
+            if exp:
+                return jax.jit(exp.call).trace(*args).lower()
+        return self.jitted.trace(*args).lower()
+
+    def __call__(self, *args):
+        key = self._key(args)
+        fut = self.ready.get(key)
+        if fut is not None:
+            try:
+                return fut.result().result()(*args)
+            except Exception:  # let jit raise (or succeed) with its usual traceback
+                del self.ready[key]
+        return self.jitted(*args)
+
+
 class _Kernels:
     """Everything ``minimize`` compiles for one problem, independent of the box.
 
     ``bound(lo, hi, cutoff)`` tightens a batch of boxes by FBBT and bounds them;
-    ``obbt(lo, hi, cutoff)`` tightens a batch by OBBT then FBBT. They are
+    ``obbt(lo, hi, cutoff)`` tightens a batch by OBBT (FBBT first for ``obbt="tree"``). They are
     separate kernels that share no code, so neither the bounder nor the OBBT
     LPs are compiled twice (a single kernel that switches OBBT on and off with
     ``lax.cond`` compiles about twice as slowly: batching control flow around
@@ -150,6 +226,7 @@ class _Kernels:
 
     def __init__(self, f, ineq, eq, *, n_fw, n_kelley, fbbt, fbbt_rounds, dbbt, obbt, obbt_rounds,
                  univariate, alphabb, multivariate, lifted, crown, feas_tol, safe):  # fmt: skip
+        opts = {k: v for k, v in locals().items() if k not in ("self", "f", "ineq", "eq")}
         constrained = ineq is not None or eq is not None
         g, h = _vec(ineq), _vec(eq)
 
@@ -198,22 +275,31 @@ class _Kernels:
                     jnp.where(empty, 0.5 * (blo + bhi), xr))  # fmt: skip
 
         def node_obbt(blo, bhi, cutoff):
-            """FBBT, then OBBT on the result. Returns (lo', hi', empty).
+            """OBBT (after FBBT for ``obbt="tree"``). Returns (lo', hi', empty).
 
             ``node`` runs FBBT again on the OBBT box, so the sequence is
-            FBBT, OBBT, FBBT, bound."""
+            FBBT, OBBT, FBBT, bound. The root box has already been through
+            ``node`` (FBBT included), so for ``obbt="root"`` the leading FBBT
+            is left out: it would only add its trace and compile time."""
             empty = jnp.array(False)
-            if tighten is not None:
+            if tighten is not None and obbt == "tree":
                 blo, bhi, empty = tighten(blo, bhi, cutoff)
             blo, bhi, e = lp_tighten(blo, bhi, cutoff)
             return blo, bhi, empty | e
 
-        self.bound = jax.jit(jax.vmap(node, in_axes=(0, 0, None)))
-        self.obbt = jax.jit(jax.vmap(node_obbt, in_axes=(0, 0, None))) if obbt else None
+        self.bound = _Precompiled(jax.jit(jax.vmap(node, in_axes=(0, 0, None))), "bound")
+        self.obbt = _Precompiled(jax.jit(jax.vmap(node_obbt, in_axes=(0, 0, None))), "obbt") if obbt else None
+        self._problem, self._opts, self._fingerprints = (f, ineq, eq), opts, {}
         self.viol = jax.jit(jax.vmap(violation))
         self.fvals = jax.jit(jax.vmap(f))
         self.fns = [fn for fn in (f, ineq, eq) if fn is not None]
         self.hessians = [_hessian(fn) for fn in self.fns]
+
+    def fingerprint(self, n):
+        """Disk-cache key of this problem on ``n`` variables (``kcache.fingerprint``), or None."""
+        if n not in self._fingerprints:
+            self._fingerprints[n] = kcache.fingerprint(self._problem, n, sorted(self._opts.items()))
+        return self._fingerprints[n]
 
 
 def _vec(fn):
@@ -249,31 +335,44 @@ def _verify(f, ineq, eq, x, fun, lo, hi, feas_tol):
 
 
 class _Padder:
-    """Pad batches of boxes to a few fixed sizes and spread big ones over devices.
+    """Cut batches of boxes into calls of a few fixed sizes; spread big calls over devices.
 
-    Kernel cost grows about linearly with the number of boxes, so a batch is
-    padded to the smallest of ``sizes`` (plus the full batch) that holds it;
-    each size used is compiled once. With several JAX devices (e.g. CPU cores exposed by
-    ``XLA_FLAGS=--xla_force_host_platform_device_count=N``) a full batch is
-    rounded up to a multiple of the device count and split across them.
+    Every distinct batch shape is traced and compiled separately, and on CPU a
+    call costs about the same per box from a few dozen boxes up, so ``sizes``
+    is kept small (``batch_sizes``, capped by ``batch``; the full ``batch``
+    when empty). A batch up to the largest size is padded to the smallest size
+    that holds it; a bigger one is cut into calls of the largest size. With
+    several JAX devices (e.g. CPU cores exposed by
+    ``XLA_FLAGS=--xla_force_host_platform_device_count=N``) the largest size is
+    rounded up to a multiple of the device count and its calls are split across
+    them.
     """
 
     def __init__(self, batch, sizes, devices):
         self.mesh = None
+        sizes = {min(int(s), batch) for s in sizes} or {batch}
         if len(devices) > 1:
             from jax.sharding import Mesh, NamedSharding, PartitionSpec
 
             self.mesh = NamedSharding(Mesh(np.array(devices), ("boxes",)), PartitionSpec("boxes"))
-            batch = -(-batch // len(devices)) * len(devices)
-        self.sizes = sorted({min(int(s), batch) for s in sizes} | {batch})
+            top = max(sizes)
+            sizes = (sizes - {top}) | {-(-top // len(devices)) * len(devices)}
+        self.sizes = sorted(sizes)
 
     def __call__(self, *arrays):
-        k = len(arrays[0])
-        size = next(s for s in self.sizes if s >= k)
-        out = [np.concatenate([a, np.repeat(a[:1], size - k, 0)]) for a in arrays]
-        if self.mesh is not None and size == self.sizes[-1]:
-            return [jax.device_put(a, self.mesh) for a in out]
-        return [jnp.asarray(a) for a in out]
+        """List of calls, each a list of the arrays padded to one of ``sizes``."""
+        k, top = len(arrays[0]), self.sizes[-1]
+        calls = []
+        for s in range(0, k, top):
+            part = [a[s : s + top] for a in arrays]
+            m = len(part[0])
+            size = next(z for z in self.sizes if z >= m)
+            out = [np.concatenate([a, np.repeat(a[:1], size - m, 0)]) for a in part]
+            if self.mesh is not None and size == top:
+                calls.append([jax.device_put(a, self.mesh) for a in out])
+            else:
+                calls.append([jnp.asarray(a) for a in out])
+        return calls
 
 
 _LAM, _BETA = 0.75, 0.2  # branch_point="relax": pull toward the relaxation minimizer, margin from faces
@@ -320,7 +419,7 @@ def minimize(
     rel_tol=1e-6,
     feas_tol=1e-6,
     batch=256,
-    batch_sizes=(16, 64),
+    batch_sizes=(16,),
     devices=None,
     max_iter=5000,
     n_fw=20,
@@ -399,9 +498,14 @@ def minimize(
     strong-branched, up to ``_M`` of them per box, within the ``batch`` budget).
     ``Result.evaluations`` counts every box bounded.
 
-    Batches of boxes are padded to the smallest of ``batch_sizes`` or ``batch``
-    that holds them (each size used compiles once). With several JAX devices
-    full batches are split across them; on CPU, expose cores by setting
+    Up to ``batch`` boxes are bounded per iteration, in kernel calls of the
+    sizes in ``batch_sizes`` (capped by ``batch``; just ``batch`` when empty):
+    a batch is padded to the smallest size that holds it or cut into calls of
+    the largest. Each size is traced and compiled once, so the default is a
+    single small size. The kernels compile in background threads and are
+    cached on disk across processes (``jaxglobal/kcache.py``; disable with
+    ``JAXGLOBAL_CACHE=0``). With several JAX devices calls of the largest size
+    are split across them; on CPU, expose cores by setting
     ``XLA_FLAGS=--xla_force_host_platform_device_count=N`` before JAX is
     imported. ``devices`` overrides the device list (e.g.
     ``devices=jax.devices()[:1]`` to disable splitting).
@@ -439,9 +543,17 @@ def minimize(
     elif crown:
         crown = crown_supported(f, lo)  # an unsupported f gets no CROWN kernel
     opts = dict(n_fw=n_fw, n_kelley=n_kelley, fbbt=bool(fbbt), fbbt_rounds=fbbt_rounds, dbbt=bool(dbbt),
-                obbt=bool(obbt), obbt_rounds=obbt_rounds, univariate=univariate, alphabb=alphabb,
+                obbt=obbt or False, obbt_rounds=obbt_rounds, univariate=univariate, alphabb=alphabb,
                 multivariate=multivariate, lifted=lifted, crown=bool(crown), feas_tol=feas_tol, safe=bool(safe))  # fmt: skip
     K = _cached(("kernels", f, ineq, eq, tuple(sorted(opts.items()))), lambda: _Kernels(f, ineq, eq, **opts))
+    padded = _Padder(batch, batch_sizes, jax.devices() if devices is None else list(devices))
+    if padded.mesh is None:  # compile the kernels in the background while the setup below runs
+        fp = functools.partial(K.fingerprint, lo.size) if kcache.cache_root() else None
+        for b in padded.sizes:
+            K.bound.start(b, lo.size, fp)
+        if obbt:
+            for b in padded.sizes if obbt == "tree" else [1]:
+                K.obbt.start(b, lo.size, fp)
     branchable = nonlinear_variables(K.fns, lo, hi, hessians=K.hessians)
     width0 = np.where(branchable, width0, np.inf)  # never split linear variables
 
@@ -458,7 +570,11 @@ def minimize(
         i = int(np.argmin(F))
         return X[i], float(F[i])
 
-    padded = _Padder(batch, batch_sizes, jax.devices() if devices is None else list(devices))
+    def run(kernel, calls, cutoff, k):
+        """Apply ``kernel`` to each padded call (dispatched before any result is read); first ``k`` rows."""
+        fn = kernel.jitted if padded.mesh is not None else kernel  # sharded calls compile through jit
+        outs = [fn(*c, cutoff) for c in calls]
+        return [np.concatenate([np.asarray(o[i]) for o in outs])[:k] for i in range(len(outs[0]))]
 
     def evaluate(blo, bhi, with_obbt=False):
         """Tighten and bound a batch of boxes: (lb, x, f(x), lo', hi', xr)."""
@@ -470,10 +586,10 @@ def minimize(
         if with_obbt:
             # the root OBBT pass runs on one box: do not pad it to a full batch
             # (padding would compile the OBBT kernel at the batch shape as well)
-            args = padded(blo, bhi) if obbt == "tree" else (jnp.asarray(blo), jnp.asarray(bhi))
-            olo, ohi, oe = (np.asarray(a)[:k] for a in K.obbt(*args, cutoff))
+            calls = padded(blo, bhi) if obbt == "tree" else [[jnp.asarray(blo), jnp.asarray(bhi)]]
+            olo, ohi, oe = run(K.obbt, calls, cutoff, k)
             blo, bhi, empty = np.where(oe[:, None], blo, olo), np.where(oe[:, None], bhi, ohi), oe
-        lb, x, fx, rlo, rhi, xr = (np.asarray(a)[:k] for a in K.bound(*padded(blo, bhi), cutoff))
+        lb, x, fx, rlo, rhi, xr = run(K.bound, padded(blo, bhi), cutoff, k)
         # an empty box holds no feasible point with f <= cutoff
         return (np.where(empty, ub, lb), x, np.where(empty, np.inf, fx),
                 np.where(empty[:, None], blo, rlo), np.where(empty[:, None], bhi, rhi),

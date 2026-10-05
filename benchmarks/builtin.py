@@ -9,7 +9,7 @@ Usage:
   python benchmarks/builtin.py --out before.json
   python benchmarks/builtin.py --out after.json --compare before.json
   python benchmarks/builtin.py --only gramacy_lee,G04
-  python benchmarks/builtin.py --cache-dir .jax_cache --only G04   # persistent XLA cache
+  python benchmarks/builtin.py --cache-dir .jax_cache --only G04   # disk caches (XLA + kernels)
   python benchmarks/builtin.py --opts '{"batch_sizes": [16, 64]}'
 """
 
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -29,9 +30,11 @@ TAG = "BUILTIN-RESULT "
 
 def worker(name, opts, cache_dir=""):
     sys.path.insert(0, str(ROOT))
+    os.environ["JAXGLOBAL_CACHE"] = "1" if cache_dir else "0"  # no disk caches unless asked: cold means cold
     if cache_dir:
         import jax
 
+        os.environ["JAXGLOBAL_CACHE_DIR"] = os.path.join(cache_dir, "jaxglobal")
         jax.config.update("jax_compilation_cache_dir", cache_dir)
         jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
         jax.config.update("jax_persistent_cache_min_entry_size_bytes", 0)
@@ -57,7 +60,7 @@ def main():
     ap.add_argument("--out", default="")
     ap.add_argument("--compare", default="")
     ap.add_argument("--opts", default="{}", help="JSON dict of extra minimize options")
-    ap.add_argument("--cache-dir", default="", help="JAX persistent compilation cache directory (default: off)")
+    ap.add_argument("--cache-dir", default="", help="directory for the XLA and jaxglobal kernel disk caches (default: both off)")
     a = ap.parse_args()
     if a.worker:
         return worker(a.worker, json.loads(a.opts), a.cache_dir)
