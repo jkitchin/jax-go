@@ -653,6 +653,7 @@ AUTO_UNIVARIATE = {
     "asinh": increasing_range(jnp.arcsinh),
     "sinh": increasing_range(jnp.sinh),
     "erf": increasing_range(jax.scipy.special.erf),
+    "erfc": lambda lo, hi: (jax.scipy.special.erfc(hi), jax.scipy.special.erfc(lo)),  # decreasing (norm.cdf uses it)
 }
 
 

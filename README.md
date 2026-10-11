@@ -187,8 +187,17 @@ of squares, and the bound `|σ(x) − σ(c)| ≤ sd_prior(f(x) − f(c))`, which
 because the posterior is itself a Gaussian process and does not involve
 `K⁻¹`. On a 95% chance constraint (`mean + 1.96 std ≤ c`) the solve is now
 certified in 2807 nodes and 11 s, where the formula did not close in 120 s
-(140k nodes); LCB/EI/PI of a 20-point GP: 703/1893/815 → 333/1401/727 nodes.
-`gp_mean` is the matching mean. [`examples/06-gaussian-processes.ipynb`](examples/06-gaussian-processes.ipynb)
+(140k nodes). `gp_mean` is the matching mean.
+
+The acquisition functions are primitives too:
+`expected_improvement(mu, sigma, fmin)` is relaxed as the jointly convex,
+monotone function it is (the perspective of `zΦ(z) + φ(z)`), with the concave
+envelope over the `(mu, sigma)` box, and
+`probability_of_improvement(mu, sigma, target)` from its monotonicity plus the
+exact envelopes of `Φ`, instead of `Φ`, `φ` and the division one by one. On
+the 20-point GP of example 06, with `gp_std`: EI 1401 → 765 nodes (warm solve
+0.9 s → 0.4 s), PI 727 → 451 (0.55 s → 0.4 s; PI's first, compiling solve is
+slower). [`examples/06-gaussian-processes.ipynb`](examples/06-gaussian-processes.ipynb)
 repeats the paper's case studies: GP means, acquisition functions, a chance
 constraint and a Bayesian-optimization loop.
 

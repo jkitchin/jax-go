@@ -128,3 +128,124 @@ def test_chance_constraint_certified_and_tighter():
         assert abs(rp.fun - rf.fun) <= 2e-3 * (1 + abs(rf.fun))
         assert rp.nodes <= rf.nodes, (rp.nodes, rf.nodes)
     assert rp.lower_bound <= rf.fun + 1e-6
+
+
+def test_relaxation_sound_5d():
+    """A 5-D GP: the bounds do not depend on the input dimension being small."""
+    rng = np.random.default_rng(6)
+    Z, ls, sf2 = rng.uniform(-1, 1, (25, 5)), np.full(5, 0.8), 0.9
+    d = (((Z[:, None] - Z[None]) / ls) ** 2).sum(-1)
+    A = np.linalg.inv(sf2 * np.asarray(kernels.matern52(jnp.asarray(d))) + 1e-5 * np.eye(25))
+    f = lambda x: gp_std(x, Z, ls, A, sf2)  # noqa: E731
+    g = jax.vmap(formula(Z, ls, A, sf2, "matern52"))
+    rf = jax.jit(jax.vmap(relax(f), in_axes=(0, None, None)))
+    for i in range(10):
+        c = rng.uniform(-1, 1, 5)
+        w = 10.0 ** rng.uniform(-2, 0) * np.ones(5)
+        lo, hi = c - w / 2, c + w / 2
+        X = rng.uniform(lo, hi, (800, 5))
+        m, F = rf(X, lo, hi), np.asarray(g(jnp.asarray(X)))
+        tol = 1e-9 * (1 + np.abs(F).max())
+        assert np.all(m.cv <= F + tol) and np.all(F <= m.cc + tol)
+        assert np.all(m.lo <= F + tol) and np.all(F <= m.hi + tol)
+
+
+# --- expected improvement and probability of improvement ---------------------
+
+from jax.scipy.stats import norm  # noqa: E402
+
+from jaxglobal.gp import expected_improvement, probability_of_improvement  # noqa: E402
+
+ACQ = {
+    "ei": (expected_improvement, lambda m, s, f: (f - m) * norm.cdf((f - m) / s) + s * norm.pdf((f - m) / s)),
+    "pi": (probability_of_improvement, lambda m, s, f: norm.cdf((f - m) / s)),
+}
+
+
+@pytest.mark.parametrize("name", list(ACQ))
+def test_acquisition_matches_formula(name):
+    prim, ref = ACQ[name]
+    rng = np.random.default_rng(10)
+    M, S = jnp.asarray(rng.uniform(-3, 3, 50)), jnp.asarray(10 ** rng.uniform(-2, 0.5, 50))
+    np.testing.assert_allclose(jax.jit(jax.vmap(lambda m, s: prim(m, s, 0.3)))(M, S), ref(M, S, 0.3), rtol=1e-10, atol=1e-14)
+    for m, s in zip(M[:10], S[:10]):
+        g1 = jax.grad(lambda v: prim(v[0], v[1], 0.3))(jnp.array([m, s]))
+        g2 = jax.grad(lambda v: ref(v[0], v[1], 0.3))(jnp.array([m, s]))
+        np.testing.assert_allclose(g1, g2, rtol=1e-8, atol=1e-12)
+
+
+def test_acquisition_limits_at_zero_sigma():
+    assert float(expected_improvement(0.1, 0.0, 0.3)) == pytest.approx(0.2)
+    assert float(expected_improvement(0.5, 0.0, 0.3)) == 0.0
+    assert float(probability_of_improvement(0.1, 0.0, 0.3)) == 1.0
+    assert float(probability_of_improvement(0.5, 0.0, 0.3)) == 0.0
+
+
+@pytest.mark.parametrize("name", list(ACQ))
+def test_acquisition_relaxation_sound(name):
+    """Over boxes in (mu, sigma), including tiny sigma (z over a range ~1e3) and wide boxes."""
+    prim, _ = ACQ[name]
+    F = lambda v: prim(v[0], v[1], 0.3)  # noqa: E731
+    R = jax.jit(jax.vmap(relax(F), in_axes=(0, None, None)))
+    rng = np.random.default_rng(11)
+    for _ in range(150):
+        a = np.array([rng.uniform(-3, 3), 10 ** rng.uniform(-3, 0.5)])
+        lo, hi = a, a + np.array([10 ** rng.uniform(-3, 0.5), 10 ** rng.uniform(-3, 0.5)])
+        X = jnp.asarray(np.concatenate([rng.uniform(lo, hi, (300, 2)), np.array([lo, hi, [lo[0], hi[1]], [hi[0], lo[1]]])]))
+        m, V = R(X, jnp.asarray(lo), jnp.asarray(hi)), jax.vmap(F)(X)
+        tol = 1e-12 * (1 + float(jnp.abs(V).max()))
+        assert float(jnp.max(m.cv - V)) <= tol and float(jnp.max(V - m.cc)) <= tol
+        assert float(jnp.max(m.lo - V)) <= tol and float(jnp.max(V - m.hi)) <= tol
+
+
+@pytest.mark.parametrize("name", list(ACQ))
+def test_acquisition_of_gp_sound_and_cuts_valid(name):
+    prim, ref = ACQ[name]
+    Z, ls, A, alpha, sf2 = trained()
+    std_f = formula(Z, ls, A, sf2, "matern52")
+    f = lambda x: -prim(gp_mean(x, Z, ls, alpha, sf2), gp_std(x, Z, ls, A, sf2), 0.0)  # noqa: E731
+    g = lambda x: -ref(gp_mean(x, Z, ls, alpha, sf2), std_f(x), 0.0)  # noqa: E731
+    rng = np.random.default_rng(12)
+    for lo, hi in boxes(rng, 8):
+        lo, hi = jnp.asarray(lo), jnp.asarray(hi)
+        X = jnp.asarray(rng.uniform(lo, hi, (400, 2)))
+        m, V = jax.vmap(relax(f), in_axes=(0, None, None))(X, lo, hi), jax.vmap(g)(X)
+        tol = 1e-9 * (1 + float(jnp.abs(V).max()))
+        assert float(jnp.max(m.cv - V)) <= tol and float(jnp.max(V - m.cc)) <= tol
+        cv = jax.jit(lambda x: relax(f)(x, lo, hi).cv)
+        vg, CV = jax.jit(jax.value_and_grad(cv)), jax.vmap(cv)(X)
+        for x0 in np.concatenate([np.array([lo, hi]), rng.uniform(lo, hi, (3, 2))]):
+            v, gr = vg(jnp.asarray(x0))
+            if np.isfinite(v) and np.all(np.isfinite(gr)):
+                assert float(jnp.max(v + (X - x0) @ gr - CV)) <= 1e-8 * (1 + float(jnp.abs(CV).max()))
+
+
+@pytest.mark.parametrize("name", list(ACQ))
+def test_acquisition_solve_matches_formula_with_fewer_nodes(name):
+    prim, ref = ACQ[name]
+    Z, ls, A, alpha, sf2 = trained()
+    std_f = formula(Z, ls, A, sf2, "matern52")
+    fmin = float(np.min(np.sin(3 * Z[:, 0]) + Z[:, 1] ** 2))
+    fp = lambda x: -prim(gp_mean(x, Z, ls, alpha, sf2), gp_std(x, Z, ls, A, sf2), fmin - 0.05)  # noqa: E731
+    ff = lambda x: -ref(gp_mean(x, Z, ls, alpha, sf2), std_f(x), fmin - 0.05)  # noqa: E731
+    rp = minimize(fp, LO, HI, abs_tol=1e-3, rel_tol=1e-3, time_limit=120)
+    rf = minimize(ff, LO, HI, abs_tol=1e-3, rel_tol=1e-3, time_limit=120)
+    assert rp.status == "optimal"
+    assert rp.lower_bound <= rf.fun + 1e-6
+    if rf.status == "optimal":
+        assert abs(rp.fun - rf.fun) <= 2e-3 * (1 + abs(rf.fun))
+        assert rp.nodes <= rf.nodes, (rp.nodes, rf.nodes)
+
+
+def test_erfc_relaxation_sound():
+    """jax.scipy.stats.norm.cdf lowers to erfc on jax >= 0.11."""
+    from jax.scipy.special import erfc
+
+    F = lambda v: erfc(v[0])  # noqa: E731
+    R = jax.jit(jax.vmap(relax(F), in_axes=(0, None, None)))
+    rng = np.random.default_rng(13)
+    for _ in range(200):
+        a, w = rng.uniform(-8, 8), 10 ** rng.uniform(-4, 1)
+        X = jnp.asarray(np.concatenate([rng.uniform(a, a + w, (200, 1)), [[a], [a + w]]]))
+        m, V = R(X, jnp.array([a]), jnp.array([a + w])), jax.vmap(F)(X)
+        assert float(jnp.max(m.cv - V)) <= 1e-13 and float(jnp.max(V - m.cc)) <= 1e-13

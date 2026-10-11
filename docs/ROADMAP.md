@@ -515,8 +515,23 @@ tangent of `√` at a kernel-sum upper bound on the variance) were tried and
 were sound but stayed loose: their constants scale with `K⁻¹` (≈ 1/noise).
 The chance-constrained example now certifies (2,807 nodes, 11 s; previously
 not closed in 120 s); LCB 703 → 333 nodes, EI 1,893 → 1,401, PI 815 → 727.
-The lower bound is constant per box; a convex, non-constant one (in `x`)
-would tighten EI and PI further.
+A non-constant version (the same bound at the box corners, each composed
+with the secant of the distance) tightened σ's relaxation by about 20% but
+left the solves unchanged, so it was not kept. An oracle that clamps σ to its
+sampled range on each box (not rigorous, diagnostic only) showed why: even
+near-exact σ bounds would cut EI only 18% and PI 13%. Most of their looseness
+was in how EI and PI combine μ and σ. `expected_improvement` and
+`probability_of_improvement` are now primitives: EI as a jointly convex,
+monotone function (the perspective of `zΦ(z) + φ(z)`) with the concave
+envelope over the (μ, σ) box; PI from its monotonicity plus exact `Φ`
+envelopes on `z = (t − μ)/σ`. EI 1,401 → 765 nodes, PI 727 → 451 (warm solves
+about 2× and 1.4× faster).
+
+Found on the way, not fixed: the generic relaxation of `Φ((t − μ)/σ)` through
+`erf` (automatic αBB) can put its convex side up to ~4e-8 above `Φ` on boxes
+where σ is tiny, so `z` spans ~1e3 (the division itself is exact). The PI
+primitive does not use it. Also added: a rule for `erfc`, which
+`jax.scipy.stats.norm.cdf` uses on jax 0.11.
 
 ### Phase 4 — device-resident B&B (4–6 weeks)
 

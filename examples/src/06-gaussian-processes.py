@@ -60,12 +60,11 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from jax.scipy.special import erf
 from scipy.optimize import minimize as sp_minimize
 from scipy.stats import qmc
 
 from jaxglobal import kernels, minimize
-from jaxglobal.gp import gp_std
+from jaxglobal.gp import expected_improvement, gp_std, probability_of_improvement
 
 INK, MUTED, BLUE, ORANGE, AQUA, YELLOW = "#1a1a19", "#77766f", "#2a78d6", "#eb6834", "#1baf7a", "#eda100"
 plt.rcParams.update({"axes.spines.top": False, "axes.spines.right": False, "axes.edgecolor": MUTED,
@@ -367,24 +366,21 @@ pd.DataFrame(rows)
 #    \mathrm{PI} = \Phi\!\left(\frac{f_{\min}-\xi-\mu}{\sigma}\right),\qquad
 #    \mathrm{EI} = (f_{\min}-\mu)\,\Phi(z) + \sigma\,\phi(z),\ z = \frac{f_{\min}-\mu}{\sigma}. $$
 #
-# We minimize LCB and $-$PI, $-$EI. $\Phi$ is written with `erf`, which
-# jaxglobal relaxes with its automatic αBB rule. The paper derived dedicated
-# envelopes for these functions; here nothing is hand-derived.
+# We minimize LCB and $-$PI, $-$EI. Written as formulas, EI and PI are
+# relaxed piece by piece ($\Phi$, $\phi$, the division), which loses most of
+# their structure. `jaxglobal.gp` provides them as primitives with the same
+# values, relaxed as what they are, in the spirit of the paper's dedicated
+# relaxations. EI is the perspective $\sigma\,\psi((f_{\min}-\mu)/\sigma)$ of
+# the convex $\psi(z) = z\Phi(z)+\phi(z)$, so it is jointly convex in
+# $(\mu,\sigma)$ and monotone; its concave overestimator is the concave
+# envelope over the $(\mu,\sigma)$ box. PI is monotone in $\mu$ and in
+# $\sigma$ on either side of $\mu = f_{\min}-\xi$, and its relaxation
+# combines a bound from that monotonicity with the exact envelopes of the
+# sigmoid $\Phi$.
 #
 # The GP is the 20-point peaks model, so there is plenty to explore.
 
 # %%
-SQ2 = np.sqrt(2.0)
-
-
-def Phi(z):
-    return 0.5 * (1 + erf(z / SQ2))
-
-
-def phi(z):
-    return jnp.exp(-z**2 / 2) / np.sqrt(2 * np.pi)
-
-
 X20 = lhs(20)
 y20 = np.asarray(peaks(X20))
 gp20 = GP(X20, y20, LO, HI)
@@ -396,13 +392,11 @@ def lcb(x, kappa=2.0):
 
 
 def neg_ei(x):
-    mu, s = gp20.mean(x), gp20.std(x)
-    z = (fmin - mu) / s
-    return -((fmin - mu) * Phi(z) + s * phi(z))
+    return -expected_improvement(gp20.mean(x), gp20.std(x), fmin)
 
 
 def neg_pi(x, xi=0.1 * gp20.ys):
-    return -Phi((fmin - xi - gp20.mean(x)) / gp20.std(x))
+    return -probability_of_improvement(gp20.mean(x), gp20.std(x), fmin - xi)
 
 
 rows, sols = [], {}
@@ -432,9 +426,9 @@ plt.show()
 # a point in the lower valley, 0.67 and 0.48 from the true minimizer at
 # $(0.23, -1.63)$, where the 20-point GP is uncertain. PI with a margin
 # stays 0.22 from the best data point at $(-1.46, 0.59)$, the more
-# exploitative choice. With the kernel primitives and `gp_std` the three
-# solves need 333, 1,401 and 727 nodes; with the `jnp` formulas they needed
-# 7,165, 20,635 and 9,329.
+# exploitative choice. With the kernel primitives, `gp_std` and the EI and PI
+# primitives the three solves need 333, 765 and 451 nodes; with the `jnp`
+# formulas they needed 7,165, 20,635 and 9,329.
 #
 # ### PI without a margin
 #
@@ -575,9 +569,7 @@ for it in range(8):
     fb = float(yb.min())
 
     def neg_ei_b(x, gpb=gpb, fb=fb):
-        mu, s = gpb.mean(x), gpb.std(x)
-        z = (fb - mu) / s
-        return -((fb - mu) * Phi(z) + s * phi(z))
+        return -expected_improvement(gpb.mean(x), gpb.std(x), fb)
 
     r, t = solve(neg_ei_b, LO, HI, time_limit=60)
     ynew = float(peaks(r.x))
@@ -605,7 +597,7 @@ axes[1].set_ylabel("$x_2$")
 plt.show()
 
 # %% [markdown]
-# All eight steps are certified, each in about 20 to 30 s including
+# All eight steps are certified, each in about 7 to 10 s including
 # compilation for the new GP size (`EI_bound` is within $10^{-3}$ of
 # `EI_found`). With the `jnp` formulas none was certified in 60 s, and with
 # the kernel primitives alone, four. After 8 steps the best value is −2.93,
@@ -618,10 +610,11 @@ plt.show()
 # A trained GP written in `jax.numpy` is a reduced-space model for jaxglobal
 # with no extra work: no auxiliary variables per training point, no
 # equality constraints, no hand-written GAMS or Pyomo expressions with
-# thousands of terms. Two things make it work well: the kernels from
-# `jaxglobal.kernels`, relaxed by the envelopes of
-# [schweidtmann2021deterministic], and `jaxglobal.gp.gp_std`, whose
-# relaxation uses the GP's own structure. With them every problem here is
+# thousands of terms. What makes it work well is relaxing each piece as what
+# it is: the kernels from `jaxglobal.kernels`, relaxed by the envelopes of
+# [schweidtmann2021deterministic]; `jaxglobal.gp.gp_std`, whose relaxation
+# uses the GP's own structure; and the EI and PI primitives, relaxed from
+# their convexity and monotonicity. With them every problem here is
 # certified to a $10^{-3}$ gap: GP means with up to 400 training points
 # (18 s), all four kernels, LCB, EI and PI (with and without a margin), a
 # chance constraint built from a second GP's standard deviation, and every
@@ -636,6 +629,6 @@ plt.show()
 #   one would tighten EI and PI further.
 #
 # The node counts are driven by relaxation quality, not by the search: with
-# the `jnp` formulas the same problems needed 8 to 25 times more nodes, and
+# the `jnp` formulas the same problems needed 8 to 27 times more nodes, and
 # the chance constraint, PI without a margin and the Bayesian-optimization
 # steps did not close.
