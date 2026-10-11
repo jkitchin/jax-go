@@ -506,11 +506,17 @@ function each, relaxed by the envelopes of [schweidtmann2021deterministic],
 with derivative primitives so αBB's Hessian is finite (Matérn 5/2, SE). The
 N = 200 Matérn 5/2 solve goes from 23,191 to 2,343 nodes (98 to 19
 iterations), matching a hand-written kernel-sum bound prototype (2,335).
-Still open: the GP standard deviation. A per-box upper bound
-`v <= sf2 + qᵀAq - 2(Aq)ᵀk(x)` (from `(k - q)ᵀK⁻¹(k - q) >= 0`, `q` the kernel
-vector at the box center) turns LCB into one kernel sum; in the prototype it
-cut an LCB solve from 7,165 to 251 nodes. It needs a GP-level helper, not
-just primitives.
+`jaxglobal/gp.py` adds `gp_std`, a primitive for the posterior standard
+deviation whose rule combines the sum-of-squares form `sf2 - ||Wᵀk||²`
+(`K⁻¹ = WWᵀ`) with the bound `|σ(x) − σ(c)| ≤ sd_prior(f(x) − f(c))`, which
+holds because the posterior is a GP and does not involve `K⁻¹`. Bounds that
+go through `K⁻¹` (centering the quadratic form at the box center, or the
+tangent of `√` at a kernel-sum upper bound on the variance) were tried and
+were sound but stayed loose: their constants scale with `K⁻¹` (≈ 1/noise).
+The chance-constrained example now certifies (2,807 nodes, 11 s; previously
+not closed in 120 s); LCB 703 → 333 nodes, EI 1,893 → 1,401, PI 815 → 727.
+The lower bound is constant per box; a convex, non-constant one (in `x`)
+would tighten EI and PI further.
 
 ### Phase 4 — device-resident B&B (4–6 weeks)
 

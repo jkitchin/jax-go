@@ -29,7 +29,7 @@
 # studies in that style:
 #
 # 1. minimizing the GP mean of the peaks function, and how the solve scales with $N$ and the kernel;
-# 2. globally maximizing the acquisition functions LCB, EI and PI, and a case where PI cannot be certified;
+# 2. globally maximizing the acquisition functions LCB, EI and PI, including PI without a margin;
 # 3. a chance-constrained problem with two GPs embedded;
 # 4. a short Bayesian-optimization loop that runs branch and bound on the acquisition function at every step.
 #
@@ -65,6 +65,7 @@ from scipy.optimize import minimize as sp_minimize
 from scipy.stats import qmc
 
 from jaxglobal import kernels, minimize
+from jaxglobal.gp import gp_std
 
 INK, MUTED, BLUE, ORANGE, AQUA, YELLOW = "#1a1a19", "#77766f", "#2a78d6", "#eb6834", "#1baf7a", "#eda100"
 plt.rcParams.update({"axes.spines.top": False, "axes.spines.right": False, "axes.edgecolor": MUTED,
@@ -107,6 +108,16 @@ TOL = dict(abs_tol=1e-3, rel_tol=1e-3)
 # the same as the formulas'. Below, the GP is trained with the `jnp` formulas
 # (`PLAIN`) and predicts with the primitives; `primitive=False` predicts with
 # the formulas, for comparison.
+#
+# **The standard deviation needs more than the kernel.** $k_D(x) =
+# \sigma_f^2 - k_{x,X}K^{-1}k_{X,x}$ is a quadratic form in the kernel vector,
+# and any bound computed through $K^{-1}$ inherits its conditioning (about
+# 1/noise). `jaxglobal.gp.gp_std` is a primitive with the same value whose
+# relaxation uses the GP's own structure: the quadratic form as a sum of
+# squares $\|W^\top k\|^2$ ($K^{-1} = WW^\top$), and a Lipschitz bound that
+# holds because the posterior is itself a Gaussian process,
+# $|\sigma(x)-\sigma(c)| \le \mathrm{sd}_{\text{prior}}(f(x)-f(c))
+# = \sqrt{2\sigma_f^2(1-k(d(x,c)))}$, which does not involve $K^{-1}$ at all.
 
 # %%
 PLAIN = {
@@ -155,6 +166,7 @@ class GP:
         self.lam, self.sf2, self.sn2 = np.exp(th[:dim]), float(np.exp(th[dim])), float(np.exp(th[dim + 1]))
         self.Xs, self.alpha, self.Kinv = Xs, np.linalg.solve(Kx, yt), np.linalg.inv(Kx)
         self.k = KERNELS[kernel] if primitive else PLAIN[kernel]  # prediction: what jaxglobal relaxes
+        self.kernel, self.primitive = kernel, primitive
 
     def scale(self, x):
         return 2 * (x - self.lo) / (self.hi - self.lo) - 1
@@ -167,6 +179,8 @@ class GP:
         return self.ym + self.ys * self.kvec(x) @ self.alpha
 
     def std(self, x):
+        if self.primitive:  # same value; relaxed with the GP's structure (see below)
+            return self.ys * gp_std(self.scale(x), self.Xs, self.lam, self.Kinv, self.sf2, kernel=self.kernel)
         k = self.kvec(x)
         var = self.sf2 - k @ self.Kinv @ k
         return self.ys * jnp.sqrt(jnp.maximum(var, 1e-12))  # variance can round to slightly below 0 at the data
@@ -418,26 +432,28 @@ plt.show()
 # a point in the lower valley, 0.67 and 0.48 from the true minimizer at
 # $(0.23, -1.63)$, where the 20-point GP is uncertain. PI with a margin
 # stays 0.22 from the best data point at $(-1.46, 0.59)$, the more
-# exploitative choice. With the kernel primitives the three solves need 703,
-# 1,893 and 815 nodes; with the `jnp` formula they needed 7,165, 20,635 and
-# 9,329.
+# exploitative choice. With the kernel primitives and `gp_std` the three
+# solves need 333, 1,401 and 727 nodes; with the `jnp` formulas they needed
+# 7,165, 20,635 and 9,329.
 #
-# ### Why PI needs the margin ξ
+# ### PI without a margin
 #
-# With $\xi = 0$, PI is not certified within the 60 s limit below (nor in
-# 300 s when this notebook was prepared), and the lower bound stays at $-1$,
-# the trivial bound. This is not a weak relaxation that more time would fix. At the best training point, $\mu \approx f_{\min}$
-# and $\sigma \to 0$, so $z = (f_{\min}-\mu)/\sigma$ is $0/0$. A noise-free
-# GP slightly overshoots between data, so in a tiny neighbourhood of the
-# incumbent $\mu$ dips below $f_{\min}$ while $\sigma$ is still nearly zero,
-# and PI jumps towards 1. Any box that contains the incumbent has
-# $\sigma \in [0, \cdot\,]$, so $z$ ranges over an unbounded interval and
-# no valid relaxation can say more than $\mathrm{PI} \le 1$. The paper's PI
-# is defined piecewise at $\sigma = 0$ for the same reason (its Eq. 5).
-# With a margin $\xi$ larger than the GP's overshoot, $f_{\min} - \xi - \mu < 0$
-# near the incumbent, so $z \to -\infty$ and PI $\to 0$ there instead of being
-# ambiguous, and the solve in the table above is certified. The cell below
-# measures the overshoot and reruns $\xi = 0$.
+# With $\xi = 0$ the solve below is certified as well, at PI = 0.718, a few
+# thousandths from the best data point. That point is a spike: the GP
+# slightly overshoots between data, so in a tiny neighbourhood of the
+# incumbent $\mu$ dips below $f_{\min}$ (measured below) while $\sigma$ is
+# small, and $z = (f_{\min}-\mu)/\sigma$ jumps up. For a noise-free GP,
+# $\sigma \to 0$ at the data and PI has no limit there (which is why the
+# paper defines PI piecewise at $\sigma = 0$, its Eq. 5). This GP has a noise
+# floor, so $\sigma > 0$ everywhere and the spike has a finite height.
+#
+# Certifying it needs a lower bound on $\sigma$ near the data. The
+# relaxation of the formula $\sqrt{\sigma_f^2 - k^\top K^{-1}k}$ gives 0
+# there, so with it this solve stopped at the 60 s limit with the trivial
+# bound $-1$. `gp_std`'s bound $\sigma(c) - \sqrt{2\sigma_f^2(1-k(d))}$ is
+# positive on small boxes. A margin $\xi$ is still the usual choice, because
+# it ignores improvements smaller than $\xi$ and so avoids chasing such
+# spikes.
 
 # %%
 xb = X20[np.argmin(y20)]
@@ -507,17 +523,15 @@ pd.DataFrame([
 ])
 
 # %% [markdown]
-# Only the mean-constrained problem is certified (735 nodes; 17,179 with the
-# `jnp` formula). The chance-constrained one stops at the 300 s limit with a
-# feasible design and a gap of about 7 (STY 157.2 found, at most 164.5
-# possible). That matches the paper, where this
-# case did not close in 24 hours in any solver (with real, 4-dimensional data
-# and 78 points). The difficulty is the standard deviation: it is the square
-# root of $\sigma_f^2 - k_{x,X}K^{-1}k_{X,x}$, a quadratic form in $N$ kernel
-# terms whose interval enclosure loses the cancellation between them, so the
-# relaxation of the constraint stays loose and boxes are hard to prove
-# infeasible. The kernel primitives tighten each term but not this quadratic
-# form.
+# Both problems are certified: the chance-constrained one in 2,807 nodes
+# (STY 157.18, proven within 0.16), the mean-constrained one in 735. With
+# the `jnp` formulas the chance-constrained solve did not close in 300 s
+# (gap of about 7 after 300,000 nodes). In the paper this case did not close
+# in 24 hours in any solver, with real, 4-dimensional data and 78 points, so
+# the comparison is about structure, not difficulty. What made the
+# difference is the lower bound on $\sigma$: to prove a box infeasible, the
+# solver must show $m_{\text{imp}} + 1.96\,\sigma_{\text{imp}} > c$ on all of
+# it, and the formula's relaxation of $\sigma$ is 0 there.
 #
 # The design itself behaves as expected: the constraint is active
 # ($m_{\text{imp}} + 1.96\,\sigma_{\text{imp}} = c$) and the design gives up
@@ -591,15 +605,12 @@ axes[1].set_ylabel("$x_2$")
 plt.show()
 
 # %% [markdown]
-# Four of the eight steps (1, 3, 4 and 5) are certified within 60 s; with the
-# `jnp` formula none were. For the other four the proven upper bound on EI is
-# 1.16 to 4.4 times the EI of the point found (`EI_bound` vs `EI_found`), so
-# those picks are the best points branch and bound found, not proven
-# maximizers. The 20-point EI in section 2 was certified in about 18 s, so
-# these smaller GPs are not easier. A likely reason (not tested here) is that
-# with few points the posterior standard deviation is large over most of the
-# box, so its loose relaxation dominates the bound. After 8 steps the best
-# value is −2.93, against −6.55 for the true minimum.
+# All eight steps are certified, each in about 20 to 30 s including
+# compilation for the new GP size (`EI_bound` is within $10^{-3}$ of
+# `EI_found`). With the `jnp` formulas none was certified in 60 s, and with
+# the kernel primitives alone, four. After 8 steps the best value is −2.93,
+# against −6.55 for the true minimum: EI explores the large unexplored
+# regions first.
 
 # %% [markdown]
 # ## Summary
@@ -607,28 +618,24 @@ plt.show()
 # A trained GP written in `jax.numpy` is a reduced-space model for jaxglobal
 # with no extra work: no auxiliary variables per training point, no
 # equality constraints, no hand-written GAMS or Pyomo expressions with
-# thousands of terms. Writing the kernel with `jaxglobal.kernels` instead of
-# its `jnp` formula gives it the envelopes of [schweidtmann2021deterministic]
-# and cuts the node counts about tenfold. GP means with up to 400 training
-# points (18 s), all four kernels, and the LCB, EI and PI (with a margin)
-# acquisition functions of a 20-point GP are solved to a certified $10^{-3}$
-# gap.
+# thousands of terms. Two things make it work well: the kernels from
+# `jaxglobal.kernels`, relaxed by the envelopes of
+# [schweidtmann2021deterministic], and `jaxglobal.gp.gp_std`, whose
+# relaxation uses the GP's own structure. With them every problem here is
+# certified to a $10^{-3}$ gap: GP means with up to 400 training points
+# (18 s), all four kernels, LCB, EI and PI (with and without a margin), a
+# chance constraint built from a second GP's standard deviation, and every
+# step of the Bayesian-optimization loop.
 #
-# What did not work:
+# What is still missing:
 #
-# * PI without a margin ($\xi = 0$) cannot be certified, because PI has no
-#   limit at the incumbent where $\sigma \to 0$. A small $\xi$ fixes it.
-# * The chance constraint, built from the second GP's standard deviation,
-#   was not certified in 300 s, and four of the eight EI steps of the
-#   Bayesian-optimization loop were not certified in 60 s each. Both depend
-#   on $\sqrt{k_D(x)}$, whose relaxation is loose.
 # * The integer number of layers in the paper's membrane case has no
 #   counterpart, since jaxglobal has no integer variables. For a small
 #   integer range one would solve one continuous problem per value.
+# * `gp_std`'s lower bound is constant on each box. A convex, non-constant
+#   one would tighten EI and PI further.
 #
-# The node counts are driven by relaxation quality. The kernel envelopes
-# fixed the mean; what is left is the standard deviation, relaxed as an
-# interval quadratic form in the kernel vector. A per-box bound that turns
-# the variance into one more kernel sum (from $K^{-1}$ being positive
-# semidefinite) is the natural next step; in a prototype it cut the LCB solve
-# from 7,165 to 251 nodes.
+# The node counts are driven by relaxation quality, not by the search: with
+# the `jnp` formulas the same problems needed 8 to 25 times more nodes, and
+# the chance constraint, PI without a margin and the Bayesian-optimization
+# steps did not close.

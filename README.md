@@ -177,7 +177,18 @@ the peaks function (Matérn 5/2, abs/rel gap 1e-3), same answers:
 
 (cold solves, compilation included.) Matérn 3/2 at N = 50: 1917 → 429 nodes.
 SE and Matérn 1/2 are unchanged: their `jnp` formulas were already relaxed
-exactly. [`examples/06-gaussian-processes.ipynb`](examples/06-gaussian-processes.ipynb)
+exactly.
+
+The posterior standard deviation needs more: it is a quadratic form in the
+kernel vector, and bounds through `K⁻¹` inherit its conditioning.
+`jaxglobal.gp.gp_std(x, Z, lengthscale, Kinv, sf2, kernel=...)` has the same
+value, and its relaxation uses the GP's structure: the quadratic form as a sum
+of squares, and the bound `|σ(x) − σ(c)| ≤ sd_prior(f(x) − f(c))`, which holds
+because the posterior is itself a Gaussian process and does not involve
+`K⁻¹`. On a 95% chance constraint (`mean + 1.96 std ≤ c`) the solve is now
+certified in 2807 nodes and 11 s, where the formula did not close in 120 s
+(140k nodes); LCB/EI/PI of a 20-point GP: 703/1893/815 → 333/1401/727 nodes.
+`gp_mean` is the matching mean. [`examples/06-gaussian-processes.ipynb`](examples/06-gaussian-processes.ipynb)
 repeats the paper's case studies: GP means, acquisition functions, a chance
 constraint and a Bayesian-optimization loop.
 

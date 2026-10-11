@@ -28,7 +28,10 @@ import jax.numpy as jnp
 from jax.extend.core import Primitive
 from jax.interpreters import ad, batching, mlir
 
-from . import crown, relax, univariate
+from .crown import UNARY as CROWN_UNARY
+from .crown import _convex as crown_convex
+from .relax import NONNEG, RULES, concave_rule, convex_rule
+from .univariate import EXACT, SMOOTH_ELEMENTWISE
 
 
 def _m12(d):
@@ -67,14 +70,14 @@ def _family(name, formulas, smooth):
     k, k1, k2 = prims
     # every k is convex and nonincreasing in d, k' concave and nondecreasing, k'' convex and nonincreasing:
     # the box minimizer of k and k'' and the maximizer of k' are at d.hi
-    relax.RULES[k.name] = lambda ctx, eqn, x: relax.convex_rule(fns[0], x, x.hi)
-    relax.RULES[k1.name] = lambda ctx, eqn, x: relax.concave_rule(fns[1], x, x.hi)
-    relax.RULES[k2.name] = lambda ctx, eqn, x: relax.convex_rule(fns[2], x, x.hi)
-    relax.NONNEG.update({k.name, k2.name})
-    univariate.EXACT.add(k.name)  # its McCormick rule is the envelope of k(variable)
+    RULES[k.name] = lambda ctx, eqn, x: convex_rule(fns[0], x, x.hi)
+    RULES[k1.name] = lambda ctx, eqn, x: concave_rule(fns[1], x, x.hi)
+    RULES[k2.name] = lambda ctx, eqn, x: convex_rule(fns[2], x, x.hi)
+    NONNEG.update({k.name, k2.name})
+    EXACT.add(k.name)  # its McCormick rule is the envelope of k(variable)
     if smooth:  # k'' finite at d = 0: alphaBB applies, and CROWN's tangents are finite
-        univariate.SMOOTH_ELEMENTWISE.update({k.name, k1.name, k2.name})
-        crown.UNARY[k.name] = crown._convex(fns[0], fns[1])
+        SMOOTH_ELEMENTWISE.update({k.name, k1.name, k2.name})
+        CROWN_UNARY[k.name] = crown_convex(fns[0], fns[1])
     return k.bind
 
 
