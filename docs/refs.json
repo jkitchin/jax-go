@@ -741,5 +741,20 @@
   "key": "tawarmalani2001semidefinite",
   "doi": "10.1023/a:1011233805045",
   "title": "Semidefinite Relaxations of Fractional Programs via Novel Convexification Techniques"
+ },
+ {
+  "key": "ratz1995selection",
+  "doi": "10.1007/BF01097060",
+  "title": "On the selection of subdivision directions in interval branch-and-bound methods for global optimization"
+ },
+ {
+  "key": "csendes1997subdivision",
+  "doi": "10.1137/S0036142995281528",
+  "title": "Subdivision Direction Selection in Interval Methods for Global Optimization"
+ },
+ {
+  "key": "langiu2025musebb",
+  "doi": "10.1007/s10898-025-01489-2",
+  "title": "MUSE-BB: a decomposition algorithm for nonconvex two-stage problems using strong multisection branching"
  }
 ]

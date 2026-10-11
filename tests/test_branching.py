@@ -11,6 +11,7 @@ OPTIONS = [
     {"branch_var": "pseudocost"},
     {"branch_var": "reliability"},
     {"branch_point": "relax", "branch_var": "reliability"},
+    {"branch_var": "strong"},
 ]
 IDS = [",".join(f"{k}={v}" for k, v in o.items()) for o in OPTIONS]
 
@@ -46,3 +47,16 @@ def test_invalid_options():
         solve(CAMEL, branch_point="left")
     with pytest.raises(ValueError, match="branch_var"):
         solve(CAMEL, branch_var="random")
+
+
+@pytest.mark.parametrize("q", [2, 3])
+@pytest.mark.parametrize("p", [CAMEL, G24], ids=lambda p: p.name)
+def test_orthant_multisection_reaches_optimum(p, q, monkeypatch):
+    """branch_var="strong" with _Q > 1 splits a parent into up to 2**q orthants."""
+    import jaxglobal.bnb as bnb
+
+    monkeypatch.setattr(bnb, "_Q", q)
+    r = solve(p, branch_var="strong")
+    assert r.status == "optimal"
+    assert abs(r.fun - p.fstar) < 1e-4 * (1 + abs(p.fstar))
+    assert r.lower_bound <= p.fstar + 1e-6 * (1 + abs(p.fstar))

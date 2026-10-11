@@ -24,6 +24,7 @@ Children are created from the tightened box.
 from __future__ import annotations
 
 import functools
+import itertools
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -380,6 +381,8 @@ class _Padder:
 _LAM, _BETA = 0.75, 0.2  # branch_point="relax": pull toward the relaxation minimizer, margin from faces
 _FLOOR = 0.05  # pseudocosts are floored at this fraction of the mean over observed variables
 _ETA, _M = 2, 4  # branch_var="reliability": observations to trust a pseudocost, strong-branching candidates
+_BAL = 10.0  # branch_var="strong": candidates are at least 1/_BAL as wide as the widest variable
+_Q, _ETA_MS = 2, 0.5  # branch_var="strong": split on up to _Q variables at once, those scoring >= _ETA_MS * best
 
 
 @dataclass
@@ -497,7 +500,12 @@ def minimize(
     relative width among nonlinear variables), ``"pseudocost"`` (product score
     of per-variable bound gains observed so far) or ``"reliability"`` (like
     pseudocost, but variables with fewer than ``_ETA`` observations are
-    strong-branched, up to ``_M`` of them per box, within the ``batch`` budget).
+    strong-branched, up to ``_M`` of them per box, within the ``batch`` budget)
+    or ``"strong"`` (every parent is split on its best-scored variable, and the
+    padding slots of that kernel call strong-branch further candidates, ranked
+    by the same scores, so it splits as many parents in as many kernel calls
+    per iteration as ``"width"``; each parent is then split on its ``_Q`` best
+    candidates at once into up to ``2**_Q`` orthants, see ``_BAL`` and ``_ETA_MS``).
     ``Result.evaluations`` counts every box bounded.
 
     Up to ``batch`` boxes are bounded per iteration, in kernel calls of the
@@ -534,8 +542,8 @@ def minimize(
     constrained = ineq is not None or eq is not None
     if branch_point not in ("mid", "relax"):
         raise ValueError(f"branch_point must be 'mid' or 'relax', not {branch_point!r}")
-    if branch_var not in ("width", "pseudocost", "reliability"):
-        raise ValueError(f"branch_var must be 'width', 'pseudocost' or 'reliability', not {branch_var!r}")
+    if branch_var not in ("width", "pseudocost", "reliability", "strong"):
+        raise ValueError(f"branch_var must be 'width', 'pseudocost', 'reliability' or 'strong', not {branch_var!r}")
     if obbt not in (False, None, "root", "tree"):
         raise ValueError(f"obbt must be False, 'root' or 'tree', not {obbt!r}")
     if crown not in (False, None, True, "auto"):
@@ -676,7 +684,7 @@ def minimize(
 
         k = min(batch // 2, len(open_lb))
         sel = np.argpartition(open_lb, k - 1)[:k] if k < len(open_lb) else np.arange(k)
-        if branch_var == "reliability":
+        if branch_var in ("reliability", "strong"):
             sel = sel[np.argsort(open_lb[sel], kind="stable")]
         plo, phi, pxr, plb = open_lo[sel], open_hi[sel], open_xr[sel], open_lb[sel]
         relw = (phi - plo) / width0  # relative width (0 for variables never split)
@@ -691,6 +699,35 @@ def minimize(
                 pv = np.argmax(score, axis=1)
                 pp = np.arange(k)
                 groups = [[i] for i in range(k)]
+            elif branch_var == "strong":
+                # balance: only variables at least 1/_BAL as wide as the widest are
+                # candidates, so no variable is starved (gain-based scores otherwise
+                # keep splitting one variable of nonsmooth f, e.g. holder_table)
+                wmax = np.max(np.where(branchable, relw, 0.0), axis=1, keepdims=True)
+                score = np.where(relw * _BAL >= wmax, score, -1.0)
+                # every parent gets its best-scored variable, so as many parents are
+                # split as with the other rules; spare slots then go round-robin,
+                # lowest bound first, to each parent's next-best variables
+                order = np.argsort(-score, axis=1, kind="stable")
+                ncand = (score >= 0).sum(axis=1)
+                lists = [[int(order[i, 0])] for i in range(k)]
+                # fill only the padding of the call the 2k children need anyway: those
+                # slots are computed regardless, so the trials cost no extra time
+                # (filling to ``batch`` made each iteration a full-size call, 2-7x slower)
+                top = padded.sizes[-1]
+                fill = next((z for z in padded.sizes if z >= 2 * k), -(-2 * k // top) * top)
+                spare, r = (fill - 2 * k) // 2, 1
+                while spare > 0 and (ncand > r).any():
+                    for i in np.flatnonzero(ncand > r)[:spare]:
+                        lists[i].append(int(order[i, r]))
+                    spare -= int(min((ncand > r).sum(), spare))
+                    r += 1
+                pp_l, pv_l, groups = [], [], []
+                for i, vs in enumerate(lists):
+                    groups.append(list(range(len(pp_l), len(pp_l) + len(vs))))
+                    pp_l += [i] * len(vs)
+                    pv_l += vs
+                pp, pv = np.array(pp_l), np.array(pv_l)
             else:
                 pp_l, pv_l, groups, used = [], [], [], 0
                 for i in range(k):
@@ -755,17 +792,42 @@ def minimize(
         else:
             chosen = np.arange(M)
             pmax = np.minimum(lbl, lbr)
-        rows = np.concatenate([chosen, chosen + M])
-        nodes += 2 * k
         # children cannot be worse than their parent's bound, nor than the
         # weaker side of any tried split of it
         raised = np.maximum(plb, pmax)
-        clb = np.maximum(clb[rows], np.concatenate([raised, raised]))
+        if branch_var == "strong" and _Q > 1 and M > k:
+            # orthant multisection: split each parent on its q best strong-branched
+            # variables at once. An orthant is the intersection of one (tightened)
+            # half per variable, so it lies in each of them and its bound is the
+            # largest of theirs; no box is bounded twice.
+            ol, oh, ob, ox = [], [], [], []
+            for i, g in enumerate(groups):
+                g = np.asarray(g)
+                g = g[np.argsort(-strong[g], kind="stable")]  # NaN scores sort last; all NaN: q = g[:1]
+                q = g[strong[g] >= _ETA_MS * strong[g[0]]][:_Q]
+                q = q[np.unique(pv[q], return_index=True)[1]] if len(q) else g[:1]  # one split per variable
+                for bits in itertools.product((0, M), repeat=len(q)):
+                    h = q + np.array(bits)
+                    lo_o, hi_o = clo[h].max(axis=0), chi[h].min(axis=0)
+                    if np.any(lo_o > hi_o):
+                        continue
+                    ol.append(lo_o)
+                    oh.append(hi_o)
+                    ob.append(max(raised[i], float(clb[h].max())))
+                    ox.append(np.clip(cxr[h[0]], lo_o, hi_o))
+            nodes += len(ob)
+            new_lo, new_hi = np.array(ol).reshape(-1, lo.size), np.array(oh).reshape(-1, lo.size)
+            new_lb, new_xr = np.array(ob), np.array(ox).reshape(-1, lo.size)
+        else:
+            rows = np.concatenate([chosen, chosen + M])
+            nodes += 2 * k
+            new_lo, new_hi, new_xr = clo[rows], chi[rows], cxr[rows]
+            new_lb = np.maximum(clb[rows], np.concatenate([raised, raised]))
 
-        open_lo = np.concatenate([open_lo[rest], clo[rows]])
-        open_hi = np.concatenate([open_hi[rest], chi[rows]])
-        open_lb = np.concatenate([open_lb[rest], clb])
-        open_xr = np.concatenate([open_xr[rest], cxr[rows]])
+        open_lo = np.concatenate([open_lo[rest], new_lo])
+        open_hi = np.concatenate([open_hi[rest], new_hi])
+        open_lb = np.concatenate([open_lb[rest], new_lb])
+        open_xr = np.concatenate([open_xr[rest], new_xr])
 
     glb = min(float(open_lb.min()) if len(open_lb) else np.inf, pruned_lb, ub)
     if converged:
