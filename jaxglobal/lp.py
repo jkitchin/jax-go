@@ -202,6 +202,7 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
             """Affine minorants of each convex part at p, in unit-box coords u."""
             v = convex_parts(p, lo, hi)
             J = jax.jacfwd(convex_parts)(p, lo, hi)
+            v, J = jax.lax.optimization_barrier((v, J))  # one evaluation for coef and const (see lifted.node_cuts)
             coef = J * w  # d cut / d u
             const = _cut_const(v, J, lo, p, coef, safe)  # value of the cut at u = 0
             ok = jnp.isfinite(const) & jnp.all(jnp.isfinite(coef), axis=1)
@@ -332,6 +333,7 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
         def cuts_at(p):
             v = convex_parts(p, lo, hi)
             J = jax.jacfwd(convex_parts)(p, lo, hi)
+            v, J = jax.lax.optimization_barrier((v, J))  # one evaluation for coef and const (see lifted.node_cuts)
             coef = J * w
             const = _cut_const(v, J, lo, p, coef, safe)
             ok = jnp.isfinite(const) & jnp.all(jnp.isfinite(coef), axis=1)

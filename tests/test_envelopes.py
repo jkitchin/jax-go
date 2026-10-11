@@ -119,8 +119,10 @@ def test_lifted_bound_unconstrained(p):
 @pytest.mark.parametrize("name", ["styblinski_tang_3d", "six_hump_camel", "shubert"])
 def test_univariate_reduces_nodes(name):
     p = next(q for q in PROBLEMS if q.name == name)
-    off = minimize(p.f, p.lo, p.hi, abs_tol=1e-5, rel_tol=1e-6, univariate=False)
-    on = minimize(p.f, p.lo, p.hi, abs_tol=1e-5, rel_tol=1e-6, univariate=True)
+    # alphaBB off in both: it also captures the curvature of these terms (with it
+    # on, six_hump_camel is 59 -> 25 nodes), so it would hide what univariate adds
+    off = minimize(p.f, p.lo, p.hi, abs_tol=1e-5, rel_tol=1e-6, univariate=False, alphabb=False)
+    on = minimize(p.f, p.lo, p.hi, abs_tol=1e-5, rel_tol=1e-6, univariate=True, alphabb=False)
     assert on.status == off.status == "optimal"
     assert abs(on.fun - p.fstar) <= 1e-4 * (1 + abs(p.fstar))
     assert on.lower_bound <= p.fstar + 1e-5 * (1 + abs(p.fstar))

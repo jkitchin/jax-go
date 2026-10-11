@@ -66,7 +66,9 @@ def make_bounder(f, n_fw=20, univariate=False, alphabb=False, multivariate=False
 
         def step(carry, k):
             x, best, rlo, rhi = carry
-            v, g = vg(x)
+            # one evaluation of (v, g) for the vertex choice and the cut: XLA may otherwise
+            # recompute g where it is used and break a facet tie differently (see lifted.node_cuts)
+            v, g = jax.lax.optimization_barrier(vg(x))
             vert = jnp.where(g > 0, blo, bhi)
             lb = v + jnp.dot(g, vert - x)
             if safe:  # rounding of the cut value (the subgradient itself is exact for the widened cv)
