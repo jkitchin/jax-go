@@ -208,6 +208,11 @@ def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_ro
 
             cv, cc = relax_out(*pts)
             Jcv, Jcc = jax.jacfwd(relax_out, argnums=tuple(range(len(pts))))(*pts)
+            # evaluate the value and slopes once: they are used in both A and b of the
+            # cut, and at a facet tie (max(F1, F2) with F1 == F2 up to rounding) XLA may
+            # recompute them in two fusions that break the tie differently, which pairs
+            # one facet's slope with the other's offset (an invalid cut)
+            cv, cc, Jcv, Jcc = jax.lax.optimization_barrier((cv, cc, Jcv, Jcc))
             W = jnp.zeros((L.size, N), dt).at[jnp.arange(L.size), L.offset + jnp.arange(L.size)].set(1.0)
             A_lo, b_lo = -W, -cv
             A_hi, b_hi = W, cc
@@ -267,6 +272,7 @@ def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_ro
             p = jnp.clip(p, bx_lo, bx_hi)
             val = parts(p, bx_lo, bx_hi, pdata)
             J = jax.jacfwd(parts)(p, bx_lo, bx_hi, pdata)
+            val, J = jax.lax.optimization_barrier((val, J))  # one evaluation for A and b, as in node_cuts
             A = jnp.zeros((val.size, N), dt).at[:, :n].set(J)
             A = A.at[:n_f].add(-Ef)
             b = J @ p - val

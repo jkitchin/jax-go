@@ -154,6 +154,7 @@ UNARY = {
     "expm1": _convex(jnp.expm1, jnp.exp),
     "cosh": _convex(jnp.cosh, jnp.sinh),
     "square": _convex(lambda z: z * z, lambda z: 2 * z),
+    "one_minus_square": _concave(lambda z: 1 - z * z, lambda z: -2 * z),
     "abs": _convex(jnp.abs, jnp.sign),
     "log": _concave(jnp.log, lambda z: 1 / z, lambda l, u: l > 0),
     "log1p": _concave(jnp.log1p, lambda z: 1 / (1 + z), lambda l, u: l > -1),

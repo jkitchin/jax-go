@@ -316,6 +316,11 @@ def _b_square(eqn, Z, x):
     return [_sq_back(Z, _iv(x))]
 
 
+@back("one_minus_square")
+def _b_one_minus_square(eqn, Z, x):
+    return [_sq_back((1.0 - Z[1], 1.0 - Z[0]), _iv(x))]  # x**2 = 1 - z
+
+
 @back("integer_pow")
 def _b_ipow(eqn, Z, x):
     n = eqn.params["y"]

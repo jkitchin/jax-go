@@ -3,11 +3,13 @@ name = "jaxglobal"
 version = "0.0.1"
 description = "Proof-of-concept deterministic global optimization of plain JAX functions via jaxpr-derived relaxations"
 requires-python = ">=3.10"
-dependencies = ["jax>=0.4.30", "numpy", "scipy", "optax"]
+# jax >= 0.11.2: older jaxlib segfaults running a jax.export-deserialized kernel
+# with LAPACK calls in a fresh process (kcache.py); flatbuffers: jax.export serialization
+dependencies = ["jax>=0.11.2", "numpy", "scipy", "optax", "flatbuffers"]
 
 [project.optional-dependencies]
 pounce = ["pounce-solver>=0.12"]  # default local NLP solver when installed
-dev = ["pytest", "matplotlib", "pounce-solver>=0.12"]
+dev = ["pytest", "matplotlib", "pounce-solver>=0.12", "pyomo"]
 
 [build-system]
 requires = ["setuptools>=64"]

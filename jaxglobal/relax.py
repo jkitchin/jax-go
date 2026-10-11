@@ -547,6 +547,13 @@ def _sq(ctx, eqn, x):
     return mc_square(x)
 
 
+@rule("one_minus_square")
+def _one_minus_sq(ctx, eqn, x):
+    # 1 - x**2 (jax >= 0.11 emits it in the derivatives of tanh, asin, acos, atanh):
+    # the concave function and its secant, the exact envelopes
+    return mc_sub(1.0, mc_square(x))
+
+
 @rule("pow")
 def _pow(ctx, eqn, a, b):
     if not is_mc(b):

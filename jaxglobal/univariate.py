@@ -46,10 +46,10 @@ NONSMOOTH = {"abs", "max", "min", "sign", "floor", "ceil", "round", "rem", "clam
 MOVE = set(STRUCTURAL) | {"reduce_max", "reduce_min"}
 AFFINE = set(STRUCTURAL) | {"neg", "sub"}
 # univariate ops whose McCormick rule is already the exact envelope of op(variable)
-EXACT = {"exp", "exp2", "expm1", "log", "log1p", "sqrt", "rsqrt", "cosh", "square"}
+EXACT = {"exp", "exp2", "expm1", "log", "log1p", "sqrt", "rsqrt", "cosh", "square", "one_minus_square"}
 # smooth elementwise primitives this module knows how to differentiate twice
-SMOOTH_ELEMENTWISE = {"mul", "div", "integer_pow", "square", "pow", "exp", "exp2", "expm1", "log", "log1p",
-                      "sqrt", "rsqrt", "cosh", "neg", "sub"} | set(AUTO_UNIVARIATE)  # fmt: skip
+SMOOTH_ELEMENTWISE = {"mul", "div", "integer_pow", "square", "one_minus_square", "pow", "exp", "exp2", "expm1",
+                      "log", "log1p", "sqrt", "rsqrt", "cosh", "neg", "sub"} | set(AUTO_UNIVARIATE)  # fmt: skip
 
 
 def _dep_masks(tape, n):

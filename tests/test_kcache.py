@@ -45,3 +45,38 @@ def test_second_process_loads_kernels(tmp_path):
     first, second = (r.stdout.strip().splitlines()[-1] for r in runs)
     assert first.startswith("optimal") and first == second  # same result, same files
     assert "-bound-16.bin" in first and (tmp_path / "xla").is_dir()
+
+
+_SCRIPT_LAPACK = """
+import os, jax, re
+from jaxglobal import minimize
+from jaxglobal.problems import CONSTRAINED_PROBLEMS
+p = next(p for p in CONSTRAINED_PROBLEMS if p.name == "G24")
+r = minimize(p.f, p.lo, p.hi, ineq=p.ineq, eq=p.eq)
+d = os.path.join(os.environ["JAXGLOBAL_CACHE_DIR"], "kernels")
+calls = set()
+for name in os.listdir(d):
+    if name.endswith(".bin"):
+        mlir = jax.export.deserialize(bytearray(open(os.path.join(d, name), "rb").read())).mlir_module()
+        calls |= set(re.findall(r"custom_call @(lapack_\\w+)", mlir))
+print(r.status, repr(r.fun), sorted(calls))
+"""
+
+
+def test_second_process_runs_cached_lapack_kernels(tmp_path):
+    """A kernel whose node LP calls LAPACK, loaded from disk in a fresh process.
+
+    Before jax 0.11.2 (hence the requirement in pyproject.toml) jaxlib loaded
+    its LAPACK function pointers only while lowering a linear algebra op, and a
+    kernel restored with ``jax.export.deserialize`` is not lowered from Python,
+    so the second process segfaulted on the first bound.
+    """
+    env = dict(os.environ, JAXGLOBAL_CACHE_DIR=str(tmp_path), PYTHONPATH=str(ROOT), JAX_PLATFORMS="cpu")
+    env.pop("JAXGLOBAL_CACHE", None)
+    runs = [subprocess.run([sys.executable, "-c", _SCRIPT_LAPACK], env=env, capture_output=True, text=True, timeout=600)
+            for _ in range(2)]  # fmt: skip
+    for r in runs:
+        assert r.returncode == 0, f"exit {r.returncode}\n" + r.stdout + r.stderr[-2000:]
+    first, second = (r.stdout.strip().splitlines()[-1] for r in runs)
+    assert first.startswith("optimal") and first == second
+    assert "lapack_" in first  # the cached kernels really do call LAPACK

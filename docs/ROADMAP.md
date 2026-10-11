@@ -443,6 +443,68 @@ non-compiled Python. Timings are from a loaded machine.
 - **Exit:** performance profile within 2× of Couenne on the ≤ 20-variable
   subset.
 
+**Status (branching, started).** `bnb.py` had opt-in `branch_var=
+"pseudocost"` and `"reliability"` (strong branching for variables with
+fewer than `_ETA` observations, at most `_M` per box) and
+`branch_point="relax"`, never benchmarked. On the 21 built-in problems plus
+`univariate_sum_10/20`, `nn_tanh_5x8x2` and `qcqp_10_5` (defaults otherwise,
+all certified), node counts relative to the default widest-variable
+bisection, as geometric means: `relax` 0.98 and `pseudocost` 0.97 (on
+the 18 problems all runs finished), `reliability` 0.90 (25). On 2-6 variables the choice of
+variable matters little.
+
+The literature points the same way. Strong branching gives the fewest
+nodes but is slow on CPU solvers, because each candidate is a separate LP
+(Couenne: fewest nodes on 17 of 33 instances, fastest on 1)
+[belotti2009branching, achterberg2005branching]. Gradient-times-width
+direction rules beat widest-side in interval B&B, but can starve a
+variable [ratz1995selection, csendes1997subdivision]. Splitting a node on
+several strong-branched variables at once, building the orthants from the
+two halves already bounded, cuts tree depth [langiu2025musebb].
+
+`branch_var="strong"` (new, opt-in) combines these for the batched kernel:
+
+- Every selected parent is split on its best-scored variable (pseudocost
+  product score, width before any pseudocost is known), so it never splits
+  fewer parents per iteration than `"width"`.
+- Further candidates are strong-branched only in the padding slots of the
+  16-box calls the iteration makes anyway. Filling the batch to 256 instead
+  was 2-3× slower in wall time (univariate_sum_20: 29-39 s vs 15.5 s),
+  because extra boxes are extra calls.
+- Only variables at least 1/`_BAL` = 1/10 as wide as the widest are
+  candidates. Without this, gain-based scores starved one variable of the
+  nonsmooth problems: holder_table 191 → 1831 nodes, eggholder 47 → 843.
+- Orthant multisection: each parent is split on its `_Q` = 2 best
+  candidates (those scoring at least half the best) at once, into up to 4
+  children. Each child is the intersection of one tightened half per
+  variable, so its bound is the largest of theirs, and nothing is bounded
+  twice.
+
+Against the default on the same 25 problems (all certified): nodes 0.80,
+iterations 0.82 (fewer or equal on 23; styblinski_tang_3d 5 → 7 and
+nn_tanh_5x8x2 +6% are the exceptions). Largest gains: hartmann3 157 → 46
+nodes, univariate_sum_20 513 → 201 (97 → 71 iterations), reactor 1053 →
+654, hartmann6 1099 → 634. Wall time, warm and with configurations
+interleaved on a loaded machine (median of 2), on six problems: 0.84 of
+the default, with no problem more than 4% slower. In an earlier version
+that filled the whole batch, `_Q` = 3 cut iterations further than `_Q` = 2
+(0.59 vs 0.67 of the default on nine deep searches) but raised nodes and
+hurt haverly (73 → 124 nodes), so 2 is the setting.
+
+It stays opt-in: making it the default would change every published
+result table, and the wall-time evidence is six problems (decision
+tracked in issue #11). Not done:
+gap-attribution scores (αBB separation α_j w_j²/4, Ratz's
+gradient-times-width) to rank candidates instead of pseudocosts, branching
+at the incumbent, and a `_LAM` sweep for `branch_point="relax"` (SCIP and
+Couenne weight the midpoint more than jaxglobal does). For GP surrogates,
+branching is not the limit: notebook 06's GP-mean solves need 1,079 to
+91,289 nodes for N = 20 to 400 because the Matérn product form and the
+GP standard deviation relax poorly. A prototype of the kernel envelopes of
+[schweidtmann2021deterministic] plus a finite-Hessian αBB cut the N = 200
+solve from 23,191 to 2,335 nodes; adding kernel primitives belongs to
+phase 2 or 5.
+
 ### Phase 4 — device-resident B&B (4–6 weeks)
 
 - **Node pool on device.** Fixed-capacity arrays with masks, and the whole
