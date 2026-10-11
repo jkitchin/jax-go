@@ -500,10 +500,17 @@ at the incumbent, and a `_LAM` sweep for `branch_point="relax"` (SCIP and
 Couenne weight the midpoint more than jaxglobal does). For GP surrogates,
 branching is not the limit: notebook 06's GP-mean solves need 1,079 to
 91,289 nodes for N = 20 to 400 because the Matérn product form and the
-GP standard deviation relax poorly. A prototype of the kernel envelopes of
-[schweidtmann2021deterministic] plus a finite-Hessian αBB cut the N = 200
-solve from 23,191 to 2,335 nodes; adding kernel primitives belongs to
-phase 2 or 5.
+GP standard deviation relax poorly. `jaxglobal/kernels.py` now provides the
+kernels as primitives of the squared distance: one convex, nonincreasing
+function each, relaxed by the envelopes of [schweidtmann2021deterministic],
+with derivative primitives so αBB's Hessian is finite (Matérn 5/2, SE). The
+N = 200 Matérn 5/2 solve goes from 23,191 to 2,343 nodes (98 to 19
+iterations), matching a hand-written kernel-sum bound prototype (2,335).
+Still open: the GP standard deviation. A per-box upper bound
+`v <= sf2 + qᵀAq - 2(Aq)ᵀk(x)` (from `(k - q)ᵀK⁻¹(k - q) >= 0`, `q` the kernel
+vector at the box center) turns LCB into one kernel sum; in the prototype it
+cut an LCB solve from 7,165 to 251 nodes. It needs a GP-level helper, not
+just primitives.
 
 ### Phase 4 — device-resident B&B (4–6 weeks)
 

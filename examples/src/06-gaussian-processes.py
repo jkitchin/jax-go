@@ -38,11 +38,12 @@
 # process with the same structure. The membrane case also needs an integer
 # variable (number of layers), which jaxglobal does not support.
 #
-# Differences from the paper to keep in mind: jaxglobal has no hand-derived
-# envelopes for Matérn kernels, the Gaussian PDF/CDF or EI. Its relaxations
-# come from McCormick composition, the automatic αBB rule for `erf`, and the
-# univariate grid envelopes. The tolerances are the paper's: absolute and
-# relative gap $10^{-3}$.
+# Like the paper, jaxglobal relaxes each kernel as one convex, decreasing
+# function of the squared distance (`jaxglobal.kernels`, see below). It has
+# no hand-derived envelopes for the Gaussian PDF/CDF or EI: those come from
+# McCormick composition, the automatic αBB rule for `erf`, and the univariate
+# grid envelopes. The tolerances are the paper's: absolute and relative gap
+# $10^{-3}$.
 
 # %%
 import os
@@ -63,7 +64,7 @@ from jax.scipy.special import erf
 from scipy.optimize import minimize as sp_minimize
 from scipy.stats import qmc
 
-from jaxglobal import minimize
+from jaxglobal import kernels, minimize
 
 INK, MUTED, BLUE, ORANGE, AQUA, YELLOW = "#1a1a19", "#77766f", "#2a78d6", "#eb6834", "#1baf7a", "#eda100"
 plt.rcParams.update({"axes.spines.top": False, "axes.spines.right": False, "axes.edgecolor": MUTED,
@@ -92,22 +93,37 @@ TOL = dict(abs_tol=1e-3, rel_tol=1e-3)
 #
 # with $K = K_{X,X} + \sigma_n^2 I$. Once trained, $\alpha$ and $K^{-1}$ are
 # constants, and `mean` and `std` below are the functions jaxglobal sees.
+#
+# **How the kernel is written matters.** Written in `jnp`, the Matérn 5/2
+# kernel $(1+\sqrt{5d}+\tfrac53 d)\,e^{-\sqrt{5d}}$ is a product of a
+# polynomial in $\sqrt d$ and an exponential, and McCormick relaxes the two
+# factors separately: a term whose true range is $[0,1]$ gets an enclosure up to
+# about 200 wide on a large box. Its automatic second derivative also goes
+# through $\sqrt d$, so the αBB Hessian is infinite at every training point.
+# `jaxglobal.kernels` provides the four kernels as JAX primitives instead. Each
+# is one convex, nonincreasing function of $d$, so its relaxation is the
+# envelope used by the paper, and its derivatives are primitives too, so αBB
+# gets a finite Hessian for Matérn 5/2 and SE. The values and derivatives are
+# the same as the formulas'. Below, the GP is trained with the `jnp` formulas
+# (`PLAIN`) and predicts with the primitives; `primitive=False` predicts with
+# the formulas, for comparison.
 
 # %%
-KERNELS = {
+PLAIN = {
     "matern12": lambda d: jnp.exp(-jnp.sqrt(d)),
     "matern32": lambda d: (1 + jnp.sqrt(3 * d)) * jnp.exp(-jnp.sqrt(3 * d)),
     "matern52": lambda d: (1 + jnp.sqrt(5 * d) + 5 * d / 3) * jnp.exp(-jnp.sqrt(5 * d)),
     "se": lambda d: jnp.exp(-d / 2),
 }
+KERNELS = kernels.KERNELS  # the same four functions of d, as primitives
 
 
 class GP:
     """Exact GP regression with a Matérn/SE kernel, fitted by maximum marginal likelihood."""
 
-    def __init__(self, X, y, lo, hi, kernel="matern52", noise=(1e-6, 1e-2), seed=0):
+    def __init__(self, X, y, lo, hi, kernel="matern52", noise=(1e-6, 1e-2), seed=0, primitive=True):
         self.lo, self.hi = np.asarray(lo, float), np.asarray(hi, float)
-        self.k = KERNELS[kernel]
+        self.k = PLAIN[kernel]  # training
         Xs = self.scale(np.asarray(X, float))
         self.ym, self.ys = float(np.mean(y)), float(np.std(y))
         yt = (np.asarray(y, float) - self.ym) / self.ys
@@ -138,6 +154,7 @@ class GP:
         Kx = np.asarray(gram(th))
         self.lam, self.sf2, self.sn2 = np.exp(th[:dim]), float(np.exp(th[dim])), float(np.exp(th[dim + 1]))
         self.Xs, self.alpha, self.Kinv = Xs, np.linalg.solve(Kx, yt), np.linalg.inv(Kx)
+        self.k = KERNELS[kernel] if primitive else PLAIN[kernel]  # prediction: what jaxglobal relaxes
 
     def scale(self, x):
         return 2 * (x - self.lo) / (self.hi - self.lo) - 1
@@ -229,6 +246,29 @@ fig.colorbar(cs, ax=axes, shrink=0.9)
 plt.show()
 
 # %% [markdown]
+# ### Kernel primitives against the `jnp` formula
+#
+# The same trained GPs, minimized once with the `jnp` formula in the
+# prediction and once with `jaxglobal.kernels`:
+
+# %%
+rows = []
+for n in (50, 200):
+    X = lhs(n)
+    for prim in (False, True):
+        gpc = GP(X, peaks(X), LO, HI, primitive=prim)
+        r, t = solve(gpc.mean, LO, HI)
+        rows.append(dict(N=n, kernel="kernels.matern52" if prim else "jnp formula", status=r.status, found=r.fun,
+                         lower_bound=r.lower_bound, nodes=r.nodes, iterations=r.iterations, time_s=t))
+pd.DataFrame(rows)
+
+# %% [markdown]
+# Same certified optimum, about ten times fewer nodes: 3,489 → 425 at
+# $N = 50$, and 23,191 → 2,343 at $N = 200$, where the iterations drop from 98
+# to 19. Nothing else changed: same GP, same solver options. The rest of the
+# notebook uses the primitives.
+
+# %% [markdown]
 # ### Scaling with the number of training points
 #
 # In the reduced space the number of branching variables stays at 2 for every
@@ -255,17 +295,15 @@ scaling
 # moves to the true minimizer of peaks: at 200 points it is 0.002 away and
 # predicts −6.549; at 400 points, −6.5517 (the literature value is −6.551).
 #
-# The node count grows faster than $N$, roughly like $N^{1.5}$ here
-# (1,079 nodes at $N = 20$, 91,289 at $N = 400$), even though there are
-# still only two branching variables. The cause is the relaxation of the
-# kernel, not the search. Written as
-# $(1+\sqrt{5d}+\tfrac53 d)\,e^{-\sqrt{5d}}$, each Matérn term is relaxed as
-# a product of two factors with wide ranges, so a term whose true range is
-# $[0,1]$ gets an enclosure up to about 200 wide on the root box, and the
-# sum of $N$ such terms with mixed-sign weights is loose. The paper's
-# remedy, envelopes of $k(d)$ as a single convex function of $d$, is not in
-# jaxglobal yet. The times include JIT compilation, which happens once for
-# every new $N$, since the shapes change.
+# The node count still grows faster than $N$, roughly like $N^{1.4}$ (89
+# nodes at $N = 20$, 5,859 at $N = 400$), with two branching variables
+# throughout. Each term is now relaxed by its envelope, so what remains is the
+# sum: the weights $\alpha_i$ grow with $N$ and have mixed signs, and a
+# term-by-term relaxation cannot see the cancellation between them. αBB, which
+# works on the whole sum, recovers it on small boxes. With the `jnp` formula
+# the same series took 1,079 to 91,289 nodes and several minutes at
+# $N = 400$; now the largest solve takes about 18 s. The times include JIT
+# compilation, which happens once for every new $N$, since the shapes change.
 
 # %%
 fig, ax = plt.subplots(figsize=(5, 3.4))
@@ -294,14 +332,13 @@ for name in KERNELS:
 pd.DataFrame(rows)
 
 # %% [markdown]
-# The node counts follow how each kernel's formula is relaxed, not how
-# smooth the kernel is. $k_{1/2} = e^{-\sqrt d}$ and $k_{SE} = e^{-d/2}$ are a
-# single monotone function of $d$, which McCormick composition relaxes
-# tightly, and they need the fewest nodes. $k_{3/2}$ and $k_{5/2}$ are
-# products of a polynomial in $\sqrt d$ and an exponential, relaxed factor by
-# factor, and need several times more. Their $\sqrt d$ also makes the
-# automatic αBB Hessian infinite at every training point, so αBB helps only
-# on small boxes away from the data.
+# With the primitives the four kernels need similar node counts (123 to 439).
+# For the two kernels whose `jnp` formulas are a single monotone function of
+# $d$, $k_{1/2} = e^{-\sqrt d}$ and $k_{SE} = e^{-d/2}$, the formula was
+# already relaxed this well. $k_{3/2}$ gains most from the envelope: 1,917
+# nodes with the formula, 429 now. It gets no αBB, though: its second
+# derivative, like that of $k_{1/2}$, is infinite at $d = 0$, so only
+# $k_{5/2}$ and $k_{SE}$ are marked smooth.
 
 # %% [markdown]
 # ## 2. Acquisition functions
@@ -381,7 +418,9 @@ plt.show()
 # a point in the lower valley, 0.67 and 0.48 from the true minimizer at
 # $(0.23, -1.63)$, where the 20-point GP is uncertain. PI with a margin
 # stays 0.22 from the best data point at $(-1.46, 0.59)$, the more
-# exploitative choice.
+# exploitative choice. With the kernel primitives the three solves need 703,
+# 1,893 and 815 nodes; with the `jnp` formula they needed 7,165, 20,635 and
+# 9,329.
 #
 # ### Why PI needs the margin ξ
 #
@@ -468,15 +507,17 @@ pd.DataFrame([
 ])
 
 # %% [markdown]
-# Only the mean-constrained problem is certified. The chance-constrained one
-# stops at the 300 s limit with a feasible design and a gap of about 7 (STY
-# 157.2 found, at most 164.6 possible). That matches the paper, where this
+# Only the mean-constrained problem is certified (735 nodes; 17,179 with the
+# `jnp` formula). The chance-constrained one stops at the 300 s limit with a
+# feasible design and a gap of about 7 (STY 157.2 found, at most 164.5
+# possible). That matches the paper, where this
 # case did not close in 24 hours in any solver (with real, 4-dimensional data
 # and 78 points). The difficulty is the standard deviation: it is the square
 # root of $\sigma_f^2 - k_{x,X}K^{-1}k_{X,x}$, a quadratic form in $N$ kernel
 # terms whose interval enclosure loses the cancellation between them, so the
 # relaxation of the constraint stays loose and boxes are hard to prove
-# infeasible.
+# infeasible. The kernel primitives tighten each term but not this quadratic
+# form.
 #
 # The design itself behaves as expected: the constraint is active
 # ($m_{\text{imp}} + 1.96\,\sigma_{\text{imp}} = c$) and the design gives up
@@ -550,14 +591,15 @@ axes[1].set_ylabel("$x_2$")
 plt.show()
 
 # %% [markdown]
-# No step was certified within 60 s. The proven upper bound on EI is 1.06 to
-# 15 times the EI of the point found (`EI_bound` vs `EI_found`), so each
-# pick is the best point branch and bound found, not a proven maximizer. The
-# 20-point EI in section 2 was certified in about 16 s, so the small GPs here
-# are harder, not easier. A likely reason (not tested here) is that with few
-# points the posterior standard deviation is large over most of the box, so
-# its loose relaxation dominates the bound. After 8 steps the best value is −2.93, against −6.55 for the true
-# minimum.
+# Four of the eight steps (1, 3, 4 and 5) are certified within 60 s; with the
+# `jnp` formula none were. For the other four the proven upper bound on EI is
+# 1.16 to 4.4 times the EI of the point found (`EI_bound` vs `EI_found`), so
+# those picks are the best points branch and bound found, not proven
+# maximizers. The 20-point EI in section 2 was certified in about 18 s, so
+# these smaller GPs are not easier. A likely reason (not tested here) is that
+# with few points the posterior standard deviation is large over most of the
+# box, so its loose relaxation dominates the bound. After 8 steps the best
+# value is −2.93, against −6.55 for the true minimum.
 
 # %% [markdown]
 # ## Summary
@@ -565,26 +607,28 @@ plt.show()
 # A trained GP written in `jax.numpy` is a reduced-space model for jaxglobal
 # with no extra work: no auxiliary variables per training point, no
 # equality constraints, no hand-written GAMS or Pyomo expressions with
-# thousands of terms. GP means with up to 400 training points, all four
-# kernels, and the LCB, EI and PI (with a margin) acquisition functions of
-# a 20-point GP are solved to a certified $10^{-3}$ gap.
+# thousands of terms. Writing the kernel with `jaxglobal.kernels` instead of
+# its `jnp` formula gives it the envelopes of [schweidtmann2021deterministic]
+# and cuts the node counts about tenfold. GP means with up to 400 training
+# points (18 s), all four kernels, and the LCB, EI and PI (with a margin)
+# acquisition functions of a 20-point GP are solved to a certified $10^{-3}$
+# gap.
 #
 # What did not work:
 #
 # * PI without a margin ($\xi = 0$) cannot be certified, because PI has no
 #   limit at the incumbent where $\sigma \to 0$. A small $\xi$ fixes it.
 # * The chance constraint, built from the second GP's standard deviation,
-#   was not certified in 300 s, and the EI steps of the Bayesian-optimization
-#   loop were not certified in 60 s each. Both depend on $\sqrt{k_D(x)}$,
-#   whose relaxation is loose.
+#   was not certified in 300 s, and four of the eight EI steps of the
+#   Bayesian-optimization loop were not certified in 60 s each. Both depend
+#   on $\sqrt{k_D(x)}$, whose relaxation is loose.
 # * The integer number of layers in the paper's membrane case has no
 #   counterpart, since jaxglobal has no integer variables. For a small
 #   integer range one would solve one continuous problem per value.
 #
-# The node counts are driven by relaxation quality. The Matérn 3/2 and 5/2
-# formulas are relaxed factor by factor, and the standard deviation as an
-# interval quadratic form. The paper's remedies are envelopes of $k(d)$ as
-# one convex, decreasing function and tailored relaxations of the
-# acquisition functions. In jaxglobal they would be new primitives with
-# their own relaxation rules; a prototype of the kernel envelopes cut the
-# node count of the $N = 200$ mean solve about tenfold.
+# The node counts are driven by relaxation quality. The kernel envelopes
+# fixed the mean; what is left is the standard deviation, relaxed as an
+# interval quadratic form in the kernel vector. A per-box bound that turns
+# the variance into one more kernel sum (from $K^{-1}$ being positive
+# semidefinite) is the natural next step; in a prototype it cut the LCB solve
+# from 7,165 to 251 nodes.

@@ -147,6 +147,40 @@ relaxations.
 
 Equality optima can sit slightly below f\* because of `feas_tol` (1e-6).
 
+## Gaussian-process surrogates
+
+A GP prediction written in `jax.numpy` is already a reduced-space model
+[schweidtmann2021deterministic]. Write its kernel with `jaxglobal.kernels`
+(`matern12`, `matern32`, `matern52`, `se`, each a function of the weighted
+squared distance `d`) instead of the `jnp` formula:
+
+```python
+from jaxglobal import kernels
+
+def gp_mean(x):
+    d = jnp.sum(((x - X_train) / lengthscales) ** 2, axis=-1)
+    return y_mean + alpha @ kernels.matern52(d)
+```
+
+Each kernel is a JAX primitive that is one convex, nonincreasing function of
+`d`, so it is relaxed by its envelopes; written in `jnp`, the Matérn kernels
+are relaxed factor by factor. Its derivatives are primitives too, so αBB gets
+a finite Hessian at the training points (Matérn 5/2 and SE). On the GP mean of
+the peaks function (Matérn 5/2, abs/rel gap 1e-3), same answers:
+
+| training points | nodes, `jnp` formula | nodes, `kernels.matern52` | time |
+|---:|---:|---:|---|
+| 20 | 1079 | 89 | 28 s → 19 s |
+| 50 | 3489 | 425 | 22 s → 11 s |
+| 100 | 6165 | 665 | 44 s → 17 s |
+| 200 | 23191 | 2343 | 67 s → 8.7 s |
+
+(cold solves, compilation included.) Matérn 3/2 at N = 50: 1917 → 429 nodes.
+SE and Matérn 1/2 are unchanged: their `jnp` formulas were already relaxed
+exactly. [`examples/06-gaussian-processes.ipynb`](examples/06-gaussian-processes.ipynb)
+repeats the paper's case studies: GP means, acquisition functions, a chance
+constraint and a Bayesian-optimization loop.
+
 ## Comparison with equation-based solvers
 
 `examples/compare.py` builds Pyomo models from **the same Python functions**,
@@ -208,6 +242,12 @@ Any AMPL `.nl` model (text or binary) can be loaded with
   certificate (Eggholder reported −935 as optimal). The fix is to select
   branches with `jnp.where` on sign or ordering. `test_cuts_valid` guards this
   and fails on 9 problems if the fix is reverted.
+* **A cut must use one evaluation of its value and slope.** Under `jit`, XLA
+  may recompute a value separately for each of its uses, and at a near-tie
+  between two McCormick facets the copies can pick different facets. A cut that
+  takes its coefficients from one facet and its offset from the other is
+  invalid; on jax 0.11 this made the lifted LP infeasible and its bound ~1e277.
+  Values and slopes of every cut go through `jax.lax.optimization_barrier`.
 
 ## Limitations (it's a PoC)
 
