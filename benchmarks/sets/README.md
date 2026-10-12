@@ -18,3 +18,24 @@ Run with
 python benchmarks/run.py --solvers jaxglobal --tag start50 --time-limit 60 \
   --names $(grep -v '^#' benchmarks/sets/start50.txt | awk '{print $2}' | paste -sd, -)
 ```
+
+## Results on `start50`
+
+Checked against the MINLPLib reference bounds with `report.classify`; 60 s,
+4 jobs. "Warm" reruns the same instances with the kernels already in the disk
+cache (`JAXGLOBAL_CACHE_DIR`), so it measures search without compilation.
+
+| run | solved | wrong | unsolved | unsupported | SGM time (s) |
+|---|---:|---:|---:|---:|---:|
+| phase-0 baseline (`baseline.csv`) | 12 | 0 | 26 | 12 | 40.5 |
+| jax 0.11, loaded machine (`start50.csv`) | 12 | 0 | 36 | 2 | 53.5 |
+| cold (`start50_cold.csv`) | 12 | 0 | 36 | 2 | 50.5 |
+| warm (`start50_warm.csv`) | 18 | 0 | 30 | 2 | 32.1 |
+| SCIP (`baseline.csv`) | 44 | 1 | 5 | 0 | 1.9 |
+
+Most of the cold time is tracing and compiling the bounding kernels, whose
+size grows with the number of scalar operations in the model (a scalar `.nl`
+model of 1,166 operations gives a 500,000-equation bound kernel). In the cold
+and warm runs five instances with unbounded variables were killed by the
+runner while `bound_domain` compiled its FBBT kernel; the time limit now covers
+that phase too.

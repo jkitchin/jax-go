@@ -21,11 +21,20 @@ the global optimum is preserved.
 
 from __future__ import annotations
 
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 import jax
 import jax.numpy as jnp
 import numpy as np
 
 from .fbbt import joint_tape, make_fbbt
+
+_POOL = []  # one compiler thread, created on first use
+
+
+class DomainTimeout(Exception):
+    """``bound_domain`` ran out of time (its FBBT kernel was still compiling)."""
 
 
 def used_variables(f, ineq, eq, n):
@@ -43,7 +52,7 @@ def used_variables(f, ineq, eq, n):
     return used
 
 
-def _feasible_points(f, ineq, eq, lo, hi, feas_tol, n_starts, seed):
+def _feasible_points(f, ineq, eq, lo, hi, feas_tol, n_starts, seed, deadline=None):
     """Local solves (scipy SLSQP, infinite bounds allowed) from scattered starts."""
     from scipy.optimize import minimize
 
@@ -72,6 +81,8 @@ def _feasible_points(f, ineq, eq, lo, hi, feas_tol, n_starts, seed):
     rng = np.random.default_rng(seed)
     best_x, best_f = None, np.inf
     for k in range(n_starts):
+        if deadline is not None and time.perf_counter() > deadline:
+            break
         scale = 10.0 ** (k % 3)  # 1, 10, 100: the model's scale is unknown
         fin = np.isfinite(lo) & np.isfinite(hi)
         mid = np.where(fin, 0.5 * (np.where(fin, lo, 0.0) + np.where(fin, hi, 0.0)), np.clip(0.0, lo, hi))
@@ -89,18 +100,30 @@ def _feasible_points(f, ineq, eq, lo, hi, feas_tol, n_starts, seed):
     return best_x, best_f
 
 
-def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed=0):
+def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed=0, deadline=None):
     """Derive finite bounds. Returns ``(lo, hi, infeasible, x_feasible, f_feasible)``.
 
     ``lo``/``hi`` may still contain infinities when nothing bounds a variable;
-    ``x_feasible`` is a feasible point found on the way (or ``None``).
+    ``x_feasible`` is a feasible point found on the way (or ``None``). With a
+    ``deadline`` (a ``time.perf_counter()`` value) the FBBT kernel is compiled
+    in a background thread and ``DomainTimeout`` is raised if it is not ready
+    in time; no new local solve starts after it.
     """
     lo, hi = np.array(lo, np.float64), np.array(hi, np.float64)
     fb = jax.jit(make_fbbt(f, ineq, eq, rounds=rounds, feas_tol=feas_tol))
+    if deadline is not None and np.isfinite(deadline):
+        if not _POOL:
+            _POOL.append(ThreadPoolExecutor(1, thread_name_prefix="jaxglobal-domain"))
+        spec = jax.ShapeDtypeStruct(lo.shape, jnp.float64)
+        fut = _POOL[0].submit(lambda: fb.trace(spec, spec, jax.ShapeDtypeStruct((), jnp.float64)).lower().compile())
+        try:
+            fb = fut.result(timeout=max(deadline - time.perf_counter(), 0.0))
+        except TimeoutError:
+            raise DomainTimeout() from None
 
     def tighten(cutoff):
         nonlocal lo, hi
-        a, b, empty = fb(jnp.asarray(lo), jnp.asarray(hi), cutoff)
+        a, b, empty = fb(jnp.asarray(lo), jnp.asarray(hi), jnp.asarray(cutoff, jnp.float64))
         lo, hi = np.maximum(lo, np.asarray(a)), np.minimum(hi, np.asarray(b))
         return bool(empty)
 
@@ -113,7 +136,7 @@ def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed
         lo, hi = np.where(unused, pt, lo), np.where(unused, pt, hi)
     xf, ff = None, np.inf
     if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
-        xf, ff = _feasible_points(f, ineq, eq, lo, hi, feas_tol, n_starts, seed)
+        xf, ff = _feasible_points(f, ineq, eq, lo, hi, feas_tol, n_starts, seed, deadline)
         if xf is not None:
             cutoff = ff + 1e-9 * (1 + abs(ff))
             keep = lo.copy(), hi.copy()

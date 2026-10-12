@@ -35,7 +35,7 @@ import numpy as np
 
 from .local import make_local
 from .crown import crown_auto, crown_supported, make_crown
-from .domain import bound_domain
+from .domain import DomainTimeout, bound_domain
 from . import kcache
 from .fbbt import make_fbbt
 from .lifted import make_lifted_bounder
@@ -541,7 +541,14 @@ def minimize(
     seed_x, seed_f = None, np.inf
     if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
         # derive finite bounds from the constraints and a feasible point (domain.py)
-        lo, hi, infeasible0, seed_x, seed_f = bound_domain(f, ineq, eq, lo, hi, feas_tol=feas_tol)
+        try:
+            lo, hi, infeasible0, seed_x, seed_f = bound_domain(f, ineq, eq, lo, hi, feas_tol=feas_tol,
+                                                               deadline=t0 + time_limit)
+        except DomainTimeout:
+            x = np.clip(np.zeros(lo.size), lo, hi)
+            return Result(x=x, fun=np.inf, lower_bound=-np.inf, converged=False, iterations=0, nodes=0,
+                          time=time.perf_counter() - t0, status="time_limit",
+                          message="time_limit reached while deriving bounds for unbounded variables")
         if infeasible0 or not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
             free = np.flatnonzero(~(np.isfinite(lo) & np.isfinite(hi)))
             status = "infeasible" if infeasible0 else "unbounded_domain"
