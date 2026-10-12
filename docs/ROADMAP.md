@@ -527,10 +527,13 @@ envelope over the (μ, σ) box; PI from its monotonicity plus exact `Φ`
 envelopes on `z = (t − μ)/σ`. EI 1,401 → 765 nodes, PI 727 → 451 (warm solves
 about 2× and 1.4× faster).
 
-Found on the way, not fixed: the generic relaxation of `Φ((t − μ)/σ)` through
-`erf` (automatic αBB) can put its convex side up to ~4e-8 above `Φ` on boxes
-where σ is tiny, so `z` spans ~1e3 (the division itself is exact). The PI
-primitive does not use it. Also added: a rule for `erfc`, which
+Found on the way and fixed: the generic relaxation of `Φ((t − μ)/σ)`
+through `erf` put its convex side up to 4e-8 above `Φ` on boxes where σ is
+tiny, so `z` spans ~1e3. Cause: the quotient's relaxation was one ulp below
+the quotient (ordinary rounding in default mode), and αBB's added slope
+`a (hi − lo) / 2`, which `f` itself does not have, amplified it ~10⁵-fold.
+`alphabb_rule` now widens its input by a few ulps before composing; the worst
+excess is 1e-16 (rounding), and `safe=True` was already exact. Also added: a rule for `erfc`, which
 `jax.scipy.stats.norm.cdf` uses on jax 0.11.
 
 ### Phase 4 — device-resident B&B (4–6 weeks)

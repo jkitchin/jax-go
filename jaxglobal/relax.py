@@ -179,6 +179,13 @@ def alphabb_rule(ctx: Ctx, f, x: MC, rng, d2rng) -> MC:
     ok_a, ok_b = jnp.isfinite(a), jnp.isfinite(b)
     a = jnp.where(ok_a, a, 0.0)
     b = jnp.where(ok_b, b, 0.0)
+    # Widen x outward by a few ulps of its magnitude. The alphaBB terms give ucv/ucc a slope of
+    # about a (hi - lo) / 2 that f itself does not have, so a rounding-level error in x's own
+    # relaxation (e.g. a quotient's cc one ulp below the quotient) would otherwise come out
+    # amplified: on z in [0.4, 863] it put Phi's convex side 4e-8 above Phi.
+    pad = SAFE_K * float(jnp.finfo(jnp.asarray(x.lo).dtype).eps) * (jnp.abs(x.lo) + jnp.abs(x.hi))
+    pad = jnp.where(jnp.isfinite(pad), pad, 0.0)
+    x = MC(x.lo - pad, x.hi + pad, x.cv - pad, x.cc + pad)
     L, U = x.lo, x.hi
     m = 0.5 * (L + U)
     fp = jnp.vectorize(jax.grad(f))

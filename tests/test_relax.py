@@ -93,3 +93,20 @@ def test_unsupported_primitive_message():
 
     with pytest.raises(NotImplementedError, match="floor"):
         relax(f)(jnp.zeros(2), -jnp.ones(2), jnp.ones(2))
+
+
+def test_alphabb_does_not_amplify_input_rounding():
+    """Phi((t - mu) / sigma) via erf with tiny sigma: z spans ~1e3, and alphaBB's slope a (hi - lo) / 2
+    used to turn a one-ulp error in the quotient's relaxation into ~4e-8 above Phi (default mode)."""
+    from jax.scipy.special import erf
+
+    F = lambda v: 0.5 * (1 + erf((0.3 - v[0]) / v[1] / np.sqrt(2)))  # noqa: E731
+    R = jax.jit(jax.vmap(relax(F), in_axes=(0, None, None)))
+    FV = jax.jit(jax.vmap(F))
+    rng = np.random.default_rng(0)
+    for _ in range(300):
+        a = np.array([rng.uniform(-3, 3), 10 ** rng.uniform(-3, 0.5)])
+        lo, hi = a, a + np.array([10 ** rng.uniform(-3, 0.5), 10 ** rng.uniform(-3, 0.5)])
+        X = jnp.asarray(np.concatenate([rng.uniform(lo, hi, (300, 2)), np.array([lo, hi, [lo[0], hi[1]], [hi[0], lo[1]]])]))
+        m, V = R(X, jnp.asarray(lo), jnp.asarray(hi)), FV(X)
+        assert float(jnp.max(m.cv - V)) <= 1e-14 and float(jnp.max(V - m.cc)) <= 1e-14

@@ -268,6 +268,10 @@ Any AMPL `.nl` model (text or binary) can be loaded with
   takes its coefficients from one facet and its offset from the other is
   invalid; on jax 0.11 this made the lifted LP infeasible and its bound ~1e277.
   Values and slopes of every cut go through `jax.lax.optimization_barrier`.
+* **αBB amplifies rounding.** `f + a/2 (z − lo)(z − hi)` has a slope of about
+  `a (hi − lo) / 2` that `f` does not, so on a wide range (a quotient with a
+  tiny denominator) a one-ulp error in `z`'s relaxation became 4e-8 in the
+  bound. `alphabb_rule` widens its input by a few ulps first.
 
 ## Limitations (it's a PoC)
 
