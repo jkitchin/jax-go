@@ -39,6 +39,7 @@ does and does not guarantee.
 
 from __future__ import annotations
 
+import threading
 from typing import Callable, NamedTuple
 
 import jax
@@ -132,11 +133,26 @@ def _secant(f, lo, hi, z):
 # ---------------------------------------------------------------------------
 
 
+_MODE = threading.local()  # set by apply_rule: is the current rule evaluated for intervals only?
+
+
+def _interval_only():
+    """True while a rule runs under ``Ctx(interval_only=True)`` (FBBT, alphaBB's interval Hessian).
+
+    Rules then skip cv/cc: MC(lo, hi, lo, hi) is always a valid (weak) relaxation, lo/hi come
+    from the same code either way, and the skipped relaxations would only be traced, lowered
+    and then dead-code-eliminated, which made the bounding kernels ~5-50x larger per operation.
+    """
+    return getattr(_MODE, "interval_only", False)
+
+
 def convex_rule(f, x: MC, xmin) -> MC:
     """f convex on [x.lo, x.hi] with box minimizer ``xmin``."""
     flo, fhi = f(x.lo), f(x.hi)
     lo = f(xmin)
     hi = jnp.maximum(flo, fhi)
+    if _interval_only():
+        return MC(lo, hi, lo, hi)
     cv = f(_mid(xmin, x.cv, x.cc))
     xmax = jnp.where(fhi >= flo, x.hi, x.lo)
     cc = _secant(f, x.lo, x.hi, _mid(xmax, x.cv, x.cc))
@@ -261,6 +277,8 @@ def mc_mul(a: MC, b: MC, multivariate: bool = False) -> MC:
     xL, xU, yL, yU = a.lo, a.hi, b.lo, b.hi
     prods = jnp.stack([xL * yL, xL * yU, xU * yL, xU * yU])
     lo, hi = prods.min(0), prods.max(0)
+    if _interval_only():
+        return MC(lo, hi, lo, hi)
 
     # min/max over {c*cv, c*cc} is decided by the sign of c alone; selecting
     # by sign keeps autodiff on the convex branch at ties (cv == cc).
@@ -483,6 +501,8 @@ def mc_frac(a: MC, b: MC, base: MC) -> MC:
     convex (quadratic over linear), nondecreasing in a and nonincreasing in b,
     so composing it with a.cv and b.cc keeps it convex.
     """
+    if _interval_only():
+        return base
     ok = (a.lo >= 0) & (b.lo > 0) & jnp.isfinite(a.hi) & jnp.isfinite(b.hi)
     sl = jnp.sqrt(jnp.where(ok, a.lo, 0.0))
     su = jnp.sqrt(jnp.where(ok, a.hi, 1.0))
@@ -874,7 +894,12 @@ def widen(eqn, invals, out):
 
 def apply_rule(ctx, eqn, invals):
     """``RULES[primitive](ctx, eqn, *invals)``, outward-widened when ``ctx.safe``."""
-    outs = RULES[eqn.primitive.name](ctx, eqn, *invals)
+    prev = _interval_only()
+    _MODE.interval_only = ctx.interval_only
+    try:
+        outs = RULES[eqn.primitive.name](ctx, eqn, *invals)
+    finally:
+        _MODE.interval_only = prev
     if not ctx.safe or eqn.primitive.multiple_results:
         return outs
     return widen(eqn, invals, outs)
