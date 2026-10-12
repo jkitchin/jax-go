@@ -30,8 +30,17 @@ def scalar_model():
     return f, g, h
 
 
+@pytest.fixture(params=["rows", "steps"])
+def sweep(request, monkeypatch):
+    """Run a test with the row-by-row and the scheduled (step-by-step) sweeps."""
+    import jaxglobal.fbbt_interp as FI
+
+    monkeypatch.setattr(FI, "SCHEDULE_MIN_ROWS", 10**9 if request.param == "rows" else 0)
+    return request.param
+
+
 @pytest.mark.parametrize("cutoff", [np.inf, 0.5, -1.0])
-def test_never_looser_than_propagate(cutoff):
+def test_never_looser_than_propagate(cutoff, sweep):
     """At least as tight as propagate (structural equations are aliases instead of separate,
     padded nodes, so updates reach every use at once): every box propagate proves empty is
     empty, and no bound is looser beyond rounding. Soundness is checked separately below."""
@@ -51,7 +60,7 @@ def test_never_looser_than_propagate(cutoff):
     assert np.all((np.asarray(r[1] - q[1]) / sc)[ok] >= -1e-12)
 
 
-def test_sound_on_sampled_feasible_points():
+def test_sound_on_sampled_feasible_points(sweep):
     """Every sampled point with f <= cutoff and g <= 0 lies in the tightened box."""
     f, g, _ = scalar_model()
     fb = jax.jit(make_fbbt(f, g, None, rounds=5, interpret=True))
@@ -89,24 +98,22 @@ def test_nl_model_scalarizes():
     assert make_propagate(tape, M.ineq, M.eq, len(M.lo), 1e-6, 5) is not None
 
 
-def _has_switch(jaxpr):
-    for e in jaxpr.eqns:
-        if e.primitive.name == "cond" and len(e.params.get("branches", ())) > 2:
-            return True
-        for p in e.params.values():
-            for s in (p if isinstance(p, (tuple, list)) else (p,)):
-                sub = getattr(s, "jaxpr", None)
-                if sub is not None and _has_switch(getattr(sub, "jaxpr", sub)):
-                    return True
-    return False
-
-
-def test_interpreter_is_used_inside_jit_and_vmap():
+def test_interpreter_is_used_inside_jit_and_vmap(monkeypatch):
     """Scalarizing evaluates structural equations on concrete arrays; inside an enclosing trace
     JAX stages them (omnistaging) unless forced eager, and fbbt silently fell back to the compiled
     path in exactly the kernels it was meant for."""
+    import jaxglobal.fbbt_interp as FI
+
+    calls = []
+    make = FI.make_propagate
+
+    def spy(*a, **k):
+        run = make(*a, **k)
+        return None if run is None else (lambda *args: calls.append(1) or run(*args))
+
+    monkeypatch.setattr(FI, "make_propagate", spy)
     f, g, h = scalar_model()
     B = jnp.zeros((4, 3))
-    on = jax.make_jaxpr(jax.jit(jax.vmap(make_fbbt(f, g, h, interpret=True), in_axes=(0, 0, None))))(B, B + 1, 0.0)
-    off = jax.make_jaxpr(jax.jit(jax.vmap(make_fbbt(f, g, h, interpret=False), in_axes=(0, 0, None))))(B, B + 1, 0.0)
-    assert _has_switch(on.jaxpr) and not _has_switch(off.jaxpr)
+    for interpret in (False, True):
+        jax.make_jaxpr(jax.jit(jax.vmap(make_fbbt(f, g, h, interpret=interpret), in_axes=(0, 0, None))))(B, B + 1, 0.0)
+        assert bool(calls) == interpret

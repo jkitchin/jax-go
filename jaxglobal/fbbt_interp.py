@@ -11,15 +11,16 @@ is turned into data instead:
   only renumber slots, constants get fixed slots, and every elementwise
   equation becomes one row ``(opcode, a, b, out)`` per element;
 * **interpret**: forward and backward sweeps are ``lax.fori_loop`` over the
-  rows with a ``lax.switch`` on the opcode. Each opcode's branch calls the same
+  steps of ``schedule`` (groups of independent rows), each step evaluating
+  every opcode once, vectorized over its rows. Each opcode's branch calls the same
   rules as ``fbbt`` (``relax.RULES`` in interval mode forward, ``fbbt.BACK``
   backward) on scalar intervals, with constant operands passed as constants,
   so the result is that of ``propagate`` element by element (sums of more than
   two terms become chains of ``add``, the same bounds up to rounding).
 
 The kernel's size depends on the number of distinct opcodes, not on the number
-of rows. Its run time is one loop step per row, so ``make_fbbt`` uses it only
-for large, mostly scalar tapes (see ``use_interpreter``).
+of rows. Its run time is one loop step per ``schedule`` step, so ``make_fbbt``
+uses it only for large, mostly scalar tapes (see ``use_interpreter``).
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import lax
 
-from .fbbt import BACK, CTX, INF, SAFE_CTX, Const, _clean, _meet2, _pad
+from .fbbt import BACK, CTX, INF, SAFE_CTX, Const, _clean, _empty, _meet2, _pad
 from .relax import MC, RULES, apply_rule, is_mc
 
 # equations that only move elements: the interpreter renumbers slots, no row
@@ -174,13 +175,125 @@ def _branches(prog, safe):
     return fwd, bwd
 
 
-def make_propagate(tape, ineq, eq, n, feas_tol, rounds, safe=False):
-    """``fbbt(lo, hi, cutoff) -> (lo, hi, empty)`` by interpreting the scalarized tape, or None."""
+# Tapes this large are swept step by step (``schedule``), smaller ones row by row: at 300+ rows
+# the steps were 1.2-4x faster (kriging_peaks, 1,162 rows: 561 -> 126 ms for 16 boxes), under
+# ~120 rows (a handful of rows per step, padded to twice as many) up to 2x slower for 256 boxes.
+SCHEDULE_MIN_ROWS = 300
+
+
+def make_propagate(tape, ineq, eq, n, feas_tol, rounds, safe=False, scheduled=None):
+    """``fbbt(lo, hi, cutoff) -> (lo, hi, empty)`` by interpreting the scalarized tape, or None.
+
+    ``scheduled`` (default: at least ``SCHEDULE_MIN_ROWS`` rows) sweeps step by
+    step instead of row by row.
+    """
     prog = scalarize(tape, n)
     if prog is None or len(prog.op) == 0:
         return None
     fwd, bwd = _branches(prog, safe)
-    op, A, B, O = (jnp.asarray(v) for v in (prog.op, prog.a, prog.b, prog.out))
+    if scheduled is None:
+        scheduled = len(prog.op) >= SCHEDULE_MIN_ROWS
+    run = _propagate_steps(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds) if scheduled else \
+        _propagate_rows(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds)  # fmt: skip
+    run.program = prog
+    return run
+
+
+def _propagate_steps(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds):
+    """Step by step through ``layout``'s schedule: forward, each step evaluates its rows and
+    writes them as one block; backward, the steps are taken in reverse, each opcode's rows
+    narrowing their operands together (candidates for the same slot intersected by scatter
+    max / min) before the next opcode's rows read them."""
+    lay = layout(prog)
+    prog = lay.prog
+    A, B, OUT = (jnp.asarray(v) for v in (prog.a, prog.b, prog.out))
+    R = [jnp.asarray(r) for r in lay.rows]
+    VALID = [jnp.asarray(r >= 0) for r in lay.rows]
+    START = jnp.asarray(lay.start[0])  # a step's blocks are adjacent, opcode 0's first
+    T = lay.steps
+    cval = jnp.asarray(np.nan_to_num(prog.const_val, nan=0.0))
+    is_c = jnp.asarray(~np.isnan(prog.const_val))
+    out_ids = [jnp.asarray(o) for o in prog.outs]
+
+    def forward(P):
+        """One forward sweep from the prior bounds ``P`` (``(S, 2)``: lo, hi)."""
+
+        def step(t, c):
+            V, empty = c
+            rs, bads = [], []
+            for o in range(len(R)):  # read everything, then write the step's block once (in place)
+                k = jnp.maximum(R[o][t], 0)
+                va, vb, p = V[A[k]], V[B[k]], P[OUT[k]]
+                vl, vh = jax.vmap(fwd[o])(va[:, 0], va[:, 1], vb[:, 0], vb[:, 1])
+                vl, vh, bad = _meet2((vl, vh), (p[:, 0], p[:, 1]))
+                rs.append(jnp.stack([vl, vh], axis=1))
+                bads.append(bad & VALID[o][t])
+            V = lax.dynamic_update_slice_in_dim(V, jnp.concatenate(rs), START[t], 0)
+            return V, empty | jnp.any(jnp.concatenate(bads))
+
+        return lax.fori_loop(0, T, step, (P, jnp.array(False)))
+
+    def backward(V, cutoff):
+        lo, hi = V[:, 0], V[:, 1]
+        empty = jnp.array(False)
+        zs = [(-INF, cutoff)] + ([(-INF, feas_tol)] if ineq is not None else []) + ([(-feas_tol, feas_tol)] if eq is not None else [])
+        for ids, (zl, zh) in zip(out_ids, zs):
+            ml, mh, bad = _meet2((lo[ids], hi[ids]), (jnp.full(ids.shape, zl), jnp.full(ids.shape, zh)))
+            keep = is_c[ids]  # a constant output that violates its bound makes the box empty (strictly, as fbbt)
+            empty |= jnp.any(jnp.where(keep, (cval[ids] < zl) | (cval[ids] > zh), bad))
+            lo, hi = lo.at[ids].set(jnp.where(keep, lo[ids], ml)), hi.at[ids].set(jnp.where(keep, hi[ids], mh))
+
+        def step(j, c):
+            V, empty = c
+            t = T - 1 - j
+            # opcode groups narrow the carry one after another (rows of the same opcode in a step
+            # see each other's narrowing only in the next round): closer to the row-by-row sweep
+            for o in range(len(R)):
+                k = jnp.maximum(R[o][t], 0)
+                a, b = A[k], B[k]
+                z, va, vb = V[OUT[k]], V[a], V[b]
+                al, ah, ua, bl, bh, ub = jax.vmap(bwd[o])(z[:, 0], z[:, 1], va[:, 0], va[:, 1], vb[:, 0], vb[:, 1])
+                idx, cl, ch, use = [], [], [], []
+                for s, l_, h_, u_ in ((a, al, ah, ua), (b, bl, bh, ub)):
+                    pl, ph = _pad(l_, h_)
+                    u_ = u_ & VALID[o][t] & ~is_c[s]
+                    idx.append(s)
+                    cl.append(jnp.where(u_, pl, -INF))
+                    ch.append(jnp.where(u_, ph, INF))
+                    use.append(u_)
+                idx, cl, ch, use = (jnp.concatenate(v) for v in (idx, cl, ch, use))
+                gl = V[:, 0].at[idx].max(cl)
+                gh = V[:, 1].at[idx].min(ch)
+                bad = _empty(gl[idx], gh[idx])  # _meet2 per slot: slightly crossed endpoints are reordered
+                empty = empty | jnp.any(bad & use)
+                sl = jnp.where(bad, gl[idx], jnp.minimum(gl[idx], gh[idx]))
+                sh = jnp.where(bad, gh[idx], jnp.maximum(gl[idx], gh[idx]))
+                V = jnp.stack([gl.at[idx].set(sl), gh.at[idx].set(sh)], axis=1)
+            return V, empty
+
+        return lax.fori_loop(0, T, step, (jnp.stack([lo, hi], axis=1), empty))
+
+    def fbbt(lo, hi, cutoff=INF):
+        cutoff = jnp.asarray(cutoff, jnp.float64)
+        P0 = jnp.stack([jnp.where(is_c, cval, -INF).at[:n].set(lo), jnp.where(is_c, cval, INF).at[:n].set(hi)], axis=1)
+
+        def round_(_, carry):
+            P, empty = carry
+            V, e1 = forward(P)
+            V, e2 = backward(V, cutoff)
+            return jnp.where(is_c[:, None], cval[:, None], V), empty | e1 | e2
+
+        P, empty = lax.fori_loop(0, rounds, round_, (P0, jnp.array(False)))
+        V, e = forward(P)
+        xl, xh = V[:n, 0], V[:n, 1]
+        return jnp.minimum(xl, xh), jnp.maximum(xl, xh), empty | e
+
+    return fbbt
+
+
+def _propagate_rows(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds):
+    """Row by row: one loop step per row, a ``lax.switch`` on its opcode."""
+    op, A, B, OUT = (jnp.asarray(v) for v in (prog.op, prog.a, prog.b, prog.out))
     K = len(prog.op)
     cval = jnp.asarray(np.nan_to_num(prog.const_val, nan=0.0))
     is_c = jnp.asarray(~np.isnan(prog.const_val))
@@ -191,7 +304,7 @@ def make_propagate(tape, ineq, eq, n, feas_tol, rounds, safe=False):
 
         def step(k, carry):
             lo, hi, empty = carry
-            a, b, o = A[k], B[k], O[k]
+            a, b, o = A[k], B[k], OUT[k]
             vl, vh = lax.switch(op[k], fwd, lo[a], hi[a], lo[b], hi[b])
             vl, vh, bad = _meet2((vl, vh), (P[0][o], P[1][o]))
             return lo.at[o].set(vl), hi.at[o].set(vh), empty | bad
@@ -216,7 +329,7 @@ def make_propagate(tape, ineq, eq, n, feas_tol, rounds, safe=False):
         def step(j, carry):
             lo, hi, empty = carry
             k = K - 1 - j
-            a, b, o = A[k], B[k], O[k]
+            a, b, o = A[k], B[k], OUT[k]
             al, ah, ua, bl, bh, ub = lax.switch(op[k], bwd, lo[o], hi[o], lo[a], hi[a], lo[b], hi[b])
             lo, hi, e1 = update(lo, hi, a, al, ah, ua)
             lo, hi, e2 = update(lo, hi, b, bl, bh, ub)
@@ -226,7 +339,6 @@ def make_propagate(tape, ineq, eq, n, feas_tol, rounds, safe=False):
 
     def fbbt(lo, hi, cutoff=INF):
         cutoff = jnp.asarray(cutoff, jnp.float64)
-        S = cval.shape[0]
         L0 = jnp.where(is_c, cval, -INF).at[:n].set(lo)
         H0 = jnp.where(is_c, cval, INF).at[:n].set(hi)
 
@@ -241,7 +353,6 @@ def make_propagate(tape, ineq, eq, n, feas_tol, rounds, safe=False):
         xl, xh = vl[:n], vh[:n]
         return jnp.minimum(xl, xh), jnp.maximum(xl, xh), empty | e
 
-    fbbt.program = prog
     return fbbt
 
 
@@ -251,3 +362,110 @@ def use_interpreter(tape, n, min_rows=50, max_expansion=1.5):
                if node.eqn.primitive.name not in STRUCTURAL)  # fmt: skip
     eqns = sum(1 for node in tape.nodes if node.eqn.primitive.name not in STRUCTURAL)
     return rows >= min_rows and rows <= max_expansion * max(eqns, 1)
+
+
+class Schedule(NamedTuple):
+    rows: list  # per opcode: (T, W_o) row indices, -1 for padding
+    steps: int  # T
+
+
+def schedule(prog, step_cost=8.0, factors=(0.5, 1.0, 2.0, 4.0, 8.0)):
+    """Group the rows into ``T`` steps of mutually independent rows, at most ``W_o`` per opcode.
+
+    A step evaluates every opcode once, vectorized over its ``W_o`` slots, so an
+    interpreter runs ``T`` loop iterations instead of one per row. Rows become
+    ready when the rows producing their operands are done in an earlier step;
+    ready rows are taken longest-remaining-path first (greedy list scheduling).
+    The widths are ``factor * count_o / critical_path`` for the factor that
+    minimizes ``T * (step_cost + sum_o W_o)``, the padded work.
+    """
+    import heapq
+
+    K, nop = len(prog.op), len(prog.opcodes)
+    row_of = np.full(len(prog.const_val), -1, np.int64)
+    row_of[prog.out] = np.arange(K)
+    deps = [sorted({int(row_of[s]) for s in (prog.a[k], prog.b[k]) if row_of[s] >= 0}) for k in range(K)]
+    users = [[] for _ in range(K)]
+    for k, ds in enumerate(deps):
+        for d in ds:
+            users[d].append(k)
+    height = np.ones(K, np.int64)  # longest path from the row to an output, in rows
+    for k in range(K - 1, -1, -1):
+        for u in users[k]:
+            height[k] = max(height[k], height[u] + 1)
+    crit = int(height.max()) if K else 1
+    count = np.bincount(prog.op, minlength=nop)
+
+    def run(widths):
+        left = np.array([len(d) for d in deps])
+        heaps = [[] for _ in range(nop)]
+        for k in range(K):
+            if left[k] == 0:
+                heapq.heappush(heaps[prog.op[k]], (-height[k], k))
+        steps, done = [], 0
+        while done < K:
+            took = [[heapq.heappop(heaps[o])[1] for _ in range(min(widths[o], len(heaps[o])))] for o in range(nop)]
+            steps.append(took)
+            for rows in took:
+                done += len(rows)
+                for k in rows:
+                    for u in users[k]:
+                        left[u] -= 1
+                        if left[u] == 0:
+                            heapq.heappush(heaps[prog.op[u]], (-height[u], u))
+        return steps
+
+    best = None
+    for f in factors:
+        widths = [max(1, int(np.ceil(f * c / crit))) for c in count]
+        steps = run(widths)
+        cost = len(steps) * (step_cost + sum(widths))
+        if best is None or cost < best[0]:
+            best = (cost, widths, steps)
+    _, widths, steps = best
+    rows = []
+    for o in range(nop):
+        r = np.full((len(steps), widths[o]), -1, np.int64)
+        for t, took in enumerate(steps):
+            r[t, : len(took[o])] = took[o]
+        rows.append(r)
+    return Schedule(rows, len(steps))
+
+
+class Layout(NamedTuple):
+    prog: Program  # renumbered: slots of x and constants first, then one block per (step, opcode)
+    rows: list  # per opcode: (T, W_o) row indices of the renumbered program, -1 for padding
+    start: list  # per opcode: (T,) first slot of its block in each step
+    steps: int
+
+
+def layout(prog, sched=None):
+    """Renumber the slots so each step writes each opcode's results to one contiguous block.
+
+    An interpreter then stores a step's results with ``dynamic_update_slice``,
+    which XLA does in place inside a loop, where a scatter to scattered slots
+    copies the whole (batched) slot array every time. The block of opcode ``o``
+    in step ``t`` has ``W_o`` slots; padding rows write to the unused ones.
+    """
+    sched = sched or schedule(prog)
+    S = len(prog.const_val)
+    is_row = np.zeros(S, bool)
+    is_row[prog.out] = True
+    keep = np.flatnonzero(~is_row)  # x first (slots 0..n-1 are never row outputs), then constants
+    new = np.full(S, -1, np.int64)
+    new[keep] = np.arange(keep.size)
+    nxt = keep.size
+    start = [np.zeros(sched.steps, np.int64) for _ in sched.rows]
+    for t in range(sched.steps):
+        for o, r in enumerate(sched.rows):
+            start[o][t] = nxt
+            for i, k in enumerate(r[t]):
+                if k >= 0:
+                    new[prog.out[k]] = nxt + i
+            nxt += r.shape[1]
+    const_val = np.full(nxt, np.nan)
+    const_val[new[keep]] = prog.const_val[keep]
+    ids = {s: new[np.asarray(v)] for s, v in (prog.ids or {}).items()}
+    p2 = Program(prog.op, new[prog.a], new[prog.b], new[prog.out], const_val, prog.n, prog.opcodes,
+                 [new[o] for o in prog.outs], ids)  # fmt: skip
+    return Layout(p2, sched.rows, start, sched.steps)

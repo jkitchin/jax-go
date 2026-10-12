@@ -11,7 +11,7 @@ from jaxglobal.fbbt import make_tape
 from jaxglobal.relax import MC, eval_jaxpr_mc, relax
 from jaxglobal.relax_interp import make_taylor2
 from jaxglobal.univariate import find_blocks, make_relaxer, make_univariate
-from test_fbbt_interp import _has_switch, scalar_model
+from test_fbbt_interp import scalar_model
 
 
 def coupled(x):
@@ -135,16 +135,21 @@ def test_alphabb_uses_the_interpreted_hessian():
     _close(a[1], b[1], 1e-12)
 
 
-def test_interpreter_is_used_inside_the_bound_kernel():
+def test_interpreter_is_used_inside_the_bound_kernel(monkeypatch):
     """Like fbbt's: inside jit/vmap the relaxer must not fall back to the traced path."""
-    from jaxglobal.bnb import make_bounder
+    import jaxglobal.relax_interp as RI
 
+    calls = []
+    make = RI.make_mc
+
+    def spy(*a, **k):
+        run = make(*a, **k)
+        return None if run is None else (lambda *args: calls.append(1) or run(*args))
+
+    monkeypatch.setattr(RI, "make_mc", spy)
     B = jnp.zeros((4, 3))
-
-    def jaxpr(interpret):
+    for interpret in (False, True):
         R = make_relaxer(coupled, univariate=True, alphabb=True, interpret=interpret)
-        return jax.make_jaxpr(jax.jit(jax.vmap(lambda lo, hi: jax.value_and_grad(
-            lambda x: R(x, lo, hi, R.prepare(lo, hi)).cv)(0.5 * (lo + hi)))))(B, B + 1).jaxpr  # fmt: skip
-
-    assert _has_switch(jaxpr(True)) and not _has_switch(jaxpr(False))
-    assert make_bounder(coupled)  # the default bounder builds with the interpreter available
+        jax.make_jaxpr(jax.jit(jax.vmap(lambda lo, hi: jax.value_and_grad(
+            lambda x: R(x, lo, hi, R.prepare(lo, hi)).cv)(0.5 * (lo + hi)))))(B, B + 1)  # fmt: skip
+        assert bool(calls) == interpret

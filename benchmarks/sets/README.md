@@ -35,6 +35,8 @@ cache (`JAXGLOBAL_CACHE_DIR`), so it measures search without compilation.
 | FBBT interpreter, warm (`start50_interp_warm.csv`) | 20 | 0 | 27 | 3 | 29.2 |
 | + relaxation interpreter, cold (`start50_relax_cold.csv`) | 18 | 0 | 29 | 3 | 47.2 |
 | + relaxation interpreter, warm (`start50_relax_warm.csv`) | 21 | 0 | 26 | 3 | 30.5 |
+| + scheduled sweeps, cold (`start50_sched_cold.csv`) | 18 | 0 | 29 | 3 | 49.7 |
+| + scheduled sweeps, warm (`start50_sched_warm.csv`) | 22 | 0 | 25 | 3 | 28.5 |
 | SCIP (`baseline.csv`) | 44 | 1 | 5 | 0 | 1.9 |
 
 Most of the cold time is tracing and compiling the bounding kernels, whose
@@ -64,3 +66,15 @@ is therefore used only for functions of at least 600 rows
 `kriging_peaks-red030` (one 1,162-row function), which never finished
 compiling before, now solves cold in 40 s; its warm solve (35 s, 603 nodes) is
 bound by the interpreter's per-call cost.
+
+The interpreters then sweep step by step instead of row by row
+(`fbbt_interp.schedule` / `layout`: groups of independent rows, each step
+evaluating every opcode once, vectorized over its rows, and writing its results
+as one contiguous block so XLA updates the carried slot array in place). In a
+warm `kriging_peaks-red030` solve FBBT was 466 of the bound kernel's 519 ms per
+call (16 boxes); stepping brought it to 141 ms and the warm solve from 25.6 s
+to 8.1 s (603 nodes either way). Small tapes have only a few rows per step and
+were up to 2x slower that way for 256 boxes, so FBBT sweeps step by step from
+300 rows (`fbbt_interp.SCHEDULE_MIN_ROWS`) and row by row below; the relaxation
+interpreter (600+ rows) always steps. The `start50` difference (22 warm) is
+within run-to-run variation (load average ~50 during the runs).

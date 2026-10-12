@@ -5,8 +5,9 @@ and ``jax.grad`` / ``jax.jacfwd`` of the relaxation trace it again, so for a
 model read from an ``.nl`` file (fully scalar, ~1,000 operations) the bounding
 kernels have hundreds of thousands of equations and take minutes to compile.
 Here, as in ``fbbt_interp``, the tape is data: ``fbbt_interp.scalarize`` turns
-it into rows ``(opcode, a, b, out)`` and a ``lax.fori_loop`` with a
-``lax.switch`` on the opcode evaluates the rows in order.
+it into rows ``(opcode, a, b, out)``, ``fbbt_interp.schedule`` groups them
+into steps of independent rows, and a ``lax.fori_loop`` over the steps
+evaluates every opcode once per step, vectorized over that step's rows.
 
 Each slot carries ``MC(lo, hi, cv, cc)`` and, when derivatives are wanted, the
 gradients of ``cv`` and ``cc`` with respect to ``x`` (forward mode: ``(S, n)``
@@ -32,7 +33,7 @@ import numpy as np
 from jax import lax
 from jax.custom_derivatives import SymbolicZero
 
-from .fbbt_interp import scalarize, use_interpreter
+from .fbbt_interp import layout, scalarize, use_interpreter
 from .relax import MC, apply_rule, is_mc
 
 F64 = jnp.float64
@@ -87,6 +88,11 @@ def _branches(prog, ctx, grads):
     return out
 
 
+def _put(c, v, start):
+    """``c[start : start + len(v)] = v``."""
+    return lax.dynamic_update_slice_in_dim(c, v, start, 0)
+
+
 def _combine(cv, cc, cvh, cch, lo, hi):
     """``relax_with``'s use of a hull: intersect, then tighten."""
     cv = jnp.where(jnp.isnan(cv), cvh, jnp.maximum(cv, cvh))
@@ -120,12 +126,14 @@ def make_mc(tape, n, ctx, blocks=()):
     prog = scalarize(tape, n)
     if prog is None or len(prog.op) == 0 or len(tape.outs) != 1:
         return None
+    lay = layout(prog)
+    prog = lay.prog
     try:
         fwd, fwd_g = _branches(prog, ctx, False), _branches(prog, ctx, True)
     except Exception:
         return None
     K = len(prog.op)
-    op, A, B, OUT = (jnp.asarray(v) for v in (prog.op, prog.a, prog.b, prog.out))
+    A, B, OUT = (jnp.asarray(v) for v in (prog.a, prog.b, prog.out))
     hid_np, dep_np = _hull_rows(prog, tape, list(blocks), K)
     HID = jnp.asarray(hid_np)
     has_hull = bool((hid_np >= 0).any())
@@ -151,54 +159,61 @@ def make_mc(tape, n, ctx, blocks=()):
         onehot = jax.nn.one_hot(dep, n, dtype=F64)
         return vals, (pad(dcv[:, None] * onehot, 0.0), pad(dcc[:, None] * onehot, 0.0))
 
+    R = [jnp.asarray(r) for r in lay.rows]
+    START = [jnp.asarray(st) for st in lay.start]
+    S = cval.shape[0]
+
+    def finish(r, G, j, hv, hg):
+        """One row's result, intersected with its hull element ``j`` (``-1``: none)."""
+        lo_, hi_, cv, cc = r[0], r[1], r[2], r[3]
+        lo_, hi_ = jnp.maximum(lo_, hv[0][j]), jnp.minimum(hi_, hv[1][j])
+        on = j >= 0
+        if G is not None:
+            w, lin = jax.linearize(lambda u: _combine(u[0], u[1], u[2], u[3], lo_, hi_),
+                                   jnp.stack([cv, cc, hv[2][j], hv[3][j]]))  # fmt: skip
+            Jh = jax.vmap(lin, out_axes=1)(jnp.eye(4, dtype=F64))
+            G = jnp.where(on, Jh @ jnp.concatenate([G, jnp.stack([hg[0][j], hg[1][j]])]), G)
+        else:
+            w = _combine(cv, cc, hv[2][j], hv[3][j], lo_, hi_)
+        return jnp.stack([lo_, hi_, jnp.where(on, w[0], cv), jnp.where(on, w[1], cc)]), G
+
     def sweep(x, lo, hi, hull, grads):
         x, lo, hi = (jnp.asarray(v, F64) for v in (x, lo, hi))
-        L = jnp.where(is_c, cval, 0.0).at[:n].set(lo)
-        H = jnp.where(is_c, cval, 0.0).at[:n].set(hi)
-        CV = jnp.where(is_c, cval, 0.0).at[:n].set(x)
-        CC = CV
+        base = jnp.where(is_c, cval, 0.0)
+        # (S, 4) columns lo, hi, cv, cc: one 2-D array per box, which XLA updates in place in the
+        # loop (four (S,) arrays were each copied every step under vmap)
+        V = jnp.stack([base.at[:n].set(lo), base.at[:n].set(hi), base.at[:n].set(x), base.at[:n].set(x)], axis=1)
         use_hull = has_hull and hull is not None
         if use_hull:
             hv, hg = hull_values(x, hull, grads)
-        if grads:
-            S = cval.shape[0]
+        if grads:  # columns: lo, hi, cv, cc, d cv / dx (n), d cc / dx (n)
             GV = jnp.zeros((S, n), F64).at[:n].set(jnp.eye(n, dtype=F64))
-            GC = GV
+            V = jnp.concatenate([V, GV, GV], axis=1)
 
-        def step(k, c):
-            a, b, o = A[k], B[k], OUT[k]
-            ins = (c[0][a], c[1][a], c[2][a], c[3][a], c[0][b], c[1][b], c[2][b], c[3][b])
-            if grads:
-                T = jnp.stack([c[4][a], c[5][a], c[4][b], c[5][b]])
-                r, G = lax.switch(op[k], fwd_g, *ins, T)
-            else:
-                r = lax.switch(op[k], fwd, *ins)
-            lo_, hi_, cv, cc = r[0], r[1], r[2], r[3]
-            if use_hull:
-                j = HID[k]
-                lo_, hi_ = jnp.maximum(lo_, hv[0][j]), jnp.minimum(hi_, hv[1][j])
+        def step(t, V):
+            # the rows of a step are independent: read everything from the carry first, then write
+            # it once (the step's blocks are adjacent), so XLA can update the carry in place
+            rs = []
+            for o in range(len(R)):  # every opcode once, vectorized over its rows of the step
+                k = jnp.maximum(R[o][t], 0)
+                va, vb = V[A[k]], V[B[k]]
+                ins = (va[:, 0], va[:, 1], va[:, 2], va[:, 3], vb[:, 0], vb[:, 1], vb[:, 2], vb[:, 3])
                 if grads:
-                    w, lin = jax.linearize(lambda u: _combine(u[0], u[1], u[2], u[3], lo_, hi_),
-                                           jnp.stack([cv, cc, hv[2][j], hv[3][j]]))  # fmt: skip
-                    Jh = jax.vmap(lin, out_axes=1)(jnp.eye(4, dtype=F64))
-                    Gh = Jh @ jnp.concatenate([G, jnp.stack([hg[0][j], hg[1][j]])])
-                    on = j >= 0
-                    G = jnp.where(on, Gh, G)
+                    T = jnp.stack([va[:, 4:4 + n], va[:, 4 + n:], vb[:, 4:4 + n], vb[:, 4 + n:]], axis=1)
+                    r, G = jax.vmap(fwd_g[o])(*ins, T)
                 else:
-                    w = _combine(cv, cc, hv[2][j], hv[3][j], lo_, hi_)
-                on = j >= 0
-                cv, cc = jnp.where(on, w[0], cv), jnp.where(on, w[1], cc)
-            new = [c[0].at[o].set(lo_), c[1].at[o].set(hi_), c[2].at[o].set(cv), c[3].at[o].set(cc)]
-            if grads:
-                new += [c[4].at[o].set(G[0]), c[5].at[o].set(G[1])]
-            return tuple(new)
+                    r, G = jax.vmap(fwd[o])(*ins), None
+                if use_hull:
+                    r, G = jax.vmap(lambda r, G, j: finish(r, G, j, hv, hg),
+                                    in_axes=(0, 0 if grads else None, 0))(r, G, HID[k])  # fmt: skip
+                rs.append(jnp.concatenate([r, G[:, 0], G[:, 1]], axis=1) if grads else r)
+            return _put(V, jnp.concatenate(rs), START[0][t])
 
-        init = (L, H, CV, CC) + ((GV, GC) if grads else ())
-        res = lax.fori_loop(0, K, step, init)
-        m = tuple(jnp.reshape(v[out_ids], out_shape) for v in res[:4])
+        V = lax.fori_loop(0, lay.steps, step, V)[out_ids]
+        m = tuple(jnp.reshape(V[:, i], out_shape) for i in range(4))
         if not grads:
             return m
-        return m, tuple(jnp.reshape(v[out_ids], out_shape + (n,)) for v in res[4:])
+        return m, (jnp.reshape(V[:, 4:4 + n], out_shape + (n,)), jnp.reshape(V[:, 4 + n:], out_shape + (n,)))
 
     @jax.custom_jvp
     def mc(x, lo, hi, hull):
@@ -293,6 +308,8 @@ def make_taylor2(tape, n, ictx, d):
     prog = scalarize(tape, n)
     if prog is None or len(prog.op) == 0:
         return None
+    lay = layout(prog)
+    prog = lay.prog
     zs, zg, zH = jnp.zeros((), F64), jnp.zeros((d,), F64), jnp.zeros((d, d), F64)
     branches = []
     for name, _, same, ca, cb, n_in, eqn in prog.opcodes:
@@ -323,28 +340,37 @@ def make_taylor2(tape, n, ictx, d):
             return None
         branches.append(br)
 
-    K = len(prog.op)
-    op, A, B, OUT = (jnp.asarray(v) for v in (prog.op, prog.a, prog.b, prog.out))
+    A, B, OUT = (jnp.asarray(v) for v in (prog.a, prog.b, prog.out))
     cval = jnp.asarray(np.nan_to_num(prog.const_val, nan=0.0))
     is_c = jnp.asarray(~np.isnan(prog.const_val))
     S = cval.shape[0]
+    R = [jnp.asarray(r) for r in lay.rows]
+    START = [jnp.asarray(st) for st in lay.start]
+
+    # packed columns: value lo, hi; gradient lo, hi; Hessian lo, hi
+    cuts = np.cumsum([0, 1, 1, d, d, d * d, d * d])
+    shapes = [(), (), (d,), (d,), (d, d), (d, d)]
+
+    def unpack(v):  # (W, w) -> the six branch arguments
+        return [jnp.reshape(v[:, cuts[i]:cuts[i + 1]], (-1,) + shapes[i]) for i in range(6)]
 
     def taylor(lo, hi, E):
         lo, hi, E = (jnp.asarray(v, F64) for v in (lo, hi, E))
-        Vl = jnp.where(is_c, cval, 0.0).at[:n].set(lo)
-        Vh = jnp.where(is_c, cval, 0.0).at[:n].set(hi)
+        base = jnp.where(is_c, cval, 0.0)
         G = jnp.zeros((S, d), F64).at[:n].set(E)
-        Hz = jnp.zeros((S, d, d), F64)
+        Hz = jnp.zeros((S, d * d), F64)
+        V = jnp.concatenate([base.at[:n].set(lo)[:, None], base.at[:n].set(hi)[:, None], G, G, Hz, Hz], axis=1)
 
-        def step(k, c):
-            a, b, o = A[k], B[k], OUT[k]
-            ins = []
-            for s in (a, b):
-                ins += [c[0][s], c[1][s], c[2][s], c[3][s], c[4][s], c[5][s]]
-            r = lax.switch(op[k], branches, *ins)
-            return tuple(ci.at[o].set(ri) for ci, ri in zip(c, r))
+        def step(t, V):  # read, then one in-place write of the packed carry (see make_mc)
+            rs = []
+            for o in range(len(R)):
+                k = jnp.maximum(R[o][t], 0)
+                r = jax.vmap(branches[o])(*unpack(V[A[k]]), *unpack(V[B[k]]))
+                rs.append(jnp.concatenate([jnp.reshape(ri, (ri.shape[0], -1)) for ri in r], axis=1))
+            return _put(V, jnp.concatenate(rs), START[0][t])
 
-        return lax.fori_loop(0, K, step, (Vl, Vh, G, G, Hz, Hz))
+        V = lax.fori_loop(0, lay.steps, step, V)
+        return tuple(jnp.reshape(V[:, cuts[i]:cuts[i + 1]], (S,) + shapes[i]) for i in range(6))
 
     taylor.program = prog
     return taylor
