@@ -31,6 +31,8 @@ cache (`JAXGLOBAL_CACHE_DIR`), so it measures search without compilation.
 | jax 0.11, loaded machine (`start50.csv`) | 12 | 0 | 36 | 2 | 53.5 |
 | cold (`start50_cold.csv`) | 12 | 0 | 36 | 2 | 50.5 |
 | warm (`start50_warm.csv`) | 18 | 0 | 30 | 2 | 32.1 |
+| FBBT interpreter, cold (`start50_interp_cold.csv`) | 15 | 0 | 32 | 3 | 48.3 |
+| FBBT interpreter, warm (`start50_interp_warm.csv`) | 20 | 0 | 27 | 3 | 29.2 |
 | SCIP (`baseline.csv`) | 44 | 1 | 5 | 0 | 1.9 |
 
 Most of the cold time is tracing and compiling the bounding kernels, whose
@@ -39,3 +41,9 @@ model of 1,166 operations gives a 500,000-equation bound kernel). In the cold
 and warm runs five instances with unbounded variables were killed by the
 runner while `bound_domain` compiled its FBBT kernel; the time limit now covers
 that phase too.
+
+With the FBBT tape interpreter (`jaxglobal/fbbt_interp.py`) FBBT's compile
+time no longer grows with the model; new solves include `ex5_3_2` (22
+variables) and `pooling_foulds2tp` (36). The relaxation and LP kernels are
+still compiled straight-line and now dominate the cold time (kriging still
+does not finish compiling within the limit).
