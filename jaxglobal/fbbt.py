@@ -723,18 +723,36 @@ def propagate(tape, lo, hi, out_bounds, rounds, safe=False):
     return vals, empty | e
 
 
-def make_fbbt(f, ineq=None, eq=None, rounds=5, feas_tol=1e-6, safe=False):
+def make_fbbt(f, ineq=None, eq=None, rounds=5, feas_tol=1e-6, safe=False, interpret="auto"):
     """Return ``fbbt(lo, hi, cutoff) -> (lo, hi, infeasible)`` for one box.
 
     The returned box contains every point of ``[lo, hi]`` with
     ``f(x) <= cutoff``, ``ineq(x) <= feas_tol`` and ``|eq(x)| <= feas_tol``.
     ``infeasible`` means no such point exists.
+
+    ``interpret``: ``"auto"`` runs large, mostly scalar tapes (models read from
+    ``.nl`` files) through the tape interpreter of ``fbbt_interp``, whose
+    compile time does not grow with the model; ``True`` / ``False`` force it
+    on (when the tape can be scalarized) / off.
     """
 
     tape_of = tape_cache(lambda x: (joint_tape(f, ineq, eq, x),))
+    interp = {}
+
+    def interpreted(tape, n):
+        if n not in interp:
+            from .fbbt_interp import make_propagate, use_interpreter
+
+            on = interpret is True or (interpret == "auto" and use_interpreter(tape, n))
+            interp[n] = make_propagate(tape, ineq, eq, n, feas_tol, rounds, safe) if on else None
+        return interp[n]
 
     def fbbt(lo, hi, cutoff=INF):
         (tape,) = tape_of(lo)
+        if interpret is not False and jnp.ndim(lo) == 1 and not _has_tracer(tape):
+            run = interpreted(tape, lo.shape[0])
+            if run is not None:
+                return run(lo, hi, cutoff)
         ob = output_bounds(tape, ineq, eq, jnp.asarray(cutoff, lo.dtype), feas_tol)
         vals, empty = propagate(tape, lo, hi, ob, rounds, safe)
         x = vals[0]
