@@ -35,7 +35,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from .fbbt import Const, make_tape, tape_cache
+from .fbbt import Const, _has_tracer, make_tape, tape_cache
 from .relax import MC, SAFE_K, Ctx, eval_jaxpr_mc, is_mc
 
 INTERVAL_CTX = Ctx(interval_only=True)
@@ -57,7 +57,10 @@ def is_smooth(tape):
     return True
 
 
-def make_alphabb(fn, eigen=True, safe=False):
+TAYLOR_BUDGET = 30_000  # slots * n**2: the interpreted Hessian keeps every slot's (n, n) interval Hessian
+
+
+def make_alphabb(fn, eigen=True, safe=False, interpret="auto"):
     """Return ``prepare(lo, hi) -> (a, b)`` and ``apply(x, lo, hi, data) -> (cv, cc)``.
 
     With ``safe`` the interval Hessian is outward-rounded, alpha is enlarged by
@@ -69,6 +72,11 @@ def make_alphabb(fn, eigen=True, safe=False):
     ``fn`` maps a 1-D array to an array; outputs are flattened to ``(m,)``,
     ``a`` and ``b`` have shape ``(m, n)``. ``prepare`` returns ``None`` when
     ``fn`` is not smooth (then ``apply`` is never needed).
+
+    ``interpret`` (``"auto"``, True, False): get the interval Hessian from the
+    second-order tape interpreter ``relax_interp.make_taylor2`` instead of
+    tracing ``jacfwd(jacfwd(fn))`` (large scalar tapes whose per-slot Hessians
+    fit ``TAYLOR_BUDGET``).
     """
 
     ictx = SAFE_INTERVAL_CTX if safe else INTERVAL_CTX
@@ -83,18 +91,43 @@ def make_alphabb(fn, eigen=True, safe=False):
         with jax.ensure_compile_time_eval():
             return tape, is_smooth(tape)
 
+    taylors = {}
+
+    def taylor(tape, lo):
+        """The interpreted interval Hessian of ``tape`` (cached), or None."""
+        if interpret is False or jnp.ndim(lo) != 1 or _has_tracer(tape):
+            return None
+        if id(tape) not in taylors:
+            from .relax_interp import make_taylor2, use_relax_interpreter
+
+            n = lo.shape[0]
+            run = None
+            if interpret is True or use_relax_interpreter(tape, n):
+                with jax.ensure_compile_time_eval():
+                    run = make_taylor2(tape, n, ictx, n)
+                if run is not None and interpret is not True and run.program.const_val.size * n * n > TAYLOR_BUDGET:
+                    run = None
+            taylors[id(tape)] = (tape, run)
+        return taylors[id(tape)][1]
+
     def prepare(lo, hi):
-        _, smooth = smoothness(lo)
+        tape, smooth = smoothness(lo)
         if not smooth:
             return None
-        try:
-            closed = jax.make_jaxpr(jax.jacfwd(jax.jacfwd(flat)))(lo)
-            (H,) = eval_jaxpr_mc(closed.jaxpr, closed.consts, [MC(lo, hi, lo, hi)], ictx)
-        except NotImplementedError:
-            return None
-        H = H if is_mc(H) else MC(H, H, H, H)
         n = lo.size
         m = jnp.size(flat(lo))
+        run = taylor(tape, lo)
+        if run is not None:
+            ids = jnp.asarray(run.program.outs[0])
+            r = run(lo, hi, jnp.eye(n, dtype=lo.dtype))
+            H = MC(r[4][ids], r[5][ids], r[4][ids], r[5][ids])
+        else:
+            try:
+                closed = jax.make_jaxpr(jax.jacfwd(jax.jacfwd(flat)))(lo)
+                (H,) = eval_jaxpr_mc(closed.jaxpr, closed.consts, [MC(lo, hi, lo, hi)], ictx)
+            except NotImplementedError:
+                return None
+            H = H if is_mc(H) else MC(H, H, H, H)
         hlo = jnp.broadcast_to(H.lo, (m, n, n))
         hhi = jnp.broadcast_to(H.hi, (m, n, n))
         hlo = jnp.where(jnp.isnan(hlo), -jnp.inf, hlo)

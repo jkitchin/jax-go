@@ -34,7 +34,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from .fbbt import Const, make_tape, tape_cache
+from .fbbt import Const, _has_tracer, make_tape, tape_cache
 from .relax import AUTO_UNIVARIATE, MC, RULES, SAFE_K, STRUCTURAL, Ctx, Unknown, apply_rule, eval_jaxpr_mc, is_mc, tighten
 
 INTERVAL_CTX = Ctx(interval_only=True)
@@ -233,15 +233,49 @@ def _lines(X, G, upper):
     return jnp.where(bad, 0.0, s), jnp.where(bad, -jnp.inf if not upper else jnp.inf, b)
 
 
-def make_univariate(f, K=65, multivariate=False, safe=False):
+def _interpreters(ctx, interpret):
+    """``get(tape, blocks, x)``: the ``relax_interp`` relaxation of ``tape`` (cached per tape), or None."""
+    cache = {}
+
+    def get(tape, blocks, x):
+        if interpret is False or jnp.ndim(x) != 1 or _has_tracer(tape):
+            return None
+        if id(tape) not in cache:
+            from .relax_interp import interpreted
+
+            cache[id(tape)] = (tape, interpreted(tape, x.shape[0], ctx, blocks, interpret))
+        return cache[id(tape)][1]
+
+    return get
+
+
+def make_univariate(f, K=65, multivariate=False, safe=False, interpret="auto"):
     """Return ``prepare(lo, hi) -> data`` and ``relax_with(x, lo, hi, data) -> MC``.
 
     With ``safe`` the grid values come from outward-rounded interval evaluation,
     the curvature bounds from outward-rounded interval arithmetic, and the hull
     lines are lowered (raised) by the rounding error of evaluating them.
+    ``interpret`` (``"auto"``, True, False): evaluate ``relax_with`` with the
+    tape interpreter of ``relax_interp`` (large scalar tapes, see ``relax_interp.MIN_ROWS``).
     """
     ctx = Ctx(interval_only=False, multivariate=multivariate, safe=safe)
     ictx = SAFE_INTERVAL_CTX if safe else INTERVAL_CTX
+    interpreter = _interpreters(ctx, interpret)
+    taylors = {}
+
+    def taylor(tape, blocks, x):
+        """``relax_interp.make_taylor2`` of ``tape`` along one direction (cached), or None."""
+        if interpret is False or jnp.ndim(x) != 1 or _has_tracer(tape):
+            return None
+        if id(tape) not in taylors:
+            from .relax_interp import make_taylor2, use_relax_interpreter
+
+            run = None
+            if interpret is True or use_relax_interpreter(tape, x.shape[0]):
+                with jax.ensure_compile_time_eval():
+                    run = make_taylor2(tape, x.shape[0], ictx, 1)
+            taylors[id(tape)] = (tape, run)
+        return taylors[id(tape)][1]
 
     @tape_cache
     def setup(x):
@@ -267,12 +301,21 @@ def make_univariate(f, K=65, multivariate=False, safe=False):
             return jax.jvp(lambda z: jax.jvp(fn, (z,), (jnp.ones_like(z),))[1], (z,), (jnp.ones_like(z),))[1]
 
         try:
-            closed = jax.make_jaxpr(d2)(lo)
+            run = taylor(tape, blocks, lo)
+            if run is not None:  # interpreted: g'' of every slot along the all-ones direction
+                ids = jnp.asarray(np.concatenate([np.asarray(run.program.ids[b.slot]).reshape(-1) for b in blocks]))
+                ones = jnp.ones((lo.size, 1), lo.dtype)
 
-            def cell(a, b):
-                (out,) = eval_jaxpr_mc(closed.jaxpr, closed.consts, [MC(a, b, a, b)], ictx)
-                out = out if is_mc(out) else MC(out, out, out, out)
-                return jnp.broadcast_to(out.lo, (dep.size,)), jnp.broadcast_to(out.hi, (dep.size,))
+                def cell(a, b):
+                    r = run(a, b, ones)
+                    return r[4][ids, 0, 0], r[5][ids, 0, 0]
+            else:
+                closed = jax.make_jaxpr(d2)(lo)
+
+                def cell(a, b):
+                    (out,) = eval_jaxpr_mc(closed.jaxpr, closed.consts, [MC(a, b, a, b)], ictx)
+                    out = out if is_mc(out) else MC(out, out, out, out)
+                    return jnp.broadcast_to(out.lo, (dep.size,)), jnp.broadcast_to(out.hi, (dep.size,))
 
             dlo, dhi = jax.vmap(lambda t0, t1: cell(lo + t0 * w, lo + t1 * w))(ts[:-1], ts[1:])  # (K-1, m)
             dlo, dhi = dlo.T, dhi.T
@@ -311,6 +354,9 @@ def make_univariate(f, K=65, multivariate=False, safe=False):
 
     def relax_with(x, lo, hi, data):
         tape, blocks = setup(x)
+        run = interpreter(tape, blocks, x)
+        if run is not None:
+            return run(x, lo, hi, data if blocks else None)
         override = {}
         k = 0
         for b in blocks:
@@ -375,7 +421,7 @@ class Relaxer(NamedTuple):
         return self.call(x, lo, hi, data)
 
 
-def make_relaxer(fn, univariate=True, alphabb=False, K=65, multivariate=False, safe=False):
+def make_relaxer(fn, univariate=True, alphabb=False, K=65, multivariate=False, safe=False, interpret="auto"):
     """Relaxation of ``fn``: McCormick, optionally tightened by univariate hull
     envelopes (``univariate``) and whole-function scaled-Gershgorin alphaBB
     (``alphabb``, smooth ``fn`` only; ``alphabb="eigen"`` adds the eigenvalue
@@ -384,13 +430,20 @@ def make_relaxer(fn, univariate=True, alphabb=False, K=65, multivariate=False, s
     from .relax import relax
 
     if univariate:
-        uprep, ucall = make_univariate(fn, K, multivariate, safe)
+        uprep, ucall = make_univariate(fn, K, multivariate, safe, interpret)
     else:
         rf = relax(fn, multivariate, safe)
-        uprep, ucall = (lambda lo, hi: None), (lambda x, lo, hi, data: rf(x, lo, hi))
+        interpreter = _interpreters(Ctx(multivariate=multivariate, safe=safe), interpret)
+        tape_of = tape_cache(lambda x: (make_tape(fn, x),))
+
+        def ucall(x, lo, hi, data):
+            run = interpreter(tape_of(x)[0], (), x) if interpret is not False else None
+            return run(x, lo, hi) if run is not None else rf(x, lo, hi)
+
+        uprep = lambda lo, hi: None  # noqa: E731
     if not alphabb:
         return Relaxer(uprep, ucall)
-    aprep, aapply = make_alphabb(fn, eigen=alphabb == "eigen", safe=safe)
+    aprep, aapply = make_alphabb(fn, eigen=alphabb == "eigen", safe=safe, interpret=interpret)
 
     def prepare(lo, hi):
         return uprep(lo, hi), aprep(lo, hi)

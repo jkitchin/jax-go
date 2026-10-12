@@ -53,6 +53,7 @@ class Program(NamedTuple):
     n: int  # the first n slots are x
     opcodes: list  # (name, params, same, const_a, const_b, n_in, eqn) per opcode
     outs: list  # slot ids (np arrays) of the tape outputs
+    ids: dict = None  # tape slot -> array of scalar slot ids (its shape)
 
 
 def scalarize(tape, n):
@@ -130,7 +131,7 @@ def _scalarize(tape, n):
         else:
             outs.append(np.asarray(ids[a]).reshape(-1))
     r = np.asarray(rows, np.int64).reshape(-1, 4)
-    return Program(r[:, 0], r[:, 1], r[:, 2], r[:, 3], np.asarray(const_val, np.float64), n, opcodes, outs)
+    return Program(r[:, 0], r[:, 1], r[:, 2], r[:, 3], np.asarray(const_val, np.float64), n, opcodes, outs, ids)
 
 
 def _branches(prog, safe):
