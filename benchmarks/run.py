@@ -228,7 +228,11 @@ def main():
     ap.add_argument("--worker", help=argparse.SUPPRESS)
     a = ap.parse_args()
     if a.worker:
-        print(TAG + json.dumps(worker(a.worker, a.time_limit)))
+        print(TAG + json.dumps(worker(a.worker, a.time_limit)), flush=True)
+        # exit now: a kernel still compiling in the background (abandoned at the time limit)
+        # would otherwise hold the process open until the runner kills it and loses the result
+        sys.stdout.flush()
+        os._exit(0)
         return
 
     out = HERE / "results" / f"{a.tag}.csv"

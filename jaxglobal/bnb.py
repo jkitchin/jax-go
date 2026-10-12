@@ -155,6 +155,10 @@ def _pools():
     return _POOLS
 
 
+class _CompileTimeout(Exception):
+    """A kernel was still being traced or compiled when ``minimize``'s time limit ran out."""
+
+
 class _Precompiled:
     """A jitted batch kernel plus executables compiled ahead of time in the background.
 
@@ -205,14 +209,22 @@ class _Precompiled:
                 return jax.jit(exp.call).trace(*args).lower()
         return self.jitted.trace(*args).lower()
 
-    def __call__(self, *args):
+    def __call__(self, *args, deadline=None):
+        """Run on ``args``; with a started shape, wait for its executable until ``deadline``
+        (a ``time.perf_counter()`` value), else raise ``_CompileTimeout``."""
         key = self._key(args)
         fut = self.ready.get(key)
         if fut is not None:
+            wait = None if deadline is None or not np.isfinite(deadline) else max(deadline - time.perf_counter(), 0.0)
             try:
-                return fut.result().result()(*args)
+                compiled = fut.result(timeout=wait)
+                compiled = compiled.result(timeout=None if wait is None else max(deadline - time.perf_counter(), 0.0))
+            except TimeoutError:
+                raise _CompileTimeout(self.name) from None
             except Exception:  # let jit raise (or succeed) with its usual traceback
                 del self.ready[key]
+            else:
+                return compiled(*args)
         return self.jitted(*args)
 
 
@@ -455,8 +467,10 @@ def minimize(
     A point is accepted as feasible when ``ineq <= feas_tol`` and ``|eq| <= feas_tol``.
     ``local_solver`` picks the upper-bounding local NLP solver: ``"pounce"``,
     ``"optax"`` (pure JAX), ``"scipy"``, or ``"auto"`` (pounce if installed).
-    The search stops with status ``"time_limit"`` after ``time_limit`` seconds
-    (checked between batches, so compile time counts).
+    The search stops with status ``"time_limit"`` after ``time_limit`` seconds,
+    counted from the call: tracing and compiling the bounding kernels count, and
+    if they are not ready in time the result has no bound (``lower_bound=-inf``)
+    and ``message`` says so.
 
     Bounds may be infinite: finite ones are derived first from the constraints,
     unused variables, and FBBT against a feasible point found by local solves
@@ -582,8 +596,10 @@ def minimize(
 
     def run(kernel, calls, cutoff, k):
         """Apply ``kernel`` to each padded call (dispatched before any result is read); first ``k`` rows."""
-        fn = kernel.jitted if padded.mesh is not None else kernel  # sharded calls compile through jit
-        outs = [fn(*c, cutoff) for c in calls]
+        if padded.mesh is not None:  # sharded calls compile through jit (synchronously, no deadline)
+            outs = [kernel.jitted(*c, cutoff) for c in calls]
+        else:
+            outs = [kernel(*c, cutoff, deadline=t0 + time_limit) for c in calls]
         return [np.concatenate([np.asarray(o[i]) for o in outs])[:k] for i in range(len(outs[0]))]
 
     def evaluate(blo, bhi, with_obbt=False):
@@ -633,16 +649,29 @@ def minimize(
     def tol():
         return max(abs_tol, rel_tol * abs(ub)) if np.isfinite(ub) else abs_tol
 
-    lb, xc, fc, rlo, rhi, rxr = evaluate(lo[None], hi[None])
+    try:
+        lb, xc, fc, rlo, rhi, rxr = evaluate(lo[None], hi[None])
+    except _CompileTimeout as e:  # no bound at all yet: report what is known
+        xbest = np.asarray(xbest)
+        maxv, verified, _ = _verify(f, ineq, eq, xbest, ub, lo_user, hi_user, feas_tol)
+        return Result(x=xbest, fun=ub, lower_bound=-np.inf, converged=False, iterations=0, nodes=0,
+                      evaluations=evaluations, time=time.perf_counter() - t0, status="time_limit",
+                      message=f"time_limit reached while compiling the '{e}' kernel; no bound computed",
+                      max_violation=maxv, verified=verified)  # fmt: skip
     update_incumbent(xc, fc, lb)
     if obbt and (constrained or np.isfinite(ub)) and not (ub - float(lb.min()) <= tol()):
         # root OBBT once an incumbent cutoff is known (it is useless without
         # one when there are no constraints), and not when the root bound has
         # already closed the gap (the search ends at once; OBBT would only
         # cost its own trace and compilation)
-        lb2, xc, fc, rlo, rhi, rxr = evaluate(rlo, rhi, with_obbt=True)
-        lb = np.maximum(lb, lb2)
-        update_incumbent(xc, fc, lb)
+        try:
+            lb2, xc, fc, rlo2, rhi2, rxr2 = evaluate(rlo, rhi, with_obbt=True)
+        except _CompileTimeout:  # the root bound stands; the search loop then stops on the time limit
+            pass
+        else:
+            rlo, rhi, rxr = rlo2, rhi2, rxr2
+            lb = np.maximum(lb, lb2)
+            update_incumbent(xc, fc, lb)
     open_lo, open_hi, open_lb, open_xr = rlo, rhi, lb, rxr
     sumL, sumR, cnt = np.zeros(lo.size), np.zeros(lo.size), np.zeros(lo.size)  # pseudocost sums, observations
 
@@ -765,7 +794,10 @@ def minimize(
         clo = np.concatenate([plo[pp], right_lo])
         chi = np.concatenate([left_hi, phi[pp]])
 
-        clb, cx, cf, clo, chi, cxr = evaluate(clo, chi, with_obbt=obbt == "tree")
+        try:
+            clb, cx, cf, clo, chi, cxr = evaluate(clo, chi, with_obbt=obbt == "tree")
+        except _CompileTimeout:  # out of time while a kernel compiles; the open boxes are unchanged
+            break
         update_incumbent(cx, cf, clb)
         if branch_var != "width":
             # pseudocost observations: bound gain per squared relative width
