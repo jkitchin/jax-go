@@ -600,7 +600,8 @@ as a branching point (it is a box vertex).
 ### Phase 6 — integers and rigor (later)
 
 - **Integer variables:** branch on integrality alongside spatial branching,
-  giving MINLP. Mostly B&B bookkeeping; relaxations are unchanged.
+  giving MINLP. Relaxations are unchanged; the work is box rounding, integer
+  branching and incumbent search. Detailed plan: *Integers: plan* below.
 - **Correctness status (implemented):** `minimize(..., safe=True)` rounds every
   quantity that feeds a lower bound outward by one mechanism at the
   primitive-dispatch level (`relax.apply_rule` widens each primitive's
@@ -636,6 +637,168 @@ as a branching point (it is a box vertex).
 - **Rigorous mode (remaining):** directed rounding in interval and LP-bound computations.
   JAX has no rounding-mode control, so this means outward-rounding by 1 ulp per
   operation (`nextafter`) and a Neumaier–Shcherbina correction of the LP bound.
+
+### Integers: plan
+
+**Goal.** Solve MINLPs of modest size natively: up to about 50 variables, of
+which up to about 30 are binary or general integer, including integers that
+enter nonlinear terms. MINLPLib has 220 such instances (no semicontinuous or
+SOS variables, `.nl` available): 193 with a reference solution closed to 1e-4,
+106 convex, 125 with general integers, and 166 with integers inside nonlinear
+terms (counts from `instancedata.csv`). Within 100 variables there are 328.
+
+**Approach.** Integrality is a property of boxes, so it fits the existing
+spatial B&B. The continuous relaxation of a box is still a valid bound, so
+FBBT, the McCormick/alphaBB relaxations, the LP and its certificate, OBBT and
+batching are unchanged. Integer logic goes in two places only: host-side
+bookkeeping in `bnb.py` (branching, incumbents, termination), and a static
+integer mask inside the node kernel (bound rounding), which keeps every
+kernel shape fixed. External MILP machinery (HiGHS, SCIP) stays out: HiGHS has
+no nonlinear relaxation, and SCIP as the host would bound one node per
+callback and lose batching. SCIP as the host is the fallback only if
+combinatorial instances (many binaries in big-M constraints) turn out to
+matter, since the plan below has no MILP cutting planes.
+
+**Stage 0: stop silent relaxation (1 day).** `read_nl` parses integer models
+but only counts the integers (`NLModel.n_int`), and nothing checks the count.
+So `minimize` on a MINLP `.nl` file solves the continuous relaxation and can
+report it as `optimal`. Until stage 2 lands, make `read_nl` raise `NLError`
+for `n_int > 0` unless the caller asks for the relaxation explicitly.
+
+**Stage 1: model, reader and harness (2 to 3 days).**
+
+1. `minimize(..., integer=None)` takes a boolean mask or index array. Integer
+   bounds are rounded on entry, `lo = ceil(lo - int_tol)` and
+   `hi = floor(hi + int_tol)`, after `bound_domain` for unbounded ones;
+   `lo > hi` returns `infeasible`. `_verify` also checks
+   `|x_j - round(x_j)| <= int_tol` (`int_tol = 1e-6`), and the returned `x` has
+   its integer entries rounded exactly before verification.
+2. The `.nl` reader returns the mask. In Gay's variable ordering the integer
+   variables are the last ones of each block: the last `nlvbi` of the
+   variables nonlinear in both constraints and objectives, the last `nlvci` of
+   those nonlinear in constraints only, the last `nlvoi` of those nonlinear in
+   the objective only, then the `nbv` linear binaries and the `niv` linear
+   integers at the end. A test checks the mask against the `Binary
+   Variables` / `Integer Variables` declarations of the `.gms` files for all
+   220 instances.
+3. The mask goes into the kernel cache key and the disk fingerprint
+   (`_Kernels`, `kcache.fingerprint`), since stage 2 compiles it into the
+   node kernel.
+4. `benchmarks/minlplib/fetch.py` gets a second selection (discrete, at most
+   50 variables, `.nl` available, no semicontinuous/SOS) written to
+   `instances_int.csv`. `run.py` and `report.py` read it, and `run.py` passes
+   the mask. A set file `benchmarks/sets/int50.txt` takes 50 of them,
+   stratified by number of integers (1 to 5, 6 to 10, 11 to 20, 21 to 50),
+   binary versus general integer, and convex versus not, with at most 3 per
+   family.
+
+**Stage 2: correct and complete integer B&B (1 week).**
+
+1. *Rounding in the node kernel.* After FBBT, after the duality-based range
+   reduction (`reduce_ranges`) and after OBBT, round the masked bounds inward
+   as above, and mark the box empty if `lo > hi`. The mask is static, so this
+   is a closure in `node` / `node_obbt` with no shape change. `int_tol` must
+   exceed FBBT's relative padding (1e-10) and the 1e-9 slack of
+   `reduce_ranges`, so rounding never removes an integer point that floating
+   point nudged past a bound.
+2. *Integer branching.* For an integer variable with `lo < hi`, split at
+   `p = floor(v)` with `v` the relaxation point `xr_j` clipped to
+   `[lo, hi - 1]`, or `floor((lo + hi) / 2)` when `xr_j` is integral. The
+   children are `[lo, p]` and `[p + 1, hi]`. In the child construction
+   (`bnb.py`, after the variable choice) this is `right_lo = pt + 1` for
+   integer variables. A fixed variable (`lo == hi`) is never a candidate,
+   which already holds (`branchable & (phi > plo)`).
+3. *Variable choice.* The first rule: integer variables whose `xr_j` is
+   fractional by more than `int_tol`, most fractional first, and spatial
+   branching on continuous variables otherwise. The pseudocost and strong
+   rules then work unchanged, except that an integer split's gain is
+   normalized per unit of fractionality (as in MIP pseudocosts), not per
+   squared relative width.
+4. *Termination.* A box whose integers are all fixed is a continuous problem,
+   and spatial branching continues on its continuous variables. In a pure
+   integer problem it is a point, where the relaxations are exact (zero-width
+   intervals), so its bound equals `f` there and the box is pruned or gives
+   the incumbent.
+5. *Incumbents.* The node kernel evaluates `f` and the violation at the LP
+   point. Make it evaluate at the point with integer coordinates rounded to
+   the nearest integer (simple rounding, batched, free). In `update_incumbent`,
+   the best few candidates get a fix-and-solve: integers fixed at the rounded
+   values (`lo = hi`) and the local NLP over the continuous variables. This
+   needs per-start bounds in `local.py`. The optax backend already takes
+   `lo, hi` as arguments (vmap them with `in_axes=0`). The pounce backend
+   builds a problem with fixed bounds (`from_jax(..., lb, ub)`); measure
+   whether rebuilding per assignment recompiles. If it does, cache by
+   assignment, or add per-solve bounds upstream in pounce.
+6. *Tests.* Compare with MINLPLib references on tiny instances (at most
+   5 variables): `ex1221`, `ex1222`, `ex1226`, `nvs03`, `nvs04`, `nvs06`,
+   `st_e13`, `st_e36`, `prob03`, `gbd`, `st_miqp3`. A fuzz test builds random
+   small mixed problems, enumerates every integer assignment, solves each
+   continuous subproblem with `minimize`, and checks the optimum. Further
+   tests cover integrality in `_verify` and an infeasible integer box.
+
+*Exit:* 0 wrong on all 220 instances at 60 s, and the small `ex12xx`, `nvs*`,
+`st_miqp*` and `st_test*` instances solved.
+
+**Stage 3: baseline and profile (2 to 3 days).** Run `int50` with jaxglobal
+(cold and warm) and SCIP at 60 s. Profile every unsolved instance the way the
+continuous no-bound instances were profiled: no bound yet (compile), no
+incumbent, slow kernel calls, or too many nodes. The profile sets the order
+of stage 4.
+
+**Stage 4: performance (3 to 5 weeks).** In the expected order of payoff:
+
+1. *Rounding inside FBBT rounds.* Round the variable slots after each sweep,
+   in both the compiled `propagate` and the interpreter, so a fixing
+   propagates within the same call. Binaries are often fixed by constraint
+   propagation alone.
+2. *Root probing.* Bound the `2 nb` boxes with one binary at 0 or 1 in a
+   single batched kernel call. Fix a binary when a side is empty or its bound
+   reaches the incumbent, and shrink every variable to the hull of the two
+   sides. This is one batch, the same mechanism as strong branching; it can
+   be repeated in the tree with a budget.
+3. *Reduced-cost fixing.* `reduce_ranges` already confines each variable from
+   the certificate's reduced costs; with rounding it fixes binaries. This
+   needs no new computation.
+4. *Incumbent search.* Reserve part of each batch for a dive: depth-first
+   children of the most promising box, rounding and fixing as they go, plus
+   fix-and-solve from LP points. A feasibility-pump variant (alternate
+   rounding and NLP projection) comes later. Pruning, OBBT and range
+   reduction all need a cutoff, so an early incumbent matters more here than
+   in continuous problems.
+5. *Branching.* Integer pseudocosts per unit change, with reliability
+   branching through the existing batched strong branching, whose candidates
+   fill the padding slots of each call.
+6. *Node selection.* Best-bound with periodic plunging.
+7. *Linear integer structure.* Big-M constraints give weak LP relaxations.
+   Coefficient tightening from FBBT bounds is cheap. Cover and MIR cuts are a
+   separate project and are deferred; on instances that need them, SCIP will
+   stay ahead.
+
+*Exit:* on `int50`, solve at least half of the instances SCIP solves at 60 s
+(warm cache), every SCIP-solved instance with at most 5 integers, and 0
+wrong.
+
+**Stage 5: toward 100 to 200 variables (later).** Re-measure on the 328
+instances with at most 100 variables. The known costs grow as in the
+continuous case: the dense IPM (rows times n squared per iteration; linear
+constraints already contribute one row each), the kernel compile time (one
+relaxation trace per cut call site), and host-side Python bookkeeping over
+many small boxes.
+
+**Risks.**
+- **Incumbents:** finding them is the most likely bottleneck, and the
+  continuous solver's local search was not designed for it.
+- **Big-M constraints:** without MILP cuts, instances dominated by them will
+  lag SCIP.
+- **Integer tolerance:** rounding interacts with FBBT padding and the range
+  reduction slack. A rounding bug removes the optimum silently, which is why
+  the fuzz test enumerates.
+- **Variable ordering:** errors in the `.nl` integer mask would mislabel
+  variables. The `.gms` cross-check covers them.
+
+**Effort.** Stages 0 to 2 take about 2 weeks and give correct MINLP support.
+Stage 3 takes a few days. Stage 4 takes 3 to 5 weeks to reach modest
+problems at useful speed, so about 6 to 8 weeks in total.
 
 ## Risks
 
