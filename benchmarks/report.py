@@ -68,7 +68,9 @@ def main():
     ap.add_argument("--tag", default="baseline")
     ap.add_argument("--time-limit", type=float, default=None, help="defaults to the largest time recorded")
     a = ap.parse_args()
-    refs = {r["name"]: r for r in csv.DictReader(open(HERE / "minlplib" / "instances.csv"))}
+    from minlplib.fetch import references
+
+    refs = references()
     rows = list(csv.DictReader(open(HERE / "results" / f"{a.tag}.csv")))
     solvers = list(dict.fromkeys(r["solver"] for r in rows))
     res = defaultdict(dict)

@@ -11,7 +11,6 @@ Usage:  python benchmarks/check_wrong.py --sample 12 --time-limit 20 --seed 0
 from __future__ import annotations
 
 import argparse
-import csv
 import os
 import pathlib
 import random
@@ -36,7 +35,9 @@ def main():
     if a.safe:
         os.environ["JAXGLOBAL_SAFE"] = "1"  # inherited by the worker processes
 
-    refs = {r["name"]: r for r in csv.DictReader(open(run.LIB / "instances.csv"))}
+    from minlplib.fetch import references
+
+    refs = references()
     pool = [r for r in run.instances(a.max_vars) if (run.LIB / "nl" / f"{r['name']}.nl").exists()]
     if not pool:
         sys.exit(f"no .nl files under {run.LIB / 'nl'}")

@@ -12,6 +12,15 @@ band (1–5, 6–10, 11–20, 21–50 variables):
 | solved | 12 | jaxglobal solved them (5/5/2/0 per band): regressions and speed |
 | wrong | 6 | jaxglobal's baseline answer contradicted the reference (later fixed to time-outs) |
 
+`int50.txt`: 50 MINLPLib instances with binary or integer variables (at most
+50 variables), for the integer work (`docs/ROADMAP.md`, *Integers: plan*).
+`benchmarks/sets/make_int50.py` selects them (seed 2026) from
+`minlplib/instances_int.csv` (`python benchmarks/minlplib/fetch.py --integer`,
+220 instances): those with a reference solution closed to 1e-4, 14 / 12 / 12 /
+12 from the bands of 1-5, 6-10, 11-20 and 21-50 integer variables, taken
+round-robin over binary-only or general-integer and convex or not, at most 3
+per model family. SCIP runs through GAMS (`--solvers scip-gams`).
+
 Run with
 
 ```

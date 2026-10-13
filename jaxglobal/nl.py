@@ -9,10 +9,11 @@ solver sees an ordinary traced function, exactly as for hand-written models.
 Supported: text ("g") and binary ("b") formats, nonlinear expressions, linear
 parts (J/G segments), defined variables (V segments), ranges, bounds and
 initial points. Not supported: imported functions, suffixes, logical
-constraints, complementarity, and integer variables. A model with integer
-variables raises ``NLError``: solving it as continuous would return the optimum
-of its relaxation as if it were the model's. ``relax_integers=True`` reads it
-anyway, as that continuous relaxation.
+constraints and complementarity. Integer variables are read as a mask
+(``NLModel.integer``) with ``integers="mask"``. By default (``"error"``) a model
+with integer variables raises ``NLError``, because passing only ``f``, the
+constraints and the bounds to a solver would solve its continuous relaxation and
+report that optimum as the model's; ``"relax"`` reads it as that relaxation.
 Reference: D. M. Gay, "Writing .nl Files" (Sandia report SAND2005-7907P).
 """
 
@@ -75,7 +76,8 @@ class NLModel:
     sense: int  # +1 minimize, -1 maximize: model objective = sense * f(x)
     bodies: callable  # raw constraint bodies, for checking against other readers
     objective: callable  # raw model objective (not negated)
-    n_int: int = 0  # binary and integer variables (relaxed to continuous: read with relax_integers=True)
+    n_int: int = 0  # binary and integer variables
+    integer: np.ndarray | None = None  # (n,) bool, integer variables (integers="mask"; else all False)
     info: dict = field(default_factory=dict)
 
     @property
@@ -212,12 +214,15 @@ def _range(R):
     return lo, hi
 
 
-def parse_nl(data, name="model", relax_integers=False):
+def parse_nl(data, name="model", integers="error"):
     """Parse ``.nl`` contents (bytes or str, text or binary format).
 
-    Raises ``NLError`` for a model with integer variables unless
-    ``relax_integers``, which reads it as its continuous relaxation.
+    ``integers``: for a model with integer variables, ``"error"`` raises
+    ``NLError``, ``"mask"`` sets ``NLModel.integer``, and ``"relax"`` reads the
+    continuous relaxation (``integer`` all False).
     """
+    if integers not in ("error", "mask", "relax"):
+        raise ValueError(f"integers must be 'error', 'mask' or 'relax', not {integers!r}")
     if isinstance(data, str):
         data = data.encode()
     head, body = [], data
@@ -232,12 +237,11 @@ def parse_nl(data, name="model", relax_integers=False):
     else:
         raise NLError(f"unknown .nl format {kind!r}")
     n, m, n_obj = head[1][:3]
-    # discrete variables: linear binary, linear integer, and integers among the variables
-    # nonlinear in both constraints and objectives, in constraints only, in objectives only
     n_int = sum(head[6][:5])
-    if n_int and not relax_integers:
-        raise NLError(f"integer variables are not supported ({n_int} in {name}); "
-                      "relax_integers=True reads the continuous relaxation")  # fmt: skip
+    if n_int and integers == "error":
+        raise NLError(f"{n_int} integer variables in {name}: read with integers='mask' and pass "
+                      "the mask to the solver (integers='relax' reads the continuous relaxation)")  # fmt: skip
+    integer = _integer_mask(n, head[4], head[6]) if integers == "mask" else np.zeros(n, bool)
     ncom = sum(head[9])
 
     exprs_c = [("num", 0.0)] * m
@@ -379,14 +383,37 @@ def parse_nl(data, name="model", relax_integers=False):
     return NLModel(
         name=name, n=n, lo=lo, hi=hi, x0=x0, f=f,
         ineq=ineq if (up_i or lo_i) else None, eq=eq if eq_i else None,
-        sense=sgn, bodies=bodies, objective=objective, n_int=n_int,
+        sense=sgn, bodies=bodies, objective=objective, n_int=n_int, integer=integer,
         info=dict(m=m, n_eq=len(eq_i), n_ineq=len(up_i) + len(lo_i), n_defined=ncom),
     )  # fmt: skip
 
 
-def read_nl(path, relax_integers=False):
+def read_nl(path, integers="error"):
     """Read a ``.nl`` file (see ``parse_nl``)."""
     import pathlib
 
     p = pathlib.Path(path)
-    return parse_nl(p.read_bytes(), name=p.stem, relax_integers=relax_integers)
+    return parse_nl(p.read_bytes(), name=p.stem, integers=integers)
+
+
+def _integer_mask(n, nlv, discrete):
+    """Integer variables from header lines 5 (``nlvc nlvo nlvb``) and 7 (``nbv niv nlvbi nlvci nlvoi``).
+
+    Variables are ordered (Gay, "Writing .nl Files"; Pyomo's ``NLWriter``): those
+    nonlinear in both constraints and objectives (the first ``nlvb``), in
+    constraints only (up to ``nlvc``), in objectives only (up to ``nlvo``, which
+    counts the constraint ones before them, or equals ``nlvb`` when there are
+    none), then the linear ones, ending with ``nbv`` binaries and ``niv``
+    integers. Within each nonlinear block the integers come last.
+    """
+    nlvc, nlvo, nlvb = (list(nlv) + [0, 0, 0])[:3]
+    nbv, niv, nlvbi, nlvci, nlvoi = (list(discrete) + [0] * 5)[:5]
+    mask = np.zeros(n, bool)
+    mask[nlvb - nlvbi : nlvb] = True
+    mask[nlvc - nlvci : nlvc] = True
+    if nlvo > nlvc:
+        mask[nlvo - nlvoi : nlvo] = True
+    mask[n - nbv - niv :] = True
+    if mask.sum() != nbv + niv + nlvbi + nlvci + nlvoi:
+        raise NLError(f"inconsistent discrete-variable counts in the header: {list(nlv)} {list(discrete)}")
+    return mask

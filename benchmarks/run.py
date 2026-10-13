@@ -192,7 +192,9 @@ def _num(v):
 
 
 def instances(max_vars, names=None):
-    rows = list(csv.DictReader(open(LIB / "instances.csv")))
+    from minlplib.fetch import references
+
+    rows = list(references().values())
     rows = [r for r in rows if int(r["nvars"]) <= max_vars]
     return [r for r in rows if r["name"] in names] if names else rows
 

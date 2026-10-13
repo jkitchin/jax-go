@@ -668,7 +668,21 @@ binary and integer fields of the header and not `nlvbi`, `nlvci`, `nlvoi`
 `read_nl` now count all five fields and raise `NLError` for integer models
 unless called with `relax_integers=True`.
 
-**Stage 1: model, reader and harness (2 to 3 days).**
+**Stage 1: model, reader and harness (done; items 1 and 3 moved to stage
+2).** `read_nl(..., integers="mask")` returns `NLModel.integer`
+(`_integer_mask`). It decodes all 220 instances correctly: the counts match
+`instancedata.csv`, every masked variable has integral bounds, and every
+binary is in [0, 1] except the four that `tanksize` fixes, exactly as its
+`.gms` file does. A test checks the decoding against Pyomo's `NLWriter`
+(with and without objective-only nonlinear variables). The `.gms` cross-check
+of item 2 was not needed: the `.gms` files name variables, the `.nl` files do
+not, so there is no mapping to compare. `fetch.py --integer` writes
+`instances_int.csv`; `run.py`, `report.py` and `check_wrong.py` read both
+reference files (`fetch.references`); `benchmarks/sets/int50.txt` comes from
+`make_int50.py`. SCIP is measured through GAMS (`scip-gams`), the only SCIP on
+this machine. The `minimize` argument (item 1) and the kernel fingerprint
+(item 3) only mean something with integer branching, so they move to stage 2.
+The plan as first written:
 
 1. `minimize(..., integer=None)` takes a boolean mask or index array. Integer
    bounds are rounded on entry, `lo = ceil(lo - int_tol)` and

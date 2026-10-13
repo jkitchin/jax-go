@@ -156,7 +156,7 @@ def test_integer_models_are_refused(field):
     for data in (text, _to_binary(text)):
         with pytest.raises(NLError, match="integer variables"):
             parse_nl(data)
-        assert parse_nl(data, relax_integers=True).n_int == 1
+        assert parse_nl(data, integers="relax").n_int == 1
 
 
 def test_minlplib_integers_refused():
@@ -165,5 +165,34 @@ def test_minlplib_integers_refused():
     path = pathlib.Path(__file__).parent / "data" / "nvs01.nl"
     with pytest.raises(NLError, match="integer variables"):
         read_nl(path)
-    M = read_nl(path, relax_integers=True)
+    M = read_nl(path, integers="mask")
     assert M.n == 3 and M.n_int == 2
+
+
+@pytest.mark.parametrize("obj_only", [True, False])
+def test_integer_mask_matches_pyomo(obj_only, tmp_path):
+    """The integer mask decodes the variable order of an independent writer (Pyomo's NLWriter):
+    a continuous and an integer variable nonlinear in both constraints and objective, in
+    constraints only and (optionally) in the objective only, then linear continuous, binary and
+    integer variables."""
+    pyo = pytest.importorskip("pyomo.environ")
+    m = pyo.ConcreteModel()
+    names = ["xb", "ib", "xc", "ic", "xo", "io", "xl", "bl", "il"]
+    for v in names:
+        dom = pyo.Binary if v == "bl" else pyo.Integers if v[0] == "i" else pyo.Reals
+        setattr(m, v, pyo.Var(domain=dom, bounds=(0, 1) if v == "bl" else (-3, 3), initialize=1))
+    obj = m.xb * m.ib + m.xl + m.bl + m.il
+    if obj_only:
+        obj += pyo.exp(m.xo) + m.io**2
+    m.obj = pyo.Objective(expr=obj)
+    m.c1 = pyo.Constraint(expr=m.xb**2 + m.ib**2 + m.xc * m.ic + m.xl + m.bl - m.il <= 4)
+    m.c2 = pyo.Constraint(expr=m.xb + m.ib + pyo.sin(m.xc) + m.ic * m.ic + 2 * m.bl >= -5)
+    if not obj_only:
+        m.c3 = pyo.Constraint(expr=m.xo + m.io <= 2)  # linear: they join the linear block
+    path = tmp_path / "m.nl"
+    m.write(str(path), io_options={"symbolic_solver_labels": True})
+    cols = (tmp_path / "m.col").read_text().split()
+    M = read_nl(path, integers="mask")
+    want = [getattr(m, c).is_integer() or getattr(m, c).is_binary() for c in cols]
+    assert M.n == len(cols) and M.integer.tolist() == want, (cols, M.integer)
+    assert M.n_int == 5
