@@ -10,9 +10,10 @@ the McCormick relaxations give a convex problem
 
 Subgradients from ``jax.jacfwd`` turn each convex function into affine cuts at
 a set of points (the box center, 2n axis points, then Kelley points: the LP
-solution of the previous round). The resulting small dense LP is solved by a
-fixed-iteration primal-dual interior-point method written in JAX, so it
-``vmap``s over hundreds of boxes.
+solution of the previous round). A part that is affine in x (a linear
+constraint) gives the same cut at every point, so it gets one row, from the
+center. The resulting small dense LP is solved by a fixed-iteration primal-dual
+interior-point method written in JAX, so it ``vmap``s over hundreds of boxes.
 
 The bound returned does **not** trust the LP solver. For any multipliers
 y >= 0 on the cut rows, weak duality gives
@@ -46,11 +47,76 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 from .relax import SAFE_K
 from .univariate import make_relaxer
 
 EPS = float(jnp.finfo(jnp.float64).eps)
+
+
+def _affine_parts(f, ineq, eq, n):
+    """Which of the convex parts [cv_f, cv_g..., cv_h..., -cc_h...] are affine in x, or None if unknown.
+
+    Read off the scalarized tape (``fbbt_interp.scalarize``): x and constants
+    are affine, and so are sums, differences and negations of affine values
+    and their products with (or quotients by) constants. Tapes that are not
+    mostly scalar are not scalarized (None): all parts then count as
+    nonlinear. Calling an affine part nonlinear only keeps duplicate rows;
+    calling a nonlinear part affine would only drop valid cuts, never add an
+    invalid one.
+    """
+    from .fbbt import _has_tracer, joint_tape
+    from .fbbt_interp import scalarize, use_interpreter
+
+    with jax.ensure_compile_time_eval():
+        tape = joint_tape(f, ineq, eq, np.zeros(n))
+    if _has_tracer(tape) or not use_interpreter(tape, n, min_rows=0):
+        return None
+    prog = scalarize(tape, n)
+    if prog is None:
+        return None
+    aff = np.ones(len(prog.const_val), bool)  # x, constants
+    const = ~np.isnan(prog.const_val)
+    for o, a, b, out in zip(prog.op, prog.a, prog.b, prog.out):
+        name = prog.opcodes[o][0]
+        if name in ("add", "add_any", "sub"):
+            aff[out] = aff[a] & aff[b]
+        elif name == "neg":
+            aff[out] = aff[a]
+        elif name == "mul":
+            aff[out] = (const[a] & aff[b]) | (const[b] & aff[a])
+        elif name == "div":
+            aff[out] = const[b] & aff[a]
+        else:
+            aff[out] = False
+    out = [aff[s] for s in prog.outs]
+    if eq is not None:
+        out.append(out[-1])  # -cc_h
+    return np.concatenate(out)
+
+
+def _affine_of(f, ineq, eq):
+    """``_affine_parts`` memoized on the number of variables."""
+    cache = {}
+
+    def get(n):
+        if n not in cache:
+            cache[n] = _affine_parts(f, ineq, eq, n)
+        return cache[n]
+
+    return get
+
+
+def _cut_rows(shape, aff):
+    """Flat indices of the LP rows to keep from cuts of shape ``(P, K)`` (P points, center first, K
+    parts; point-major rows): every part at the center, nonlinear parts at the other points. None: all."""
+    P, K = shape
+    if aff is None or len(aff) != K or not aff.any():
+        return None
+    keep = np.ones((P, K), bool)
+    keep[1:, aff] = False
+    return np.flatnonzero(keep.reshape(-1))
 
 
 def ipm(c, A, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10):
@@ -177,9 +243,11 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
     ``cutoff`` is infinite.
     """
     prepare, parts, (rf, rg, rh) = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate, safe)
+    affine = _affine_of(f, ineq, eq)
 
     def bound(lo, hi, cutoff=jnp.inf):
         n = lo.size
+        aff = affine(n)
         w = hi - lo
         c = 0.5 * (lo + hi)
         data = prepare(lo, hi)
@@ -242,7 +310,8 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
             A = jnp.where(live[:, None], A / nrm[:, None], 0.0)
             bvec = jnp.where(live, bvec / nrm, 1.0)  # dead rows: 0 <= 1
             bvec = _row_margin(A, bvec, jnp.where(live, mag / nrm, 0.0), live, safe)
-            return A, bvec
+            keep = _cut_rows(const.shape, aff)
+            return (A, bvec) if keep is None else (A[keep], bvec[keep])
 
         box_A = jnp.concatenate([jnp.eye(n + 1), -jnp.eye(n + 1)])
         box_b = jnp.concatenate([jnp.ones(n + 1), jnp.zeros(n + 1)])
@@ -320,9 +389,11 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
     inexact LP solve can only make them looser, never invalid.
     """
     prepare, parts, _ = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate, safe)
+    affine = _affine_of(f, ineq, eq)
 
     def obbt(lo, hi, cutoff=jnp.inf):
         n = lo.size
+        aff = affine(n)
         w = hi - lo
         c = 0.5 * (lo + hi)
         data = prepare(lo, hi)
@@ -348,7 +419,9 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
             mag = jnp.concatenate([abs(cutoff) + jnp.abs(const[:, :1]), abs(tol) + jnp.abs(const[:, 1:])], axis=1).reshape(-1)
             A = jnp.where(live[:, None], A / nrm[:, None], 0.0)
             b = jnp.where(live, rhs / nrm, 1.0)
-            return A, _row_margin(A, b, jnp.where(live, mag / nrm, 0.0), live, safe)
+            b = _row_margin(A, b, jnp.where(live, mag / nrm, 0.0), live, safe)
+            keep = _cut_rows(const.shape, aff)
+            return (A, b) if keep is None else (A[keep], b[keep])
 
         box_A = jnp.concatenate([jnp.eye(n), -jnp.eye(n)])
         box_b = jnp.concatenate([jnp.ones(n), jnp.zeros(n)])

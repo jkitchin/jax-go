@@ -86,3 +86,72 @@ def test_degenerate_lp_bound_valid():
         lbs.append(float(cb(jnp.asarray(lo), jnp.asarray(hi))[0]))
     assert all(lb <= fstar + 1e-6 for lb in lbs), lbs
     assert lbs[-1] > fstar - 1e-3  # and still tight on a tiny box
+
+
+def mixed_model():
+    """Nonlinear objective; linear and nonlinear inequalities and equalities."""
+
+    def f(x):
+        return x[0] * x[1] + jnp.exp(0.5 * x[2]) - x[0] ** 2
+
+    def g(x):
+        return jnp.stack([x[0] + 2.0 * x[1] - 1.0, x[0] * x[1] - 0.5, 3.0 * (x[2] - x[0]) / 2.0 - 0.25])
+
+    def h(x):
+        return jnp.stack([x[0] - x[1] + x[2] - 0.1, x[0] ** 2 - x[2]])
+
+    return f, g, h
+
+
+def test_affine_parts():
+    """Parts [cv_f, cv_g..., cv_h..., -cc_h...]: linear rows are found from the scalarized tape;
+    vectorized code is not scalarized (None: every part counts as nonlinear)."""
+    from jaxglobal.lp import _affine_parts
+
+    f, g, h = mixed_model()
+    assert _affine_parts(f, g, h, 3).tolist() == [False, True, False, True, True, False, True, False]
+    W = jnp.asarray(np.random.default_rng(0).normal(size=(50, 3)))
+    assert _affine_parts(lambda x: jnp.sum(jnp.tanh(W @ x) ** 2), lambda x: W @ x, None, 3) is None
+
+
+@pytest.mark.parametrize("dedup", [True, False])
+def test_affine_rows_once(dedup, monkeypatch):
+    """With one row per linear part (instead of one per cut point) the node bound and OBBT stay
+    valid on sampled feasible points, and the bound matches the one from all rows."""
+    import jaxglobal.lp as LP
+
+    f, g, h = mixed_model()
+    lo0, hi0 = -np.ones(3), 2.0 * np.ones(3)
+    # the equalities are the curve x2 = x0^2, x1 = x0 + x0^2 - 0.1
+    t = np.linspace(-1, 2, 200001)
+    X = np.stack([t, t + t**2 - 0.1, t**2], axis=1)
+    X = X[np.all((X >= lo0) & (X <= hi0), axis=1) & np.all(np.asarray(jax.vmap(g)(jnp.asarray(X))) <= 0, axis=1)]
+    F = np.asarray(jax.vmap(f)(jnp.asarray(X)))
+    tol = 1e-6
+
+    def bounds(on):
+        """Compiled bounder and OBBT; the affine parts are read while tracing, so compile here."""
+        if not on:
+            monkeypatch.setattr(LP, "_affine_parts", lambda *a: None)
+        box = (jnp.asarray(lo0), jnp.asarray(hi0))
+        cb = jax.jit(LP.make_constrained_bounder(f, g, h, tol=tol, univariate=True, alphabb=True)).lower(*box).compile()
+        ob = jax.jit(LP.make_obbt(f, g, h, tol=tol, univariate=True, alphabb=True)).lower(*box).compile()
+        monkeypatch.undo()
+        return cb, ob
+
+    cb, ob = bounds(dedup)
+    cb_all, _ = bounds(False)
+    rng = np.random.default_rng(3)
+    centers = X[rng.choice(len(X), 8)]
+    boxes = [(lo0, hi0)] + [(np.maximum(lo0, c - rng.uniform(0, 1, 3)), np.minimum(hi0, c + rng.uniform(0, 1, 3)))
+                            for c in centers]  # fmt: skip
+    for a, b in boxes:
+        inside = np.all((X >= a) & (X <= b), axis=1)
+        assert inside.any()
+        lb = float(cb(jnp.asarray(a), jnp.asarray(b))[0])
+        olo, ohi, oempty = ob(jnp.asarray(a), jnp.asarray(b))
+        assert lb <= F[inside].min() + 1e-9
+        assert not bool(oempty)
+        assert np.all(X[inside] >= np.asarray(olo) - 1e-9) and np.all(X[inside] <= np.asarray(ohi) + 1e-9)
+        ref = float(cb_all(jnp.asarray(a), jnp.asarray(b))[0])
+        assert abs(lb - ref) <= 1e-4 * (1 + abs(ref)), (a, b, lb, ref)

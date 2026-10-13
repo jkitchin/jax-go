@@ -37,6 +37,8 @@ cache (`JAXGLOBAL_CACHE_DIR`), so it measures search without compilation.
 | + relaxation interpreter, warm (`start50_relax_warm.csv`) | 21 | 0 | 26 | 3 | 30.5 |
 | + scheduled sweeps, cold (`start50_sched_cold.csv`) | 18 | 0 | 29 | 3 | 49.7 |
 | + scheduled sweeps, warm (`start50_sched_warm.csv`) | 22 | 0 | 25 | 3 | 28.5 |
+| + one LP row per linear part, cold (`start50_dedup_cold.csv`) | 23 | 0 | 24 | 3 | 43.0 |
+| + one LP row per linear part, warm (`start50_dedup_warm.csv`) | 25 | 0 | 22 | 3 | 22.6 |
 | SCIP (`baseline.csv`) | 44 | 1 | 5 | 0 | 1.9 |
 
 Most of the cold time is tracing and compiling the bounding kernels, whose
@@ -78,3 +80,18 @@ were up to 2x slower that way for 256 boxes, so FBBT sweeps step by step from
 300 rows (`fbbt_interp.SCHEDULE_MIN_ROWS`) and row by row below; the relaxation
 interpreter (600+ rows) always steps. The `start50` difference (22 warm) is
 within run-to-run variation (load average ~50 during the runs).
+
+A profile of the nine instances that ended without any bound (cold) showed
+that, past compilation, the time went to the LPs of the node bound and OBBT,
+not to FBBT or the relaxations (tens of ms for 16 boxes). Those LPs have a row
+per convex part and cut point (2n + 1 points plus the Kelley points), and the
+dense IPM costs rows x n^2 per iteration: about 11,000 rows by 47 columns on
+`pooling_adhya1stp`. A linear constraint gives the same cut at every point, so
+most rows were copies (`st_rv7`: 1,281 rows, 21 distinct). Linear parts, read
+off the scalarized tape (`lp._affine_parts`), now get one row, from the box
+center. Measured one at a time, a call on 16 boxes went from 8.1 to 2.2 s on
+`wastewater15m1`, 13.3 to 8.7 s on `pooling_adhya1stp` and 0.76 to 0.14 s on
+`st_rv7`; root OBBT from 20 to 4.5 s, 33 to 20 s and 1.2 to 0.1 s. On `start50`
+every status change was a gain (5 cold, 3 warm), and instances solved before
+ran about 1.5x faster. The run started at load average 2 but other jobs
+raised it to 40 to 80 by the end, which only slows it down.
