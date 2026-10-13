@@ -9,7 +9,10 @@ solver sees an ordinary traced function, exactly as for hand-written models.
 Supported: text ("g") and binary ("b") formats, nonlinear expressions, linear
 parts (J/G segments), defined variables (V segments), ranges, bounds and
 initial points. Not supported: imported functions, suffixes, logical
-constraints, complementarity, and integer variables (counted, not solved).
+constraints, complementarity, and integer variables. A model with integer
+variables raises ``NLError``: solving it as continuous would return the optimum
+of its relaxation as if it were the model's. ``relax_integers=True`` reads it
+anyway, as that continuous relaxation.
 Reference: D. M. Gay, "Writing .nl Files" (Sandia report SAND2005-7907P).
 """
 
@@ -72,7 +75,7 @@ class NLModel:
     sense: int  # +1 minimize, -1 maximize: model objective = sense * f(x)
     bodies: callable  # raw constraint bodies, for checking against other readers
     objective: callable  # raw model objective (not negated)
-    n_int: int = 0
+    n_int: int = 0  # binary and integer variables (relaxed to continuous: read with relax_integers=True)
     info: dict = field(default_factory=dict)
 
     @property
@@ -209,8 +212,12 @@ def _range(R):
     return lo, hi
 
 
-def parse_nl(data, name="model"):
-    """Parse ``.nl`` contents (bytes or str, text or binary format)."""
+def parse_nl(data, name="model", relax_integers=False):
+    """Parse ``.nl`` contents (bytes or str, text or binary format).
+
+    Raises ``NLError`` for a model with integer variables unless
+    ``relax_integers``, which reads it as its continuous relaxation.
+    """
     if isinstance(data, str):
         data = data.encode()
     head, body = [], data
@@ -225,7 +232,12 @@ def parse_nl(data, name="model"):
     else:
         raise NLError(f"unknown .nl format {kind!r}")
     n, m, n_obj = head[1][:3]
-    nbv, niv = head[6][:2]
+    # discrete variables: linear binary, linear integer, and integers among the variables
+    # nonlinear in both constraints and objectives, in constraints only, in objectives only
+    n_int = sum(head[6][:5])
+    if n_int and not relax_integers:
+        raise NLError(f"integer variables are not supported ({n_int} in {name}); "
+                      "relax_integers=True reads the continuous relaxation")  # fmt: skip
     ncom = sum(head[9])
 
     exprs_c = [("num", 0.0)] * m
@@ -367,13 +379,14 @@ def parse_nl(data, name="model"):
     return NLModel(
         name=name, n=n, lo=lo, hi=hi, x0=x0, f=f,
         ineq=ineq if (up_i or lo_i) else None, eq=eq if eq_i else None,
-        sense=sgn, bodies=bodies, objective=objective, n_int=nbv + niv,
+        sense=sgn, bodies=bodies, objective=objective, n_int=n_int,
         info=dict(m=m, n_eq=len(eq_i), n_ineq=len(up_i) + len(lo_i), n_defined=ncom),
     )  # fmt: skip
 
 
-def read_nl(path):
+def read_nl(path, relax_integers=False):
+    """Read a ``.nl`` file (see ``parse_nl``)."""
     import pathlib
 
     p = pathlib.Path(path)
-    return parse_nl(p.read_bytes(), name=p.stem)
+    return parse_nl(p.read_bytes(), name=p.stem, relax_integers=relax_integers)

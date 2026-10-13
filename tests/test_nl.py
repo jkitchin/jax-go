@@ -143,3 +143,27 @@ def test_minlplib_file():
     M = read_nl(pathlib.Path(__file__).parents[1] / "benchmarks/minlplib/nl/ex4_1_1.nl")
     r = minimize(M.f, M.lo, M.hi)
     assert abs(r.fun - -7.487312365) < 1e-5
+
+
+@pytest.mark.parametrize("field", range(5))
+def test_integer_models_are_refused(field):
+    """An integer variable in any of the five discrete-variable counts (linear binary, linear
+    integer, nonlinear in both / constraints / objectives) is refused: solving the model as
+    continuous would report its relaxation's optimum as the model's."""
+    counts = [0] * 5
+    counts[field] = 1
+    text = TEXT.replace(" 0 0 0 0 0\n", " " + " ".join(map(str, counts)) + "\n", 1)
+    for data in (text, _to_binary(text)):
+        with pytest.raises(NLError, match="integer variables"):
+            parse_nl(data)
+        assert parse_nl(data, relax_integers=True).n_int == 1
+
+
+def test_minlplib_integers_refused():
+    """nvs01 (MINLPLib): both integers enter nonlinear constraints, so only the nonlinear
+    integer counts see them (the linear binary/integer counts are 0)."""
+    path = pathlib.Path(__file__).parent / "data" / "nvs01.nl"
+    with pytest.raises(NLError, match="integer variables"):
+        read_nl(path)
+    M = read_nl(path, relax_integers=True)
+    assert M.n == 3 and M.n_int == 2

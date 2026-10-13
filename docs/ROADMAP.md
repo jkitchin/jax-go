@@ -659,11 +659,14 @@ callback and lose batching. SCIP as the host is the fallback only if
 combinatorial instances (many binaries in big-M constraints) turn out to
 matter, since the plan below has no MILP cutting planes.
 
-**Stage 0: stop silent relaxation (1 day).** `read_nl` parses integer models
-but only counts the integers (`NLModel.n_int`), and nothing checks the count.
-So `minimize` on a MINLP `.nl` file solves the continuous relaxation and can
-report it as `optimal`. Until stage 2 lands, make `read_nl` raise `NLError`
-for `n_int > 0` unless the caller asks for the relaxation explicitly.
+**Stage 0: stop silent relaxation (done).** `read_nl` parsed integer models
+and only counted the integers (`NLModel.n_int`), so `minimize` on a MINLP
+`.nl` file solved the continuous relaxation and could report it as `optimal`.
+The count also missed integers in nonlinear terms: it summed the linear
+binary and integer fields of the header and not `nlvbi`, `nlvci`, `nlvoi`
+(MINLPLib `nvs01` and `nvs20` counted 0, `tln2` 2 of 8). `parse_nl` and
+`read_nl` now count all five fields and raise `NLError` for integer models
+unless called with `relax_integers=True`.
 
 **Stage 1: model, reader and harness (2 to 3 days).**
 
