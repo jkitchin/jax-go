@@ -39,6 +39,8 @@ cache (`JAXGLOBAL_CACHE_DIR`), so it measures search without compilation.
 | + scheduled sweeps, warm (`start50_sched_warm.csv`) | 22 | 0 | 25 | 3 | 28.5 |
 | + one LP row per linear part, cold (`start50_dedup_cold.csv`) | 23 | 0 | 24 | 3 | 43.0 |
 | + one LP row per linear part, warm (`start50_dedup_warm.csv`) | 25 | 0 | 22 | 3 | 22.6 |
+| + one relaxation trace per cut, cold (`start50_cuts_cold.csv`) | 23 | 0 | 24 | 3 | 43.0 |
+| + one relaxation trace per cut, warm (`start50_cuts_warm.csv`) | 25 | 0 | 22 | 3 | 24.0 |
 | SCIP (`baseline.csv`) | 44 | 1 | 5 | 0 | 1.9 |
 
 Most of the cold time is tracing and compiling the bounding kernels, whose
@@ -95,3 +97,17 @@ center. Measured one at a time, a call on 16 boxes went from 8.1 to 2.2 s on
 every status change was a gain (5 cold, 3 warm), and instances solved before
 ran about 1.5x faster. The run started at load average 2 but other jobs
 raised it to 40 to 80 by the end, which only slows it down.
+
+The node bound and OBBT kernels traced the relaxation more often than
+needed: each cut evaluated it for the values and again inside `jax.jacfwd`,
+and the interval bounds of f, g and h took three more evaluations. Cuts now
+take the values from the forward-mode pass (`has_aux`), and the interval
+bounds, which do not depend on the point, from the first cut (`lp._cuts`).
+On `st_rv7` the bounder went from 72k to 44k jaxpr equations (trace 10 to
+4.3 s, compile 9.5 to 3.9 s) and OBBT from 64k to 46k, with the same bounds;
+`st_rv7` now solves cold (33.6 s) and `pooling_adhya1stp` gets its first bound
+at about 31 s instead of none. On `start50` the counts are unchanged: these
+instances were not limited by it, and the node counts are identical (the warm
+times are within the run's variation, the same on `kriging_peaks-red030`). Each
+kernel still evaluates cuts at two call sites (initial and Kelley points;
+the two OBBT rounds); merging them would cost runtime.

@@ -179,6 +179,26 @@ def _cut_const(v, J, lo, p, coef, safe):
     return const
 
 
+def _cuts(parts, data, p, lo, hi, safe):
+    """Cuts of the convex parts at ``p``: ``(const, coef, bounds)`` in unit-box coordinates
+    (``const`` -inf and ``coef`` 0 where not finite), ``bounds`` from ``parts.bounds``.
+
+    The values come out of the forward-mode pass as its auxiliary output, so the
+    relaxation is traced (and compiled) once for values and derivatives.
+    """
+
+    def fn(x):
+        v, bounds = parts.bounds(x, lo, hi, data)
+        return v, (v, bounds)
+
+    J, (v, bounds) = jax.jacfwd(fn, has_aux=True)(p)
+    v, J = jax.lax.optimization_barrier((v, J))  # one evaluation for coef and const (see lifted.node_cuts)
+    coef = J * (hi - lo)  # d cut / d u
+    const = _cut_const(v, J, lo, p, coef, safe)  # value of the cut at u = 0
+    ok = jnp.isfinite(const) & jnp.all(jnp.isfinite(coef), axis=1)
+    return jnp.where(ok, const, -jnp.inf), jnp.where(ok[:, None], coef, 0.0), bounds
+
+
 def _row_margin(A, b, mag, live, safe):
     """Slack added to normalized rows ``A u <= b`` for the rounding of the division by the row norm."""
     if not safe:
@@ -222,15 +242,25 @@ def _parts_fn(f, ineq, eq, univariate, alphabb=False, multivariate=False, safe=F
         return tuple(r.prepare(lo, hi) if r is not None else None for r in rs)
 
     def parts(x, lo, hi, data):
+        return parts_bounds(x, lo, hi, data)[0]
+
+    def parts_bounds(x, lo, hi, data):
+        """``(parts, bounds)``: ``bounds`` are the interval bounds ``(f, g, h)`` on the box, each
+        an MC's ``(lo, hi)`` or None; they do not depend on ``x``."""
         rf, rg, rh = rs
-        out = [jnp.atleast_1d(rf(x, lo, hi, data[0]).cv)]
+        mf = rf(x, lo, hi, data[0])
+        out, bounds = [jnp.atleast_1d(mf.cv)], [(mf.lo, mf.hi), None, None]
         if rg is not None:
-            out.append(rg(x, lo, hi, data[1]).cv)
+            mg = rg(x, lo, hi, data[1])
+            out.append(mg.cv)
+            bounds[1] = (mg.lo, mg.hi)
         if rh is not None:
             mh = rh(x, lo, hi, data[2])
             out += [mh.cv, -mh.cc]
-        return jnp.concatenate(out)
+            bounds[2] = (mh.lo, mh.hi)
+        return jnp.concatenate(out), tuple(bounds)
 
+    parts.bounds = parts_bounds
     return prepare, parts, rs
 
 
@@ -242,7 +272,7 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
     ``f <= cutoff`` (the incumbent value); it is the input box when
     ``cutoff`` is infinite.
     """
-    prepare, parts, (rf, rg, rh) = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate, safe)
+    prepare, parts, _ = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate, safe)
     affine = _affine_of(f, ineq, eq)
 
     def bound(lo, hi, cutoff=jnp.inf):
@@ -252,33 +282,23 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
         c = 0.5 * (lo + hi)
         data = prepare(lo, hi)
 
-        def convex_parts(x, lo, hi):
-            """[cv_f, cv_g..., cv_h..., -cc_h...] -- every entry convex in x."""
-            return parts(x, lo, hi, data)
-
-        # --- interval information (constant on the box) ---------------------
-        mf = rf(c, lo, hi, data[0])
-        flo, fhi = mf.lo[0], mf.hi[0]
-        infeasible = jnp.array(False)
-        if rg is not None:
-            infeasible |= jnp.any(rg(c, lo, hi, data[1]).lo > tol)
-        if rh is not None:
-            mh = rh(c, lo, hi, data[2])
-            infeasible |= jnp.any(mh.lo > tol) | jnp.any(mh.hi < -tol)
-
         def cuts_at(p):
-            """Affine minorants of each convex part at p, in unit-box coords u."""
-            v = convex_parts(p, lo, hi)
-            J = jax.jacfwd(convex_parts)(p, lo, hi)
-            v, J = jax.lax.optimization_barrier((v, J))  # one evaluation for coef and const (see lifted.node_cuts)
-            coef = J * w  # d cut / d u
-            const = _cut_const(v, J, lo, p, coef, safe)  # value of the cut at u = 0
-            ok = jnp.isfinite(const) & jnp.all(jnp.isfinite(coef), axis=1)
-            return jnp.where(ok, const, -jnp.inf), jnp.where(ok[:, None], coef, 0.0)
+            """Affine minorants of each convex part at p, in unit-box coords u, and the interval
+            bounds of f, g, h (``_cuts``)."""
+            return _cuts(parts, data, p, lo, hi, safe)
 
         axis = jnp.concatenate([jnp.eye(n), -jnp.eye(n)]) * (w / 4)
         pts0 = jnp.concatenate([c[None], c + axis])
-        const0, coef0 = jax.vmap(cuts_at)(pts0)  # (P0, 1+m), (P0, 1+m, n)
+        const0, coef0, bounds = jax.vmap(cuts_at)(pts0)  # (P0, 1+m), (P0, 1+m, n)
+
+        # --- interval information (constant on the box: any point's) ---------
+        (flo, fhi), bg, bh = jax.tree.map(lambda b: b[0], bounds)
+        flo, fhi = flo[0], fhi[0]
+        infeasible = jnp.array(False)
+        if bg is not None:
+            infeasible |= jnp.any(bg[0] > tol)
+        if bh is not None:
+            infeasible |= jnp.any(bh[0] > tol) | jnp.any(bh[1] < -tol)
 
         # objective-variable range [tlo, thi] from intervals and the cuts
         cmin = const0[:, 0] + jnp.sum(jnp.minimum(coef0[:, 0], 0), axis=1)
@@ -359,7 +379,7 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
             u = jnp.clip(z[:n], 0.0, 1.0)
             # Kelley: add cuts at the LP solution (not after the last round)
             def add(cc):
-                ck, gk = cuts_at(lo + w * u)
+                ck, gk, _ = cuts_at(lo + w * u)
                 return cc[0].at[P0 + k].set(ck), cc[1].at[P0 + k].set(gk)
 
             const, coef = jax.lax.cond(k < n_kelley, add, lambda cc: cc, (const, coef))
@@ -398,17 +418,8 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
         c = 0.5 * (lo + hi)
         data = prepare(lo, hi)
 
-        def convex_parts(x, lo, hi):
-            return parts(x, lo, hi, data)
-
         def cuts_at(p):
-            v = convex_parts(p, lo, hi)
-            J = jax.jacfwd(convex_parts)(p, lo, hi)
-            v, J = jax.lax.optimization_barrier((v, J))  # one evaluation for coef and const (see lifted.node_cuts)
-            coef = J * w
-            const = _cut_const(v, J, lo, p, coef, safe)
-            ok = jnp.isfinite(const) & jnp.all(jnp.isfinite(coef), axis=1)
-            return jnp.where(ok, const, -jnp.inf), jnp.where(ok[:, None], coef, 0.0)
+            return _cuts(parts, data, p, lo, hi, safe)[:2]
 
         def rows(const, coef):
             rhs = jnp.concatenate([cutoff - const[:, :1], tol - const[:, 1:]], axis=1).reshape(-1)
