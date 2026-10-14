@@ -889,8 +889,12 @@ def minimize(
     open_lo, open_hi, open_lb, open_xr = rlo, rhi, lb, rxr
     sumL, sumR, cnt = np.zeros(lo.size), np.zeros(lo.size), np.zeros(lo.size)  # pseudocost sums, observations
 
-    def pseudo_scores(relw, free):
-        """Product-rule scores per (box, variable), -1 for non-candidates; and whether any pseudocost is known."""
+    def pseudo_scores(relw, free, xr):
+        """Product-rule scores per (box, variable), -1 for non-candidates; and whether any pseudocost is known.
+
+        A continuous variable's gains are per squared relative width; an integer variable's
+        (as in MIP) per unit of the distance its split moves it, ``f`` down and ``1 - f`` up
+        for the fractional part ``f`` of the relaxation value (0.5 each when integral)."""
         cand = branchable & free
         cand = np.where(cand.any(axis=1, keepdims=True), cand, free)
         seen = cnt > 0
@@ -902,7 +906,10 @@ def minimize(
         psiR = np.where(seen, np.maximum(sumR / np.maximum(cnt, 1), _FLOOR * mR), mR)
         eps = 1e-6 * (1 + abs(ub)) if np.isfinite(ub) else 1e-6
         r2 = relw**2
-        sc = np.maximum(psiL * r2, eps) * np.maximum(psiR * r2, eps) * (1 + 1e-3 * relw)  # width breaks ties
+        fr = xr - np.floor(xr)
+        fr = np.where(fr > INT_TOL, fr, 0.5)
+        dn, up = np.where(imask, fr, r2), np.where(imask, 1.0 - fr, r2)
+        sc = np.maximum(psiL * dn, eps) * np.maximum(psiR * up, eps) * (1 + 1e-3 * relw)  # width breaks ties
         return np.where(cand & np.isfinite(sc), sc, np.where(cand, 0.0, -1.0)), True
 
     pruned_lb = np.inf  # smallest lower bound among fathomed boxes
@@ -947,7 +954,7 @@ def minimize(
             pv = np.argmax(score, axis=1)
             groups = [[i] for i in range(k)]
         else:
-            score, _ = pseudo_scores(relw, phi > plo)
+            score, _ = pseudo_scores(relw, phi > plo, pxr)
             if branch_var == "pseudocost":
                 pv = np.argmax(score, axis=1)
                 pp = np.arange(k)
@@ -1013,6 +1020,7 @@ def minimize(
             w = hiv - lov
             pt = np.clip(_LAM * pxr[pp, pv] + (1 - _LAM) * pt, lov + _BETA * w, hiv - _BETA * w)
         rpt = pt
+        isint = np.zeros(M, bool)
         if imask.any():
             # integer variables: children [lo, p] and [p + 1, hi], p = floor of the relaxation
             # value when it is fractional and inside the box, else of the midpoint
@@ -1020,6 +1028,7 @@ def minimize(
             v = np.where((np.abs(v - np.round(v)) > INT_TOL) & (v >= lov) & (v <= hiv), v, 0.5 * (lov + hiv))
             ip = np.clip(np.floor(v), lov, hiv - 1.0)
             isint = imask[pv] & (hiv > lov)
+            v_split = v
             pt, rpt = np.where(isint, ip, pt), np.where(isint, ip + 1.0, pt)
         left_hi, right_lo = phi[pp].copy(), plo[pp].copy()
         left_hi[ar, pv] = pt
@@ -1045,9 +1054,12 @@ def minimize(
                 big = 1e12 * (1 + np.abs(plb[pp]))
                 gl, gr = np.where(gl <= big, gl, np.inf), np.where(gr <= big, gr, np.inf)
             r2 = relw[pp, pv] ** 2
-            good = np.isfinite(gl) & np.isfinite(gr) & (r2 > 1e-24)
-            np.add.at(sumL, pv[good], gl[good] / r2[good])
-            np.add.at(sumR, pv[good], gr[good] / r2[good])
+            # integer splits: per unit moved, v - p down and p + 1 - v up (p = the split point)
+            dl = np.where(isint, np.maximum(v_split - pt, 1e-6), r2) if imask.any() else r2
+            dr = np.where(isint, np.maximum(pt + 1.0 - v_split, 1e-6), r2) if imask.any() else r2
+            good = np.isfinite(gl) & np.isfinite(gr) & (dl > 1e-24) & (dr > 1e-24)
+            np.add.at(sumL, pv[good], gl[good] / dl[good])
+            np.add.at(sumR, pv[good], gr[good] / dr[good])
             np.add.at(cnt, pv[good], 1)
         lbl, lbr = clb[:M], clb[M:]
         if M > k:  # strong branching: keep the best candidate of each parent

@@ -824,8 +824,8 @@ continuous no-bound instances were profiled: no bound yet (compile), no
 incumbent, slow kernel calls, or too many nodes. The profile sets the order
 of stage 4.
 
-**Stage 4: performance (in progress; exit criterion not met, see below).**
-Done so far, in the order the stage 3 profile set:
+**Stage 4: performance (done; `nous1` waived, issue #12).** In the order the
+stage 3 profile set:
 
 * *Incumbent search.* The node kernel evaluates the LP point rounded at five
   thresholds (`ROUNDINGS`: nearest, up, down, 1/4, 3/4), keeping the best
@@ -849,6 +849,19 @@ Done so far, in the order the stage 3 profile set:
   was "solved" at 3.0097 against 0.8462 (now a test).
 * *Reduced-cost fixing* comes from the stage 2 rounding of the range-reduced
   box.
+* *Integer pseudocosts.* The pseudocost rules learn an integer split's gain
+  per unit moved (fractional part down, its complement up) instead of per
+  squared relative width, and score integer candidates with them. On `nvs05`
+  `pseudocost` and `reliability` solve in 6.5 s and about 350 nodes against
+  33.7 s and 1,277 nodes for `width`, but over `int50` (warm) `width` stays
+  best: 31 solved against 27 (`pseudocost`, 0.94 of the time on the 27
+  both solve) and 23 (`reliability`, 3.9 times slower: strong-branching trials
+  cost kernel calls). `width`, fractional integers first, remains the default.
+* *Plunging* (item 6) is covered by the dives from the best children; it is
+  not implemented as a node selection rule.
+* *Coefficient tightening* (item 7) is not done: the model is code, so
+  tightening a big-M row means rewriting the scalarized tape, a larger change
+  than this stage; root probing gets part of its effect.
 
 *Measured* (`int50`, 60 s, runs started at load 2.1 to 4.0):
 
@@ -859,15 +872,15 @@ Done so far, in the order the stage 3 profile set:
 | stage 4, warm (`int50_probe_warm.csv`) | 31 | 0 | 31 (69%) | 21.8 |
 
 The exit criterion asks for half of SCIP's instances (met), 0 wrong (met) and
-every SCIP-solved instance with at most 5 integers: all but `nous1`. Its
+every SCIP-solved instance with at most 5 integers: all but `nous1`, waived
+(user decision) as a continuous-bound limitation. Its
 integer part is solved (the root enumeration finds the optimum), but proving
 it is a continuous problem: with its two binaries fixed it is a 50-variable
 pooling model whose bound calls take 6.5 s and whose relaxation stays at
 -0.75 against 1.567 after the first nodes. That is the continuous solver's
 bound on pooling (the same weakness that leaves the pooling instances of
-`start50` unsolved), not something the items below address. Not done yet:
-items 5 (integer pseudocosts), 6 (plunging) and 7 (coefficient tightening);
-the remaining unsolved instances are weak bounds on big-M, cardinality and
+`start50` unsolved), not something the items below address; tracked in issue #12, and waived from this exit criterion. The remaining
+unsolved instances are weak bounds on big-M, cardinality and
 convex nonlinear constraints (`ex4`, `flay04m`, `smallinvDAX*`,
 `cvxnonsep_*`, `tln*`) and compile time on dense polynomials
 (`autocorr_bern*`, `hadamard_5`).

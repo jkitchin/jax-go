@@ -37,6 +37,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 LIB = HERE / "minlplib"
 REL_GAP, ABS_GAP, FEAS_TOL = 1e-4, 1e-6, 1e-6
 EXTRA = {"safe": True} if os.environ.get("JAXGLOBAL_SAFE") == "1" else {}  # check_wrong.py --safe
+EXTRA.update(json.loads(os.environ.get("JAXGLOBAL_OPTS", "{}")))  # extra minimize options, e.g. '{"branch_var": "reliability"}'
 FIELDS = ["solver", "name", "status", "time", "primal", "dual", "nodes", "message"]
 TAG = "JAXGLOBAL-RESULT "  # marks the worker's result line among solver log output
 COUENNE = shutil.which("couenne") or "/Applications/AMPL/couenne"
