@@ -149,7 +149,11 @@ def run_gams(name, tl, solver="baron"):
             "nlnz", "dnz", "mstat", "sstat", "obj", "objest", "res", "iter", "dom", "nodes", "user1"]  # fmt: skip
     r = dict(zip(cols, f))
     mstat, sstat = int(float(r["mstat"])), int(float(r["sstat"]))
-    status = ("optimal" if mstat == 1 and sstat == 1 else "infeasible" if mstat in (4, 19)
+    ub, lb = _float(r["obj"]), _float(r["objest"])
+    closed = ub == ub and lb == lb and abs(ub - lb) <= max(ABS_GAP, REL_GAP * abs(ub)) + 1e-12
+    # model status 1 optimal; 2 locally optimal and 8 integer solution are reported when a solve
+    # ends at the gap limit (8 for models with integers), so count them solved when the gap is closed
+    status = ("optimal" if sstat == 1 and (mstat == 1 or (mstat in (2, 8) and closed)) else "infeasible" if mstat in (4, 19)
               else "time_limit" if sstat == 3 else "error")  # fmt: skip
     return dict(status=status, time=_float(r["res"]), primal=_float(r["obj"]), dual=_float(r["objest"]),
                 nodes=_float(r["nodes"]), message=f"model {mstat} solver {sstat}")  # fmt: skip

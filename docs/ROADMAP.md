@@ -784,13 +784,47 @@ local solve cannot be interrupted. The plan as first written:
 *Exit:* 0 wrong on all 220 instances at 60 s, and the small `ex12xx`, `nvs*`,
 `st_miqp*` and `st_test*` instances solved.
 
-**Stage 3: baseline and profile (2 to 3 days).** Run `int50` with jaxglobal
+**Stage 3: baseline and profile (done).** `int50` at 60 s, 4 jobs, each run
+started at load average below 8 (2.4 to 4.4; the runs' own jobs raise it to
+about 35):
+
+| run | solved | wrong | unsolved | unsupported | SGM time (s) |
+|---|---:|---:|---:|---:|---:|
+| jaxglobal cold (`int50_cold.csv`) | 24 | 0 | 22 | 4 | 36.7 |
+| jaxglobal warm (`int50_warm.csv`) | 29 | 0 | 17 | 4 | 17.3 |
+| SCIP via GAMS (`int50_scip.csv`) | 45 | 0 | 5 | 0 | 1.35 |
+
+jaxglobal solves nothing SCIP does not; it solves 29 of SCIP's 45 (64%), and of
+the 14 SCIP-solved instances with at most 5 integers all but `nous1`.
+(`run.py` counted GAMS model status 8, "integer solution", as an error; a
+solve with integers that ends at the gap limit reports it. Statuses 2 and 8
+now count as solved when the gap is closed.)
+
+A profile of the 16 instances SCIP solves and jaxglobal does not (warm cache,
+one at a time, load 4.4 to 6.7) sorts them by cause:
+
+* *No incumbent* (7): `cvxnonsep_normcon30` / `40`, `nous1` and `tln5` end
+  with no integer-feasible point (up to 8,191 nodes), `tln4`, `gear2` and
+  `flay04m` find one only at iteration 8 to 19. Without a cutoff there is no
+  pruning, OBBT or range reduction.
+* *No feasible point while deriving bounds* (3, unsupported): `clay0203m`,
+  `m3`, `smallinvDAXr5b150-165`. The same weakness, earlier.
+* *Compile* (3): `autocorr_bern20-10`, `autocorr_bern30-04`, `hadamard_5`
+  (dense polynomials): trace and lowering take 20 to 35 s, or the first
+  compile more than 55 s, and no bound is computed.
+* *Weak bound or slow calls* (4): `ex4` (bound -13 against incumbent 81,838),
+  `flay04m`, `smallinvDAXr3b010-011` and `nous1`, with kernel calls of 0.6 to
+  6 s: big-M and cardinality structure, where MILP cuts would help.
+
+`gear2` and `meanvarx` solve when run alone (43 s and 12 s): near the limit,
+lost to the run's variation. So incumbent search comes first in stage 4,
+before the propagation items it was listed after. The plan as first written: Run `int50` with jaxglobal
 (cold and warm) and SCIP at 60 s. Profile every unsolved instance the way the
 continuous no-bound instances were profiled: no bound yet (compile), no
 incumbent, slow kernel calls, or too many nodes. The profile sets the order
 of stage 4.
 
-**Stage 4: performance (3 to 5 weeks).** In the expected order of payoff:
+**Stage 4: performance (3 to 5 weeks).** In the expected order of payoff (the stage 3 profile moves item 4, incumbent search, to the front):
 
 1. *Rounding inside FBBT rounds.* Round the variable slots after each sweep,
    in both the compiled `propagate` and the interpreter, so a fixing

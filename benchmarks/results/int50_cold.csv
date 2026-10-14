@@ -1,0 +1,51 @@
+solver,name,status,time,primal,dual,nodes,message
+jaxglobal,st_e13,optimal,11.16835145803634,1.9999980005873164,1.9999979989309284,1,optimal
+jaxglobal,nvs03,optimal,11.682202374911867,16.0,16.0,3,optimal
+jaxglobal,nvs06,optimal,14.325579917058349,1.7703125,1.7703125,5,optimal
+jaxglobal,nvs01,optimal,26.92547545803245,12.46966882156821,12.46966882156821,19,optimal
+jaxglobal,gear,optimal,14.077395958011039,2.72645059771712e-08,0.0,61,optimal
+jaxglobal,st_testph4,optimal,17.704860957921483,-80.5,-80.5000002272704,5,optimal
+jaxglobal,gbd,optimal,19.509569458896294,2.2,2.1999989945607856,1,optimal
+jaxglobal,prob02,optimal,13.935819332953542,112235.0,112234.99751576842,5,optimal
+jaxglobal,ex1223a,optimal,15.908107291907072,4.57957873001155,4.579578730011511,1,optimal
+jaxglobal,st_e15,optimal,23.493725375039503,7.667177433007016,7.667177421705377,3,optimal
+jaxglobal,st_miqp1,optimal,22.866234167013317,281.0,281.0,1,optimal
+jaxglobal,ex1223b,optimal,15.823177749989554,4.579578730011548,4.579578730011511,5,optimal
+jaxglobal,tln2,optimal,15.962210375000723,5.3,5.299999725666864,17,optimal
+jaxglobal,alan,optimal,18.530048292013817,2.9249999940095406,2.924821832252101,5,optimal
+jaxglobal,ball_mk2_10,optimal,17.708968208055012,-0.0,0.0,1023,optimal
+jaxglobal,gkocis,optimal,17.779474375071004,-1.9231209839245196,-1.9231210650083326,9,optimal
+jaxglobal,st_e29,optimal,20.347052916069515,-0.9434705001825452,-0.9434705555634757,7,optimal
+jaxglobal,st_testgr1,optimal,28.21523558301851,-12.8116,-12.8116,113,optimal
+jaxglobal,sporttournament06,optimal,28.85893404192757,12.000000997110677,12.000001012317101,19,optimal
+jaxglobal,synthes3,optimal,30.33826987503562,68.009739969753,68.00445617160216,21,optimal
+jaxglobal,hadamard_4,time_limit,60.365975958062336,3.0000000004263896,9.000001003234209,1,time_limit
+jaxglobal,spring,optimal,56.65787208289839,0.8461604958773868,0.8460775087599263,197,optimal
+jaxglobal,portfol_buyin,time_limit,71.04136795899831,0.029423799890568696,0.0013595319835985641,1,time_limit
+jaxglobal,tspn05,time_limit,60.97824262501672,212.0561805382647,165.44312026551844,1,time_limit
+jaxglobal,ex1252a,time_limit,60.839491833001375,nan,0.0,3,time_limit
+jaxglobal,tln4,time_limit,60.32693358301185,nan,3.024999389499934,1229,time_limit
+jaxglobal,flay03m,optimal,34.32544083299581,48.98979470646023,48.98584368748302,145,optimal
+jaxglobal,m3,unsupported,7.725091666914523,,,,"unbounded variables: no finite bounds found for variables [6, 7]"
+jaxglobal,autocorr_bern20-10,time_limit,114.31810004194267,-2912.0000000000023,nan,0,time_limit
+jaxglobal,hadamard_5,time_limit,60.753431457909755,4.999999999999997,nan,0,time_limit
+jaxglobal,clay0203m,unsupported,10.598620416014455,,,,"unbounded variables: no finite bounds found for variables [6, 7, 8, 9, 10, 11]"
+jaxglobal,csched1a,time_limit,60.65478499990422,-30430.176792276874,-47247.63344285886,1101,time_limit
+jaxglobal,gear2,time_limit,63.22921783302445,0.06963471719938377,0.0,3839,time_limit
+jaxglobal,cvxnonsep_nsig30,time_limit,60.01256820803974,nan,nan,0,time_limit
+jaxglobal,cvxnonsep_normcon30,time_limit,61.240089958999306,nan,-54.22889577551375,2303,time_limit
+jaxglobal,smallinvDAXr4b150-165,unsupported,15.73123570799362,,,,unbounded variables: no finite bounds found for variables [30]
+jaxglobal,autocorr_bern30-04,time_limit,60.29323754203506,-316.0,nan,0,time_limit
+jaxglobal,smallinvDAXr5b150-165,unsupported,15.94046479195822,,,,unbounded variables: no finite bounds found for variables [30]
+jaxglobal,smallinvDAXr3b010-011,time_limit,60.7256192920031,0.4004037119999993,nan,0,time_limit
+jaxglobal,ex3pb,optimal,35.9587902079802,68.00974266776541,68.00817553837567,21,optimal
+jaxglobal,meanvarx,time_limit,61.243991541909054,15.433382674135697,11.591811661011187,1,time_limit
+jaxglobal,tln5,time_limit,62.23974329198245,nan,4.044998876734689,509,time_limit
+jaxglobal,ex4,time_limit,72.33678149990737,211052.80058846308,-16.77726995123568,1,time_limit
+jaxglobal,cvxnonsep_normcon20r,time_limit,61.19978941697627,-21.74914738810213,-21.7674563381738,25,time_limit
+jaxglobal,cvxnonsep_normcon40,time_limit,61.96204570797272,nan,-63.054441486367125,255,time_limit
+jaxglobal,cvxnonsep_pcon40,time_limit,60.00974587490782,nan,nan,0,time_limit
+jaxglobal,flay04m,time_limit,66.01249616697896,nan,38.98014524148783,127,time_limit
+jaxglobal,batch,optimal,53.70655795803759,285505.90137339855,285505.89980909677,9,optimal
+jaxglobal,tloss,time_limit,60.19866049999837,nan,16.299997191605456,7,time_limit
+jaxglobal,nous1,time_limit,60.317681208020076,nan,-0.847238327971588,1,time_limit
