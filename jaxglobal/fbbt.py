@@ -684,7 +684,16 @@ def output_bounds(tape, ineq, eq, cutoff, feas_tol):
     return out
 
 
-def propagate(tape, lo, hi, out_bounds, rounds, safe=False):
+def round_integers(lo, hi, integer, tol=1e-6):
+    """Bounds of the ``integer`` variables (indices) rounded inward; True if one has no integer left."""
+    if not len(integer):
+        return lo, hi, jnp.array(False)
+    idx = jnp.asarray(integer)
+    il, ih = jnp.ceil(lo[idx] - tol), jnp.floor(hi[idx] + tol)
+    return lo.at[idx].set(il), hi.at[idx].set(jnp.maximum(il, ih)), jnp.any(il > ih)
+
+
+def propagate(tape, lo, hi, out_bounds, rounds, safe=False, integer=()):
     """FBBT on a tape: ``rounds`` backward+forward sweeps from the box [lo, hi].
 
     Returns ``(vals, empty)``: ``vals`` maps every slot to its final value (an
@@ -714,7 +723,10 @@ def propagate(tape, lo, hi, out_bounds, rounds, safe=False):
         prior = dict(zip(slots, bounds))
         vals, e1 = _forward(tape, prior[0], prior, safe)
         b, e2 = _backward(tape, vals, live)
-        return tuple(fix(s, b[s]) for s in slots), empty | e1 | e2
+        new = [fix(s, b[s]) for s in slots]
+        xl, xh, e3 = round_integers(*new[0], integer)  # slot 0 (x) is first: slots are sorted
+        new[0] = (xl, xh)
+        return tuple(new), empty | e1 | e2 | e3
 
     init = tuple(fix(s, (lo, hi) if s == 0 else (-INF, INF)) for s in slots)
     bounds, empty = lax.fori_loop(0, rounds, body, (init, empty))
@@ -723,7 +735,7 @@ def propagate(tape, lo, hi, out_bounds, rounds, safe=False):
     return vals, empty | e
 
 
-def make_fbbt(f, ineq=None, eq=None, rounds=5, feas_tol=1e-6, safe=False, interpret="auto"):
+def make_fbbt(f, ineq=None, eq=None, rounds=5, feas_tol=1e-6, safe=False, interpret="auto", integer=()):
     """Return ``fbbt(lo, hi, cutoff) -> (lo, hi, infeasible)`` for one box.
 
     The returned box contains every point of ``[lo, hi]`` with
@@ -734,8 +746,11 @@ def make_fbbt(f, ineq=None, eq=None, rounds=5, feas_tol=1e-6, safe=False, interp
     ``.nl`` files) through the tape interpreter of ``fbbt_interp``, whose
     compile time does not grow with the model; ``True`` / ``False`` force it
     on (when the tape can be scalarized) / off.
-    """
 
+    ``integer`` (indices) are integer variables: their bounds are rounded inward
+    after every round, so that rounding propagates within the same call.
+    """
+    integer = tuple(int(i) for i in integer)
     tape_of = tape_cache(lambda x: (joint_tape(f, ineq, eq, x),))
     interp = {}
 
@@ -744,7 +759,7 @@ def make_fbbt(f, ineq=None, eq=None, rounds=5, feas_tol=1e-6, safe=False, interp
             from .fbbt_interp import make_propagate, use_interpreter
 
             on = interpret is True or (interpret == "auto" and use_interpreter(tape, n))
-            interp[n] = make_propagate(tape, ineq, eq, n, feas_tol, rounds, safe) if on else None
+            interp[n] = make_propagate(tape, ineq, eq, n, feas_tol, rounds, safe, integer=integer) if on else None
         return interp[n]
 
     def fbbt(lo, hi, cutoff=INF):
@@ -754,7 +769,7 @@ def make_fbbt(f, ineq=None, eq=None, rounds=5, feas_tol=1e-6, safe=False, interp
             if run is not None:
                 return run(lo, hi, cutoff)
         ob = output_bounds(tape, ineq, eq, jnp.asarray(cutoff, lo.dtype), feas_tol)
-        vals, empty = propagate(tape, lo, hi, ob, rounds, safe)
+        vals, empty = propagate(tape, lo, hi, ob, rounds, safe, integer)
         x = vals[0]
         return jnp.minimum(x.lo, x.hi), jnp.maximum(x.lo, x.hi), empty
 

@@ -141,3 +141,19 @@ def test_unbounded_domain_cutoff_is_integer_feasible():
     r = minimize(lambda v: v[1], [-3.0, 0.0], [3.0, np.inf], ineq=g, integer=[0])
     assert r.status == "optimal" and r.verified
     assert abs(r.fun - 0.25) < 1e-6
+
+
+def test_probing_keeps_the_optimum():
+    """spring (MINLPLib): root probing combines the two sides of each binary into one box. A side
+    box with an infinite bound once made the hull NaN, the root box was lost and the search
+    "proved" a worse incumbent (3.0097 against 0.84624)."""
+    path, ref = NL / "spring.nl", _ref("spring")
+    if not path.exists() or ref is None:
+        pytest.skip("integer MINLPLib instances not downloaded (benchmarks/minlplib/fetch.py --integer)")
+    from jaxglobal.nl import read_nl
+
+    M = read_nl(path, integers="mask")
+    r = minimize(M.f, M.lo, M.hi, ineq=M.ineq, eq=M.eq, integer=M.integer, abs_tol=1e-6, rel_tol=1e-4, time_limit=120)
+    want = float(ref["primalbound"])
+    assert r.lower_bound <= want + 1e-4 * (1 + abs(want))
+    assert r.status == "optimal" and abs(r.fun - want) <= 1e-4 * (1 + abs(want))

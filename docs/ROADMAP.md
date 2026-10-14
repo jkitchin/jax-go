@@ -824,7 +824,55 @@ continuous no-bound instances were profiled: no bound yet (compile), no
 incumbent, slow kernel calls, or too many nodes. The profile sets the order
 of stage 4.
 
-**Stage 4: performance (3 to 5 weeks).** In the expected order of payoff (the stage 3 profile moves item 4, incumbent search, to the front):
+**Stage 4: performance (in progress; exit criterion not met, see below).**
+Done so far, in the order the stage 3 profile set:
+
+* *Incumbent search.* The node kernel evaluates the LP point rounded at five
+  thresholds (`ROUNDINGS`: nearest, up, down, 1/4, 3/4), keeping the best
+  feasible or least violated one. Fix-and-solve starts from the local solution
+  of the continuous relaxation, not the LP point: on `cvxnonsep_normcon30` the
+  LP point lies far outside the ball constraint (nine integers at their upper
+  bound), and no rounding of it is feasible. Propagation dives
+  (`_Kernels.dive`, a batched kernel: fix the most fractional integer to its
+  rounding, FBBT, take the other rounding if the box empties) from the root
+  and from the best children every few iterations; tln4 and tln5 then have an
+  incumbent at the root. With at most `_ENUM` = 32 integer assignments, all are
+  fix-and-solved at the root from four starts each (`nous1` reaches its
+  optimum 1.567072 this way). `bound_domain` also tries all five roundings.
+* *Rounding inside FBBT.* `make_fbbt(..., integer=...)` rounds the integer
+  bounds after every round, in the compiled sweep and both interpreter sweeps.
+* *Root probing on binaries* (`probe`): one batch of 2 boxes per binary,
+  fixing it to 0 and 1; a side that cannot beat the incumbent fixes the
+  variable, every variable shrinks to the hull of the two sides, and the root
+  bound rises to the larger side minimum. A first version formed the hull with
+  inf arithmetic; a side box with an infinite bound made it NaN and `spring`
+  was "solved" at 3.0097 against 0.8462 (now a test).
+* *Reduced-cost fixing* comes from the stage 2 rounding of the range-reduced
+  box.
+
+*Measured* (`int50`, 60 s, runs started at load 2.1 to 4.0):
+
+| run | solved | wrong | of SCIP's 45 | SGM time (s) |
+|---|---:|---:|---:|---:|
+| stage 3, cold / warm | 24 / 29 | 0 / 0 | 24 / 29 | 36.7 / 17.3 |
+| stage 4, cold (`int50_probe_cold.csv`) | 29 | 0 | 29 | 29.2 |
+| stage 4, warm (`int50_probe_warm.csv`) | 31 | 0 | 31 (69%) | 21.8 |
+
+The exit criterion asks for half of SCIP's instances (met), 0 wrong (met) and
+every SCIP-solved instance with at most 5 integers: all but `nous1`. Its
+integer part is solved (the root enumeration finds the optimum), but proving
+it is a continuous problem: with its two binaries fixed it is a 50-variable
+pooling model whose bound calls take 6.5 s and whose relaxation stays at
+-0.75 against 1.567 after the first nodes. That is the continuous solver's
+bound on pooling (the same weakness that leaves the pooling instances of
+`start50` unsolved), not something the items below address. Not done yet:
+items 5 (integer pseudocosts), 6 (plunging) and 7 (coefficient tightening);
+the remaining unsolved instances are weak bounds on big-M, cardinality and
+convex nonlinear constraints (`ex4`, `flay04m`, `smallinvDAX*`,
+`cvxnonsep_*`, `tln*`) and compile time on dense polynomials
+(`autocorr_bern*`, `hadamard_5`).
+
+The plan as first written, in the expected order of payoff (the stage 3 profile moves item 4, incumbent search, to the front):
 
 1. *Rounding inside FBBT rounds.* Round the variable slots after each sweep,
    in both the compiled `propagate` and the interpreter, so a fixing

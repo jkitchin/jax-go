@@ -33,7 +33,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import lax
 
-from .fbbt import BACK, CTX, INF, SAFE_CTX, Const, _clean, _empty, _meet2, _pad
+from .fbbt import BACK, CTX, INF, SAFE_CTX, Const, _clean, _empty, _meet2, _pad, round_integers
 from .relax import MC, RULES, apply_rule, is_mc
 
 # equations that only move elements: the interpreter renumbers slots, no row
@@ -181,7 +181,7 @@ def _branches(prog, safe):
 SCHEDULE_MIN_ROWS = 300
 
 
-def make_propagate(tape, ineq, eq, n, feas_tol, rounds, safe=False, scheduled=None):
+def make_propagate(tape, ineq, eq, n, feas_tol, rounds, safe=False, scheduled=None, integer=()):
     """``fbbt(lo, hi, cutoff) -> (lo, hi, empty)`` by interpreting the scalarized tape, or None.
 
     ``scheduled`` (default: at least ``SCHEDULE_MIN_ROWS`` rows) sweeps step by
@@ -193,13 +193,13 @@ def make_propagate(tape, ineq, eq, n, feas_tol, rounds, safe=False, scheduled=No
     fwd, bwd = _branches(prog, safe)
     if scheduled is None:
         scheduled = len(prog.op) >= SCHEDULE_MIN_ROWS
-    run = _propagate_steps(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds) if scheduled else \
-        _propagate_rows(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds)  # fmt: skip
+    run = _propagate_steps(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds, integer) if scheduled else \
+        _propagate_rows(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds, integer)  # fmt: skip
     run.program = prog
     return run
 
 
-def _propagate_steps(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds):
+def _propagate_steps(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds, integer=()):
     """Step by step through ``layout``'s schedule: forward, each step evaluates its rows and
     writes them as one block; backward, the steps are taken in reverse, each opcode's rows
     narrowing their operands together (candidates for the same slot intersected by scatter
@@ -281,7 +281,9 @@ def _propagate_steps(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds):
             P, empty = carry
             V, e1 = forward(P)
             V, e2 = backward(V, cutoff)
-            return jnp.where(is_c[:, None], cval[:, None], V), empty | e1 | e2
+            xl, xh, e3 = round_integers(V[:n, 0], V[:n, 1], integer)  # the first n slots are x
+            V = V.at[:n, 0].set(xl).at[:n, 1].set(xh)
+            return jnp.where(is_c[:, None], cval[:, None], V), empty | e1 | e2 | e3
 
         P, empty = lax.fori_loop(0, rounds, round_, (P0, jnp.array(False)))
         V, e = forward(P)
@@ -291,7 +293,7 @@ def _propagate_steps(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds):
     return fbbt
 
 
-def _propagate_rows(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds):
+def _propagate_rows(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds, integer=()):
     """Row by row: one loop step per row, a ``lax.switch`` on its opcode."""
     op, A, B, OUT = (jnp.asarray(v) for v in (prog.op, prog.a, prog.b, prog.out))
     K = len(prog.op)
@@ -346,7 +348,9 @@ def _propagate_rows(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds):
             Pl, Ph, empty = carry
             vl, vh, e1 = forward((Pl, Ph))
             bl, bh, e2 = backward(vl, vh, cutoff)
-            return jnp.where(is_c, cval, bl), jnp.where(is_c, cval, bh), empty | e1 | e2
+            xl, xh, e3 = round_integers(bl[:n], bh[:n], integer)  # the first n slots are x
+            bl, bh = bl.at[:n].set(xl), bh.at[:n].set(xh)
+            return jnp.where(is_c, cval, bl), jnp.where(is_c, cval, bh), empty | e1 | e2 | e3
 
         Pl, Ph, empty = lax.fori_loop(0, rounds, round_, (L0, H0, jnp.array(False)))
         vl, vh, e = forward((Pl, Ph))

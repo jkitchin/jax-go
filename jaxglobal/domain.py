@@ -110,20 +110,30 @@ def _feasible_points(f, ineq, eq, lo, hi, feas_tol, n_starts, seed, deadline=Non
                            method="SLSQP", bounds=bounds, constraints=cons,
                            options={"maxiter": 300, "ftol": 1e-10})  # fmt: skip
             x = np.clip(res.x, lo, hi)
+            cands = [x]
             if integer is not None and integer.any():
-                if deadline is not None and time.perf_counter() > deadline:
-                    break
-                xi = np.clip(np.round(x), lo, hi)
-                fixed = [(v, v) if i else bd for v, i, bd in zip(xi, integer, bounds)]
-                res = minimize(timed(lambda x: tuple(np.asarray(v, np.float64) for v in fvg(x))), np.where(integer, xi, x),
-                               jac=True, method="SLSQP", bounds=fixed, constraints=cons,
-                               options={"maxiter": 300, "ftol": 1e-10})  # fmt: skip
-                x = np.where(integer, xi, np.clip(res.x, lo, hi))
+                from .bnb import ROUNDINGS
+
+                cands = []
+                fl = np.floor(x)
+                for t in ROUNDINGS:  # several roundings: nearest can leave a nonlinear constraint violated
+                    if deadline is not None and time.perf_counter() > deadline:
+                        break
+                    xi = np.clip(fl + (x - fl > t), lo, hi)
+                    fixed = [(v, v) if i else bd for v, i, bd in zip(xi, integer, bounds)]
+                    try:
+                        res = minimize(timed(lambda x: tuple(np.asarray(v, np.float64) for v in fvg(x))),
+                                       np.where(integer, xi, x), jac=True, method="SLSQP", bounds=fixed,
+                                       constraints=cons, options={"maxiter": 300, "ftol": 1e-10})  # fmt: skip
+                    except Exception:
+                        continue
+                    cands.append(np.where(integer, xi, np.clip(res.x, lo, hi)))
         except Exception:
             continue
-        fx = float(f(jnp.asarray(x)))
-        if np.isfinite(fx) and viol(jnp.asarray(x)) <= feas_tol and fx < best_f:
-            best_x, best_f = x, fx
+        for x in cands:
+            fx = float(f(jnp.asarray(x)))
+            if np.isfinite(fx) and viol(jnp.asarray(x)) <= feas_tol and fx < best_f:
+                best_x, best_f = x, fx
     return best_x, best_f
 
 

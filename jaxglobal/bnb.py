@@ -268,7 +268,7 @@ class _Kernels:
         else:
             raw_bound = make_bounder(f, n_fw, univariate=univariate, alphabb=alphabb, multivariate=multivariate,
                                      return_xr=True, safe=safe)
-        tighten = make_fbbt(f, ineq, eq, rounds=fbbt_rounds, feas_tol=feas_tol, safe=safe) if fbbt else None
+        tighten = make_fbbt(f, ineq, eq, rounds=fbbt_rounds, feas_tol=feas_tol, safe=safe, integer=integer) if fbbt else None
         lp_tighten = make_obbt(f, ineq, eq, rounds=obbt_rounds, tol=feas_tol, univariate=univariate,
                                 alphabb=alphabb, multivariate=multivariate, safe=safe) if obbt else None
 
@@ -295,10 +295,17 @@ class _Kernels:
             if not dbbt:
                 rlo, rhi = blo, bhi
             if idx.size:
-                # an incumbent candidate must be integral: f at the LP point with its integers
-                # rounded (the relaxation point xr keeps the fractional values for branching)
-                x = x.at[idx].set(jnp.clip(jnp.round(x[idx]), blo[idx], bhi[idx]))
-                fx = jnp.where(violation(x) <= feas_tol, f(x), jnp.inf)
+                # an incumbent candidate must be integral (the relaxation point xr keeps the
+                # fractional values for branching): the LP point rounded at several thresholds
+                # (nearest, up, down, 1/4, 3/4); the best feasible one, else the least violated
+                # (the start of the fix-and-solve in update_incumbent)
+                lo_i, hi_i = blo[idx], bhi[idx]
+                fl = jnp.floor(x[idx])
+                X = jnp.stack([x.at[idx].set(jnp.clip(fl + (x[idx] - fl > t), lo_i, hi_i)) for t in ROUNDINGS])
+                v = jax.vmap(violation)(X)
+                fv = jnp.where(v <= feas_tol, jax.vmap(f)(X), jnp.inf)
+                best = jnp.where(jnp.isfinite(fv).any(), jnp.argmin(fv), jnp.argmin(v))
+                x, fx = X[best], fv[best]
                 rlo, rhi, e = round_box(rlo, rhi)  # no integer point of the box has f <= cutoff
                 empty |= e
             # an empty box holds no feasible point with f <= cutoff
@@ -324,6 +331,40 @@ class _Kernels:
         self.obbt = _Precompiled(jax.jit(jax.vmap(node_obbt, in_axes=(0, 0, None))), "obbt") if obbt else None
         self._problem, self._opts, self._fingerprints = (f, ineq, eq), opts, {}
         self.viol = jax.jit(jax.vmap(violation))
+        self.dive = None
+        if idx.size and fbbt:
+            # its own FBBT (own tape and interpreter caches): this kernel is traced on the
+            # calling thread while the bound kernel may be traced on the tracer thread
+            dive_fbbt = make_fbbt(f, ineq, eq, rounds=fbbt_rounds, feas_tol=feas_tol, safe=safe, integer=integer)
+
+            def dive(blo, bhi, x, cutoff):
+                """Propagation dive from the point ``x`` in a box: fix the integers one at a time
+                (most fractional first) to their rounded value, or the other rounding when FBBT
+                then empties the box. Returns the final box and whether a variable had no
+                value left (the dive failed)."""
+                frac = jnp.abs(x[idx] - jnp.round(x[idx]))
+                order = jnp.asarray(idx)[jnp.argsort(-frac)]
+
+                def fix(lo, hi, j, val):
+                    lo, hi, e = dive_fbbt(lo.at[j].set(val), hi.at[j].set(val), cutoff)
+                    lo, hi, e2 = round_box(lo, hi)
+                    return lo, hi, e | e2
+
+                def step(p, carry):
+                    lo, hi, failed = carry
+                    j = order[p]
+                    xj = jnp.clip(x[j], lo[j], hi[j])
+                    v = jnp.round(xj)
+                    alt = jnp.clip(jnp.where(xj >= v, v + 1.0, v - 1.0), lo[j], hi[j])
+                    L, H, E = jax.vmap(lambda val: fix(lo, hi, j, val))(jnp.stack([v, alt]))
+                    k = jnp.where(E[0], 1, 0)
+                    skip = failed | (hi[j] <= lo[j])
+                    lo, hi = jnp.where(skip, lo, L[k]), jnp.where(skip, hi, H[k])
+                    return lo, hi, failed | (~skip & E[0] & E[1])
+
+                return jax.lax.fori_loop(0, idx.size, step, (blo, bhi, jnp.array(False)))
+
+            self.dive = jax.jit(jax.vmap(dive, in_axes=(0, 0, 0, None)))
         self.fvals = jax.jit(jax.vmap(f))
         self.fns = [fn for fn in (f, ineq, eq) if fn is not None]
         self.hessians = [_hessian(fn) for fn in self.fns]
@@ -436,6 +477,10 @@ class _Padder:
 
 _LAM, _BETA = 0.75, 0.2  # branch_point="relax": pull toward the relaxation minimizer, margin from faces
 INT_TOL = 1e-6  # integer variables: a value within INT_TOL of an integer counts as integral
+ROUNDINGS = (0.5, INT_TOL, 1.0 - INT_TOL, 0.25, 0.75)  # incumbent candidates: round up fractions above each
+_DIVES = 16  # propagation dives per call (integer variables)
+_PROBE = True  # integer variables: root probing on binaries (``probe`` in ``minimize``)
+_ENUM = 32  # integer variables: at the root, fix-and-solve every assignment when there are at most this many
 _FLOOR = 0.05  # pseudocosts are floored at this fraction of the mean over observed variables
 _ETA, _M = 2, 4  # branch_var="reliability": observations to trust a pseudocost, strong-branching candidates
 _BAL = 10.0  # branch_var="strong": candidates are at least 1/_BAL as wide as the widest variable
@@ -662,13 +707,18 @@ def minimize(
     def local(starts):
         """Local solves from each start; returns (x, f) of the best feasible result.
 
-        With integer variables each solve is a fix-and-solve: the integers are fixed
-        at the start's rounded values and only the continuous variables move."""
+        With integer variables a start (an LP point, which can violate the nonlinear
+        constraints far more than any rounding can repair) is first solved as the
+        continuous relaxation; that point is rounded at the ``ROUNDINGS`` thresholds and
+        each rounding is fix-and-solved: integers fixed, continuous variables free."""
         S = np.clip(np.asarray(starts, dtype=np.float64), lo, hi)
         if imask.any():
-            fixed = np.round(S)
+            R = np.clip(np.asarray(solve_local(S)), lo, hi)  # NLP relaxation
+            fl = np.floor(R)
+            fixed = np.concatenate([np.clip(fl + (R - fl > t), lo, hi) for t in ROUNDINGS])
+            fixed = np.unique(np.where(imask, fixed, np.concatenate([R] * len(ROUNDINGS))), axis=0)
             L, H = np.where(imask, fixed, lo), np.where(imask, fixed, hi)
-            X = np.clip(np.asarray(solve_local(S, L, H)), L, H)
+            X = np.clip(np.asarray(solve_local(fixed, L, H)), L, H)
         else:
             X = np.clip(np.asarray(solve_local(S)), lo, hi)
         F = np.asarray(K.fvals(jnp.asarray(X)), dtype=np.float64)
@@ -733,6 +783,67 @@ def minimize(
     def tol():
         return max(abs_tol, rel_tol * abs(ub)) if np.isfinite(ub) else abs_tol
 
+    rng = np.random.default_rng(0)
+
+    def dive(blo, bhi, points):
+        """Propagation dives (``_Kernels.dive``) from up to ``_DIVES`` points in their boxes,
+        then a local solve of the continuous variables in each box that ends with every
+        integer fixed; improves the incumbent."""
+        nonlocal ub, xbest
+        if K.dive is None or not len(points):
+            return
+        k = min(len(points), _DIVES)
+        pad = lambda A: np.concatenate([A[:k], np.repeat(A[:1], _DIVES - k, 0)])  # noqa: E731
+        DL, DH, F = (np.asarray(a) for a in K.dive(jnp.asarray(pad(blo)), jnp.asarray(pad(bhi)),
+                                                    jnp.asarray(pad(points)), jnp.asarray(ub, jnp.float64)))  # fmt: skip
+        ok = ~F[:k] & np.all(DL[:k, imask] == DH[:k, imask], axis=1)
+        if ok.any():
+            fixed_solve(DL[:k][ok], DH[:k][ok], pad(points)[:k][ok])
+
+    def probe(rlo, rhi, lb):
+        """Root probing on the binary variables: bound the box with each one at 0 and at 1 (one
+        batch). A side that is empty or cannot beat the incumbent fixes the variable to the other
+        side; every variable shrinks to the hull of the two sides' tightened boxes (any feasible
+        point lies in one of them); and the root bound rises to the larger side minimum."""
+        j = np.flatnonzero(imask & (rhi[0] - rlo[0] == 1.0))
+        if not len(j):
+            return rlo, rhi, lb
+        P_lo, P_hi = np.repeat(rlo, 2 * len(j), 0), np.repeat(rhi, 2 * len(j), 0)
+        r = np.arange(len(j))
+        P_hi[2 * r, j] = rlo[0, j]  # side 0: x_j at its lower bound
+        P_lo[2 * r + 1, j] = rhi[0, j]  # side 1: x_j at its upper bound
+        plb, px, pf, plo, phi, _ = evaluate(P_lo, P_hi)
+        update_incumbent(px, pf, plb)
+        plb = np.where(np.isnan(plb), -np.inf, plb).reshape(-1, 2)
+        dead = plb >= ub - tol()
+        plo, phi = plo.reshape(-1, 2, lo.size), phi.reshape(-1, 2, lo.size)
+        # a side's tightened box; one with non-finite bounds tightens nothing (its probe box)
+        bad = ~(np.isfinite(plo) & np.isfinite(phi))
+        plo = np.where(bad, P_lo.reshape(-1, 2, lo.size), plo)
+        phi = np.where(bad, P_hi.reshape(-1, 2, lo.size), phi)
+        # a dead side does not widen the hull (masked, not inf arithmetic: inf - inf is NaN)
+        hull_lo = np.min(np.where(dead[..., None], np.inf, plo), axis=1)
+        hull_hi = np.max(np.where(dead[..., None], -np.inf, phi), axis=1)
+        new_lo = np.maximum(rlo[0], np.max(np.where(dead.all(axis=1)[:, None], rlo[0], hull_lo), axis=0))
+        new_hi = np.minimum(rhi[0], np.min(np.where(dead.all(axis=1)[:, None], rhi[0], hull_hi), axis=0))
+        new_lb = np.maximum(lb, np.max(np.min(plb, axis=1)))
+        if np.any(new_lo > new_hi) or dead.all(axis=1).any():  # every side of some binary is dead
+            return rlo, rhi, np.maximum(new_lb, ub)
+        return new_lo[None], new_hi[None], new_lb
+
+    def fixed_solve(L, H, S):
+        """Local solves of the continuous variables in boxes whose integers are fixed (``L``,
+        ``H``) from the points ``S``; improves the incumbent."""
+        nonlocal ub, xbest
+        X = np.clip(np.asarray(solve_local(np.clip(S, L, H), L, H)), L, H)
+        F = np.asarray(K.fvals(jnp.asarray(X)), dtype=np.float64)
+        if constrained:
+            F = np.where(np.asarray(K.viol(jnp.asarray(X))) <= feas_tol, F, np.inf)
+        F = np.where(np.isnan(F), np.inf, F)
+        i = int(np.argmin(F))
+        if F[i] < ub:
+            ub, xbest = float(F[i]), X[i]
+
     try:
         lb, xc, fc, rlo, rhi, rxr = evaluate(lo[None], hi[None])
     except _CompileTimeout as e:  # no bound at all yet: report what is known
@@ -743,6 +854,20 @@ def minimize(
                       message=f"time_limit reached while compiling the '{e}' kernel; no bound computed",
                       max_violation=maxv, verified=verified)  # fmt: skip
     update_incumbent(xc, fc, lb)
+    if imask.any() and np.all(np.isfinite(lb)) and np.all(np.isfinite(rxr)):  # root dives: relaxation point, perturbed
+        P = np.clip(rxr + rng.normal(size=(_DIVES, lo.size)) * 0.1 * (rhi - rlo) * (np.arange(_DIVES) > 0)[:, None],
+                    rlo, rhi)  # fmt: skip
+        dive(np.repeat(rlo, _DIVES, 0), np.repeat(rhi, _DIVES, 0), P)
+        # few integer assignments: fix-and-solve every one (rounding and dives try one or two)
+        ii = np.flatnonzero(imask)
+        sizes = rhi[0, ii] - rlo[0, ii] + 1
+        if np.prod(sizes) <= _ENUM:
+            A = np.array(list(itertools.product(*[np.arange(rlo[0, j], rhi[0, j] + 1) for j in ii])))
+            A = np.repeat(A, 4, 0)  # each from the relaxation point and 3 random points of the box
+            L, H = np.repeat(rlo, len(A), 0), np.repeat(rhi, len(A), 0)
+            L[:, ii] = H[:, ii] = A
+            S = np.where((np.arange(len(A)) % 4 == 0)[:, None], rxr, rng.uniform(L, H))
+            fixed_solve(L, H, S)
     if obbt and (constrained or np.isfinite(ub)) and not (ub - float(lb.min()) <= tol()):
         # root OBBT once an incumbent cutoff is known (it is useless without
         # one when there are no constraints), and not when the root bound has
@@ -756,6 +881,11 @@ def minimize(
             rlo, rhi, rxr = rlo2, rhi2, rxr2
             lb = np.maximum(lb, lb2)
             update_incumbent(xc, fc, lb)
+    if _PROBE and imask.any() and np.all(np.isfinite(lb)) and not (ub - float(lb.min()) <= tol()):
+        try:
+            rlo, rhi, lb = probe(rlo, rhi, lb)
+        except _CompileTimeout:
+            pass
     open_lo, open_hi, open_lb, open_xr = rlo, rhi, lb, rxr
     sumL, sumR, cnt = np.zeros(lo.size), np.zeros(lo.size), np.zeros(lo.size)  # pseudocost sums, observations
 
@@ -902,6 +1032,9 @@ def minimize(
         except _CompileTimeout:  # out of time while a kernel compiles; the open boxes are unchanged
             break
         update_incumbent(cx, cf, clb)
+        if imask.any() and it % (2 if not np.isfinite(ub) else 10) == 0:  # dives from the most promising children
+            o = np.argsort(clb)[:_DIVES]
+            dive(clo[o], chi[o], cxr[o])
         if branch_var != "width":
             # pseudocost observations: bound gain per squared relative width
             gl, gr = np.maximum(clb[:M] - plb[pp], 0.0), np.maximum(clb[M:] - plb[pp], 0.0)
