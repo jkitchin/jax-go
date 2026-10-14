@@ -132,7 +132,7 @@ def test_affine_rows_once(dedup, monkeypatch):
     def bounds(on):
         """Compiled bounder and OBBT; the affine parts are read while tracing, so compile here."""
         if not on:
-            monkeypatch.setattr(LP, "_affine_parts", lambda *a: None)
+            monkeypatch.setattr(LP, "_nonlinear_vars", lambda *a: None)
         box = (jnp.asarray(lo0), jnp.asarray(hi0))
         cb = jax.jit(LP.make_constrained_bounder(f, g, h, tol=tol, univariate=True, alphabb=True)).lower(*box).compile()
         ob = jax.jit(LP.make_obbt(f, g, h, tol=tol, univariate=True, alphabb=True)).lower(*box).compile()
@@ -154,4 +154,76 @@ def test_affine_rows_once(dedup, monkeypatch):
         assert not bool(oempty)
         assert np.all(X[inside] >= np.asarray(olo) - 1e-9) and np.all(X[inside] <= np.asarray(ohi) + 1e-9)
         ref = float(cb_all(jnp.asarray(a), jnp.asarray(b))[0])
+        assert abs(lb - ref) <= 1e-4 * (1 + abs(ref)), (a, b, lb, ref)
+
+
+def haverly1():
+    """Haverly's pooling problem 1 (p-formulation, minimizing): f* = -400 at ``HAVERLY_X``.
+    x = (A, B, C, Px, Py, Cx, Cy, p): source flows, pool-to-product flows, direct flows of C,
+    pool quality."""
+
+    def f(x):
+        A, B, C, Px, Py, Cx, Cy, p = (x[i] for i in range(8))
+        return -(9.0 * (Px + Cx) + 15.0 * (Py + Cy) - 6.0 * A - 16.0 * B - 10.0 * C)
+
+    def g(x):
+        A, B, C, Px, Py, Cx, Cy, p = (x[i] for i in range(8))
+        return jnp.stack([p * Px + 2.0 * Cx - 2.5 * (Px + Cx), p * Py + 2.0 * Cy - 1.5 * (Py + Cy),
+                          Px + Cx - 100.0, Py + Cy - 200.0])  # fmt: skip
+
+    def h(x):
+        A, B, C, Px, Py, Cx, Cy, p = (x[i] for i in range(8))
+        return jnp.stack([A + B - Px - Py, C - Cx - Cy, p * (Px + Py) - 3.0 * A - B])
+
+    lo, hi = np.r_[np.zeros(7), 1.0], np.r_[np.full(7, 300.0), 3.0]
+    return f, g, h, lo, hi
+
+
+HAVERLY_X = np.array([0.0, 100.0, 100.0, 0.0, 100.0, 0.0, 100.0, 1.0])
+
+
+def test_nonlinear_vars_pooling():
+    """Each part keeps its cuts at the axis points of the variables it is nonlinear in only."""
+    from jaxglobal.lp import _cut_rows, _nonlinear_vars
+
+    f, g, h, lo, hi = haverly1()
+    nl = _nonlinear_vars(f, g, h, 8)
+    # parts: f, g0..g3, h0..h2, -cc of h0..h2; the bilinear terms are p*Px, p*Py, p*(Px + Py)
+    want = np.zeros((11, 8), bool)
+    want[[1, 7, 10], 3] = want[[2, 7, 10], 4] = want[[1, 2, 7, 10], 7] = True
+    assert (nl == want).all()
+    P = 2 * 8 + 1 + 4  # center, axis points, Kelley points
+    keep = _cut_rows((P, 11), nl)
+    # every part at the center, 4 (g0, g1) or 6 (h2, -cc h2) axis points, 4 Kelley points
+    assert len(keep) == 11 + 2 * (4 + 4) + 2 * (6 + 4)
+
+
+def test_pooling_rows_valid():
+    """On a pooling model the node bound with the reduced cut rows is valid on boxes holding the
+    optimum and matches the bound from all rows."""
+    import jaxglobal.lp as LP
+
+    f, g, h, lo0, hi0 = haverly1()
+    tol = 1e-6
+
+    def bounder(on, monkeypatch=None):
+        cb = LP.make_constrained_bounder(f, g, h, tol=tol, univariate=True, alphabb=True)
+        if on:
+            return jax.jit(cb)
+        orig = LP._nonlinear_vars
+        LP._nonlinear_vars = lambda *a: None
+        try:
+            return jax.jit(cb).lower(jnp.asarray(lo0), jnp.asarray(hi0)).compile()
+        finally:
+            LP._nonlinear_vars = orig
+
+    cb, cb_all = bounder(True), bounder(False)
+    rng = np.random.default_rng(5)
+    w = hi0 - lo0
+    boxes = [(lo0, hi0)] + [(np.maximum(lo0, HAVERLY_X - rng.uniform(0, 0.5, 8) * w),
+                             np.minimum(hi0, HAVERLY_X + rng.uniform(0, 0.5, 8) * w)) for _ in range(6)]  # fmt: skip
+    for a, b in boxes:
+        lb = float(cb(jnp.asarray(a), jnp.asarray(b))[0])
+        ref = float(cb_all(jnp.asarray(a), jnp.asarray(b))[0])
+        assert lb <= -400.0 + 1e-6, (a, b, lb)
         assert abs(lb - ref) <= 1e-4 * (1 + abs(ref)), (a, b, lb, ref)
