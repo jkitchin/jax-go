@@ -7,7 +7,7 @@ GAMS, e.g. BARON) and instances.csv, or instances_int.csv for ``--integer``
 (name, nvars, ncons, probtype, primal/dual bound, gap, convexity, and the
 numbers of binary and integer variables).
 
-Run:  python benchmarks/minlplib/fetch.py [--integer]
+Run:  python benchmarks/minlplib/fetch.py [--integer] [--max-vars N]
 """
 
 import csv
@@ -39,17 +39,17 @@ def get(url, path):
         path.write_bytes(r.read())
 
 
-def main(integer=False):
+def main(integer=False, max_vars=MAX_VARS):
     get("https://www.minlplib.org/instancedata.csv", HERE / "instancedata.csv")
     rows = list(csv.DictReader(open(HERE / "instancedata.csv"), delimiter=";"))
     if integer:
         sel = [r for r in rows
                if int(r["nbinvars"]) + int(r["nintvars"]) > 0 and r["nsemi"] == r["nsos1"] == r["nsos2"] == "0"
-               and "nl" in r["formats"] and int(r["nvars"]) <= MAX_VARS]  # fmt: skip
+               and "nl" in r["formats"] and int(r["nvars"]) <= max_vars]  # fmt: skip
     else:
         sel = [r for r in rows
                if r["nbinvars"] == r["nintvars"] == r["nsemi"] == "0"
-               and "nl" in r["formats"] and int(r["nvars"]) <= MAX_VARS]  # fmt: skip
+               and "nl" in r["formats"] and int(r["nvars"]) <= max_vars]  # fmt: skip
     sel.sort(key=lambda r: (int(r["nvars"]), r["name"]))
     jobs = []
     for fmt in ("nl", "gms"):
@@ -66,4 +66,5 @@ def main(integer=False):
 
 
 if __name__ == "__main__":
-    main(integer="--integer" in sys.argv[1:])
+    args = sys.argv[1:]
+    main(integer="--integer" in args, max_vars=int(args[args.index("--max-vars") + 1]) if "--max-vars" in args else MAX_VARS)

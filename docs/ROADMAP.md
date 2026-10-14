@@ -918,7 +918,27 @@ The plan as first written, in the expected order of payoff (the stage 3 profile 
 (warm cache), every SCIP-solved instance with at most 5 integers, and 0
 wrong.
 
-**Stage 5: toward 100 to 200 variables (later).** Re-measure on the 328
+**Stage 5: toward 100 to 200 variables (measured; the work it points to is
+continuous).** `fetch.py --integer --max-vars 100` gives 328 instances (all
+decode; `instances_int.csv` now holds them). jaxglobal at 60 s, cold
+(`results/int328_stage5.csv`; started at load 2.9, then 60 to 88 from other
+work for most of the run, so the counts are pessimistic): 73 solved, **0
+wrong**, 229 time limits, 26 unsupported (no finite bound for an unbounded
+variable). By size: 72 of 220 with at most 50 variables (81 in the stage 2
+run of the same instances), 1 of 108 with 51 to 100. The SCIP run on the 328
+was skipped. A profile of 10 of the 51-100 instances (one per family, cold,
+load 63 to 149, so times are inflated) shows the search hardly starts: 0 or 1
+nodes in 60 s. The time goes to setup: tracing and lowering the bound and
+OBBT kernels (9 to 37 s each) and compiling them (9 to 25 s each), first bound
+calls of 7 to 50 s (the dense LP, rows times n squared per iteration),
+building the local solver (up to 24 s), the Hessian-sampled
+`nonlinear_variables` (18 s on `spectra2`) and deriving bounds (33 s on `m6`,
+still unbounded). Where the root is reached the incumbent is good
+(`cvxnonsep_normcon30r` ends at -34.55 to -34.23 after one node). So the next
+gains at this size are the continuous ones already on this roadmap: the LP
+(sparse or first-order, fewer cut points), compile time (one relaxation trace
+per cut site), and setup work outside the kernels; issue #12 tracks the
+pooling bound. The plan as first written: Re-measure on the 328
 instances with at most 100 variables. The known costs grow as in the
 continuous case: the dense IPM (rows times n squared per iteration; linear
 constraints already contribute one row each), the kernel compile time (one
