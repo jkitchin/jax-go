@@ -1,7 +1,9 @@
 """Batched local NLP solves for upper bounds.
 
-``make_local(f, ineq, eq, lo, hi, solver)`` returns ``solve(X0) -> X`` mapping a
-batch of starting points to local solutions. Backends:
+``make_local(f, ineq, eq, lo, hi, solver)`` returns ``solve(X0, LO=None, HI=None) -> X``
+mapping a batch of starting points to local solutions, within ``[lo, hi]`` or
+per-start bounds ``LO``, ``HI`` (each (k, n); used to fix integer variables).
+Backends:
 
 * ``"pounce"``: the pounce interior-point solver (Rust, Ipopt-derived) with
   exact JAX-built derivatives (``pounce.jax.from_jax``); the batch runs in
@@ -142,8 +144,13 @@ def _pounce_local(f, ineq, eq, lo, hi, options=None):
         prob = from_jax(f, **kw)
     opts = dict(print_level=0, tol=1e-10, max_iter=200, sb="yes", **(options or {}))
 
-    def solve(X0):
-        res = pounce.solve_nlp_batch([prob] * len(X0), list(X0), options=opts)
+    def with_bounds(lb, ub):  # the compiled functions are shared; only the bounds differ
+        return pounce.Problem(n=lo.size, m=mi + me, problem_obj=prob.problem_obj, lb=lb, ub=ub,
+                              cl=kw.get("cl"), cu=kw.get("cu"))  # fmt: skip
+
+    def solve(X0, LO=None, HI=None):
+        probs = [prob] * len(X0) if LO is None else [with_bounds(a, b) for a, b in zip(LO, HI)]
+        res = pounce.solve_nlp_batch(probs, list(X0), options=opts)
         return np.stack([x for x, _ in res])
 
     return solve
@@ -156,12 +163,10 @@ def _scipy_local(f, ineq, eq, lo, hi):
     fvg = jax.jit(jax.value_and_grad(f))
     gj = jax.jit(lambda x: (g(x), jax.jacfwd(g)(x)))
     hj = jax.jit(lambda x: (h(x), jax.jacfwd(h)(x)))
-    bounds = list(zip(lo, hi))
-
     def fun(x):
         return tuple(np.asarray(v, dtype=np.float64) for v in fvg(x))
 
-    def one(x0):
+    def one(x0, bounds):
         if ineq is None and eq is None:
             return minimize(fun, x0, jac=True, method="L-BFGS-B", bounds=bounds).x
         cons = []
@@ -172,7 +177,11 @@ def _scipy_local(f, ineq, eq, lo, hi):
         return minimize(fun, x0, jac=True, method="SLSQP", bounds=bounds, constraints=cons,
                         options={"maxiter": 200, "ftol": 1e-12}).x  # fmt: skip
 
-    return lambda X0: np.stack([one(x0) for x0 in X0])
+    def solve(X0, LO=None, HI=None):
+        LO, HI = (np.broadcast_to(lo, np.shape(X0)), np.broadcast_to(hi, np.shape(X0))) if LO is None else (LO, HI)
+        return np.stack([one(x0, list(zip(a, b))) for x0, a, b in zip(X0, LO, HI)])
+
+    return solve
 
 
 def make_local(f, ineq, eq, lo, hi, solver="auto"):
@@ -186,11 +195,13 @@ def make_local(f, ineq, eq, lo, hi, solver="auto"):
         return _scipy_local(f, ineq, eq, lo, hi)
     if solver == "optax":
         one = make_local_solver(f, ineq, eq)
-        batched = jax.jit(jax.vmap(one, in_axes=(0, None, None)))
-        def solve(X0, k=8):  # pad to a multiple of k starts so jit compiles once
+        batched = jax.jit(jax.vmap(one, in_axes=(0, 0, 0)))
+
+        def solve(X0, LO=None, HI=None, k=8):  # pad to a multiple of k starts so jit compiles once
             n = len(X0)
-            X0 = np.concatenate([X0, np.repeat(X0[:1], -n % k, 0)])
-            return np.asarray(batched(jnp.asarray(X0), jnp.asarray(lo), jnp.asarray(hi)))[:n]
+            LO, HI = (np.broadcast_to(lo, np.shape(X0)), np.broadcast_to(hi, np.shape(X0))) if LO is None else (LO, HI)
+            pad = lambda A: np.concatenate([A, np.repeat(A[:1], -n % k, 0)])  # noqa: E731
+            return np.asarray(batched(jnp.asarray(pad(X0)), jnp.asarray(pad(LO)), jnp.asarray(pad(HI))))[:n]
 
         return solve
     raise ValueError(f"unknown local_solver {solver!r}")

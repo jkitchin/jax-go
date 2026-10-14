@@ -71,11 +71,11 @@ def worker(name, tl):
     from jaxglobal.nl import NLError, read_nl
 
     try:
-        M = read_nl(LIB / "nl" / f"{name}.nl")
+        M = read_nl(LIB / "nl" / f"{name}.nl", integers="mask")
     except NLError as e:
         return dict(status="unsupported", message=str(e))
     t0 = time.perf_counter()
-    r = minimize(M.f, M.lo, M.hi, ineq=M.ineq, eq=M.eq, abs_tol=ABS_GAP, rel_tol=REL_GAP,
+    r = minimize(M.f, M.lo, M.hi, ineq=M.ineq, eq=M.eq, integer=M.integer, abs_tol=ABS_GAP, rel_tol=REL_GAP,
                  feas_tol=FEAS_TOL, time_limit=tl, **EXTRA)  # fmt: skip
     if r.status == "unbounded_domain":
         return dict(status="unsupported", message="unbounded variables: " + r.message)

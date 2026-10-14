@@ -709,7 +709,35 @@ The plan as first written:
    binary versus general integer, and convex versus not, with at most 3 per
    family.
 
-**Stage 2: correct and complete integer B&B (1 week).**
+**Stage 2: correct and complete integer B&B (done).** `minimize(...,
+integer=...)` rounds integer bounds on entry, in the node kernel after FBBT,
+range reduction and OBBT (`round_box`, `INT_TOL = 1e-6`), splits integer
+variables at `floor(v)` / `floor(v) + 1` (fractional integers first in the
+`width` rule), evaluates incumbent candidates at the LP point with its integers
+rounded, and fix-and-solves them (per-start bounds in every `local.py`
+backend; pounce reuses its compiled functions). Integer variables are always
+branchable, also where they enter linearly. `_verify` checks integrality.
+`bound_domain` takes the mask: the point whose value bounds the objective must
+be integral (rounded, then the continuous variables re-solved), since a
+relaxation point cut off every integer solution of `gear4` (reported
+infeasible). Its local solves also check the deadline inside the SLSQP
+callbacks, and running out of time while deriving bounds now reports
+`time_limit`. Tests (`tests/test_integer.py`): hand-made pure and mixed
+problems, infeasibility by integrality, linear-only integers, enumeration of
+every integer assignment on random problems, the 11 tiny MINLPLib instances,
+and the `gear4` failure mode.
+*Measured* on all 220 instances at 60 s (`results/int220_stage2.csv`; start
+load 3.1, end about 100 from the run's own jobs and other work): 81 solved
+(80 optimal, `ball_mk3_10` correctly infeasible), **0 wrong**, 104 time
+limits, 35 unsupported. All `st_miqp` (5) and 9 / 10 `st_test` solved, but
+only 9 / 14 `ex12*` and 15 / 24 `nvs`; `nvs05`, a time limit here, solves alone
+in 50 s, so part of the gap is load and the rest is speed, which stages 3 and 4
+address. The 35 unsupported get no finite bound for some variable: 25 are
+`smallinvDAX*`, whose objective variable is bounded only by an integer
+feasible point, and rounding breaks their budget constraint (incumbent search,
+stage 4). 13 runs were killed for running past the limit: tracing very large
+models (the `eg_*` GP surrogates, 868 KB `.nl` files) in the bound-deriving
+local solve cannot be interrupted. The plan as first written:
 
 1. *Rounding in the node kernel.* After FBBT, after the duality-based range
    reduction (`reduce_ranges`) and after OBBT, round the masked bounds inward

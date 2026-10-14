@@ -240,7 +240,7 @@ class _Kernels:
     """
 
     def __init__(self, f, ineq, eq, *, n_fw, n_kelley, fbbt, fbbt_rounds, dbbt, obbt, obbt_rounds,
-                 univariate, alphabb, multivariate, lifted, crown, feas_tol, safe):  # fmt: skip
+                 univariate, alphabb, multivariate, lifted, crown, feas_tol, safe, integer=()):  # fmt: skip
         opts = {k: v for k, v in locals().items() if k not in ("self", "f", "ineq", "eq")}
         constrained = ineq is not None or eq is not None
         g, h = _vec(ineq), _vec(eq)
@@ -273,17 +273,34 @@ class _Kernels:
                                 alphabb=alphabb, multivariate=multivariate, safe=safe) if obbt else None
 
         crown_lb = make_crown(f, safe=safe) if crown else None
+        idx = np.asarray(integer, dtype=np.int64)
+
+        def round_box(lo, hi):
+            """Integer bounds rounded inward (``_round_bounds``); True if that empties the box."""
+            if not idx.size:
+                return lo, hi, jnp.array(False)
+            il, ih = jnp.ceil(lo[idx] - INT_TOL), jnp.floor(hi[idx] + INT_TOL)
+            return lo.at[idx].set(il), hi.at[idx].set(jnp.maximum(il, ih)), jnp.any(il > ih)
 
         def node(blo, bhi, cutoff):
             """Tighten, then bound one box. Returns (lb, x, f(x), lo', hi', xr)."""
             empty = jnp.array(False)
             if tighten is not None:
                 blo, bhi, empty = tighten(blo, bhi, cutoff)
+            blo, bhi, e = round_box(blo, bhi)
+            empty |= e
             lb, x, fx, rlo, rhi, xr = raw_bound(blo, bhi, cutoff)
             if crown_lb is not None:  # both bounds are valid on the box: take the larger
                 lb = jnp.maximum(jnp.where(jnp.isnan(lb), -jnp.inf, lb), crown_lb(blo, bhi))
             if not dbbt:
                 rlo, rhi = blo, bhi
+            if idx.size:
+                # an incumbent candidate must be integral: f at the LP point with its integers
+                # rounded (the relaxation point xr keeps the fractional values for branching)
+                x = x.at[idx].set(jnp.clip(jnp.round(x[idx]), blo[idx], bhi[idx]))
+                fx = jnp.where(violation(x) <= feas_tol, f(x), jnp.inf)
+                rlo, rhi, e = round_box(rlo, rhi)  # no integer point of the box has f <= cutoff
+                empty |= e
             # an empty box holds no feasible point with f <= cutoff
             return (jnp.where(empty, cutoff, lb), x, jnp.where(empty, jnp.inf, fx),
                     jnp.where(empty, blo, rlo), jnp.where(empty, bhi, rhi),
@@ -300,7 +317,8 @@ class _Kernels:
             if tighten is not None and obbt == "tree":
                 blo, bhi, empty = tighten(blo, bhi, cutoff)
             blo, bhi, e = lp_tighten(blo, bhi, cutoff)
-            return blo, bhi, empty | e
+            blo, bhi, e2 = round_box(blo, bhi)
+            return blo, bhi, empty | e | e2
 
         self.bound = _Precompiled(jax.jit(jax.vmap(node, in_axes=(0, 0, None))), "bound")
         self.obbt = _Precompiled(jax.jit(jax.vmap(node_obbt, in_axes=(0, 0, None))), "obbt") if obbt else None
@@ -321,12 +339,34 @@ def _vec(fn):
     return lambda x: jnp.atleast_1d(fn(x)) if fn is not None else jnp.zeros(0)
 
 
-def _verify(f, ineq, eq, x, fun, lo, hi, feas_tol):
+def _integer_mask(integer, n):
+    """``integer`` (None, a boolean mask or indices) as a boolean mask of length ``n``."""
+    mask = np.zeros(n, bool)
+    if integer is None:
+        return mask
+    a = np.asarray(integer)
+    if a.dtype == bool:
+        if a.shape != (n,):
+            raise ValueError(f"integer mask has shape {a.shape}, expected ({n},)")
+        return a.copy()
+    mask[a.astype(np.int64)] = True
+    return mask
+
+
+def _round_bounds(lo, hi, mask):
+    """Integer bounds rounded inward, ``ceil(lo - INT_TOL)`` and ``floor(hi + INT_TOL)`` (infinite ones stay)."""
+    lo, hi = lo.copy(), hi.copy()
+    lo[mask], hi[mask] = np.ceil(lo[mask] - INT_TOL), np.floor(hi[mask] + INT_TOL)
+    return lo, hi
+
+
+def _verify(f, ineq, eq, x, fun, lo, hi, feas_tol, integer=None):
     """Re-evaluate ``x`` outside jit in float64: ``(max_violation, ok, reason)``.
 
-    Checks the box, ``ineq <= feas_tol``, ``|eq| <= feas_tol`` and
-    ``f(x) == fun`` (to 1e-8 relative). With no incumbent (``fun`` infinite)
-    there is nothing to verify: ``(inf, False, "")``.
+    Checks the box, ``ineq <= feas_tol``, ``|eq| <= feas_tol``, integrality of
+    the ``integer`` variables (a mask) to ``INT_TOL`` and ``f(x) == fun`` (to
+    1e-8 relative). With no incumbent (``fun`` infinite) there is nothing to
+    verify: ``(inf, False, "")``.
     """
     if not np.isfinite(fun):
         return float("inf"), False, ""
@@ -346,6 +386,10 @@ def _verify(f, ineq, eq, x, fun, lo, hi, feas_tol):
         why.append(f"constraint violation {viol:.3g} > feas_tol {feas_tol:.3g}")
     if abs(fx - fun) > 1e-8 * (1 + abs(fun)):
         why.append(f"f(x) = {fx:.12g} != fun = {fun:.12g}")
+    if integer is not None and np.any(integer):
+        off = float(np.max(np.abs(x[integer] - np.round(x[integer]))))
+        if off > INT_TOL:
+            why.append(f"integer variables off integral values by {off:.3g}")
     return viol, not why, "; ".join(why)
 
 
@@ -391,6 +435,7 @@ class _Padder:
 
 
 _LAM, _BETA = 0.75, 0.2  # branch_point="relax": pull toward the relaxation minimizer, margin from faces
+INT_TOL = 1e-6  # integer variables: a value within INT_TOL of an integer counts as integral
 _FLOOR = 0.05  # pseudocosts are floored at this fraction of the mean over observed variables
 _ETA, _M = 2, 4  # branch_var="reliability": observations to trust a pseudocost, strong-branching candidates
 _BAL = 10.0  # branch_var="strong": candidates are at least 1/_BAL as wide as the widest variable
@@ -432,6 +477,7 @@ def minimize(
     *,
     ineq=None,
     eq=None,
+    integer=None,
     abs_tol=1e-6,
     rel_tol=1e-6,
     feas_tol=1e-6,
@@ -465,6 +511,10 @@ def minimize(
     ``f`` is any JAX-traceable Python function of a 1-D array returning a
     scalar; ``ineq`` / ``eq`` return a scalar or 1-D array of constraint values.
     A point is accepted as feasible when ``ineq <= feas_tol`` and ``|eq| <= feas_tol``.
+    ``integer`` marks integer variables (a boolean mask or an array of indices):
+    their bounds are rounded inward, they are branched on at integer values, and
+    a returned ``x`` has them integral (``Result.verified`` checks it to
+    ``INT_TOL``). The relaxations are those of the continuous problem.
     ``local_solver`` picks the upper-bounding local NLP solver: ``"pounce"``,
     ``"optax"`` (pure JAX), ``"scipy"``, or ``"auto"`` (pounce if installed).
     The search stops with status ``"time_limit"`` after ``time_limit`` seconds,
@@ -539,16 +589,22 @@ def minimize(
     hi = np.asarray(hi, dtype=np.float64)
     lo_user, hi_user = lo, hi
     seed_x, seed_f = None, np.inf
+    imask = _integer_mask(integer, lo.size)
     if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
         # derive finite bounds from the constraints and a feasible point (domain.py)
         try:
             lo, hi, infeasible0, seed_x, seed_f = bound_domain(f, ineq, eq, lo, hi, feas_tol=feas_tol,
-                                                               deadline=t0 + time_limit)
+                                                               deadline=t0 + time_limit, integer=imask)
         except DomainTimeout:
             x = np.clip(np.zeros(lo.size), lo, hi)
             return Result(x=x, fun=np.inf, lower_bound=-np.inf, converged=False, iterations=0, nodes=0,
                           time=time.perf_counter() - t0, status="time_limit",
                           message="time_limit reached while deriving bounds for unbounded variables")
+        if not infeasible0 and not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))) and \
+                time.perf_counter() - t0 > time_limit:  # fmt: skip
+            return Result(x=np.clip(np.zeros(lo.size), lo, hi), fun=np.inf, lower_bound=-np.inf, converged=False,
+                          iterations=0, nodes=0, time=time.perf_counter() - t0, status="time_limit",
+                          message="time_limit reached while deriving bounds for unbounded variables")  # fmt: skip
         if infeasible0 or not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
             free = np.flatnonzero(~(np.isfinite(lo) & np.isfinite(hi)))
             status = "infeasible" if infeasible0 else "unbounded_domain"
@@ -559,6 +615,16 @@ def minimize(
                 converged=bool(infeasible0), iterations=0, nodes=0, time=time.perf_counter() - t0,
                 status=status, message="" if infeasible0 else f"no finite bounds found for variables {free.tolist()}",
             )  # fmt: skip
+    if imask.any():
+        lo, hi = _round_bounds(lo, hi, imask)
+        if np.any(lo > hi):
+            bad = np.flatnonzero(lo > hi).tolist()
+            return Result(x=np.clip(np.round(0.5 * (lo_user + hi_user)), lo_user, hi_user), fun=np.inf,
+                          lower_bound=np.inf, converged=True, iterations=0, nodes=0,
+                          time=time.perf_counter() - t0, status="infeasible",
+                          message=f"no integer value within the bounds of variables {bad}")  # fmt: skip
+        if seed_x is not None and np.any(np.abs(seed_x[imask] - np.round(seed_x[imask])) > INT_TOL):
+            seed_x, seed_f = None, np.inf  # a feasible point of the relaxation only
     width0 = np.where(hi > lo, hi - lo, 1.0)
     constrained = ineq is not None or eq is not None
     if branch_point not in ("mid", "relax"):
@@ -575,7 +641,8 @@ def minimize(
         crown = crown_supported(f, lo)  # an unsupported f gets no CROWN kernel
     opts = dict(n_fw=n_fw, n_kelley=n_kelley, fbbt=bool(fbbt), fbbt_rounds=fbbt_rounds, dbbt=bool(dbbt),
                 obbt=obbt or False, obbt_rounds=obbt_rounds, univariate=univariate, alphabb=alphabb,
-                multivariate=multivariate, lifted=lifted, crown=bool(crown), feas_tol=feas_tol, safe=bool(safe))  # fmt: skip
+                multivariate=multivariate, lifted=lifted, crown=bool(crown), feas_tol=feas_tol, safe=bool(safe),
+                integer=tuple(int(i) for i in np.flatnonzero(imask)))  # fmt: skip
     K = _cached(("kernels", f, ineq, eq, tuple(sorted(opts.items()))), lambda: _Kernels(f, ineq, eq, **opts))
     padded = _Padder(batch, batch_sizes, jax.devices() if devices is None else list(devices))
     if padded.mesh is None:  # compile the kernels in the background while the setup below runs
@@ -585,15 +652,25 @@ def minimize(
         if obbt:
             for b in padded.sizes if obbt == "tree" else [1]:
                 K.obbt.start(b, lo.size, fp)
-    branchable = nonlinear_variables(K.fns, lo, hi, hessians=K.hessians)
+    # integer variables are split even where they enter linearly: that is what makes them integral
+    branchable = nonlinear_variables(K.fns, lo, hi, hessians=K.hessians) | imask
     width0 = np.where(branchable, width0, np.inf)  # never split linear variables
 
     solve_local = _cached(("local", f, ineq, eq, local_solver, lo.tobytes(), hi.tobytes()),
                           lambda: make_local(f, ineq, eq, lo, hi, local_solver))
 
     def local(starts):
-        """Local solves from each start; returns (x, f) of the best feasible result."""
-        X = np.clip(np.asarray(solve_local(np.asarray(starts, dtype=np.float64))), lo, hi)
+        """Local solves from each start; returns (x, f) of the best feasible result.
+
+        With integer variables each solve is a fix-and-solve: the integers are fixed
+        at the start's rounded values and only the continuous variables move."""
+        S = np.clip(np.asarray(starts, dtype=np.float64), lo, hi)
+        if imask.any():
+            fixed = np.round(S)
+            L, H = np.where(imask, fixed, lo), np.where(imask, fixed, hi)
+            X = np.clip(np.asarray(solve_local(S, L, H)), L, H)
+        else:
+            X = np.clip(np.asarray(solve_local(S)), lo, hi)
         F = np.asarray(K.fvals(jnp.asarray(X)), dtype=np.float64)
         if constrained:
             F = np.where(np.asarray(K.viol(jnp.asarray(X))) <= feas_tol, F, np.inf)
@@ -660,7 +737,7 @@ def minimize(
         lb, xc, fc, rlo, rhi, rxr = evaluate(lo[None], hi[None])
     except _CompileTimeout as e:  # no bound at all yet: report what is known
         xbest = np.asarray(xbest)
-        maxv, verified, _ = _verify(f, ineq, eq, xbest, ub, lo_user, hi_user, feas_tol)
+        maxv, verified, _ = _verify(f, ineq, eq, xbest, ub, lo_user, hi_user, feas_tol, integer=imask)
         return Result(x=xbest, fun=ub, lower_bound=-np.inf, converged=False, iterations=0, nodes=0,
                       evaluations=evaluations, time=time.perf_counter() - t0, status="time_limit",
                       message=f"time_limit reached while compiling the '{e}' kernel; no bound computed",
@@ -685,7 +762,7 @@ def minimize(
     def pseudo_scores(relw, free):
         """Product-rule scores per (box, variable), -1 for non-candidates; and whether any pseudocost is known."""
         cand = branchable & free
-        cand = np.where(cand.any(axis=1, keepdims=True), cand, branchable)
+        cand = np.where(cand.any(axis=1, keepdims=True), cand, free)
         seen = cnt > 0
         if not seen.any():
             return np.where(cand, relw, -1.0), False
@@ -725,9 +802,19 @@ def minimize(
         plo, phi, pxr, plb = open_lo[sel], open_hi[sel], open_xr[sel], open_lb[sel]
         relw = (phi - plo) / width0  # relative width (0 for variables never split)
 
+        free = phi > plo
         if branch_var == "width":
             pp = np.arange(k)
-            pv = np.argmax(np.where(branchable, relw, -1.0), axis=1)
+            score = np.where(branchable & free, relw, -1.0)
+            if imask.any():  # integers fractional at the relaxation point first, most fractional first
+                frac = np.abs(pxr - np.round(pxr))
+                score = np.where(imask & free & (frac > INT_TOL), 2.0 + frac, score)
+            none = (score < 0).all(axis=1)
+            if none.any():  # no branchable variable left to split: the widest of any kind
+                score[none] = np.where(free[none], (phi - plo)[none] / np.where(hi > lo, hi - lo, 1.0), -1.0)
+            # a box with no free variable at all (range reduction can shrink one to a point)
+            # is "split" into two copies of itself; bounding a point is exact, so they are pruned
+            pv = np.argmax(score, axis=1)
             groups = [[i] for i in range(k)]
         else:
             score, _ = pseudo_scores(relw, phi > plo)
@@ -795,9 +882,18 @@ def minimize(
         if branch_point == "relax":
             w = hiv - lov
             pt = np.clip(_LAM * pxr[pp, pv] + (1 - _LAM) * pt, lov + _BETA * w, hiv - _BETA * w)
+        rpt = pt
+        if imask.any():
+            # integer variables: children [lo, p] and [p + 1, hi], p = floor of the relaxation
+            # value when it is fractional and inside the box, else of the midpoint
+            v = pxr[pp, pv]
+            v = np.where((np.abs(v - np.round(v)) > INT_TOL) & (v >= lov) & (v <= hiv), v, 0.5 * (lov + hiv))
+            ip = np.clip(np.floor(v), lov, hiv - 1.0)
+            isint = imask[pv] & (hiv > lov)
+            pt, rpt = np.where(isint, ip, pt), np.where(isint, ip + 1.0, pt)
         left_hi, right_lo = phi[pp].copy(), plo[pp].copy()
         left_hi[ar, pv] = pt
-        right_lo[ar, pv] = pt
+        right_lo[ar, pv] = rpt
         clo = np.concatenate([plo[pp], right_lo])
         chi = np.concatenate([left_hi, phi[pp]])
 
@@ -876,7 +972,10 @@ def minimize(
     else:
         status = "max_iter"
     xbest = np.asarray(xbest)
-    maxv, verified, why = _verify(f, ineq, eq, xbest, ub, lo_user, hi_user, feas_tol)
+    xbest = np.asarray(xbest)
+    if imask.any() and np.isfinite(ub):
+        xbest = np.where(imask, np.round(xbest), xbest)
+    maxv, verified, why = _verify(f, ineq, eq, xbest, ub, lo_user, hi_user, feas_tol, integer=imask)
     message = ""
     if np.isfinite(ub) and not verified:
         message = f"incumbent failed float64 verification: {why}"

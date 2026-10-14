@@ -52,22 +52,40 @@ def used_variables(f, ineq, eq, n):
     return used
 
 
-def _feasible_points(f, ineq, eq, lo, hi, feas_tol, n_starts, seed, deadline=None):
-    """Local solves (scipy SLSQP, infinite bounds allowed) from scattered starts."""
+def _feasible_points(f, ineq, eq, lo, hi, feas_tol, n_starts, seed, deadline=None, integer=None):
+    """Local solves (scipy SLSQP, infinite bounds allowed) from scattered starts.
+
+    With ``integer`` (a mask) a point counts only when it is integral: each
+    solve's integers are rounded and fixed, and the continuous variables are
+    solved again (a feasible point of the continuous relaxation can be better
+    than every integer one, so its value would cut off the integer optimum).
+    """
     from scipy.optimize import minimize
 
     def vec(fn):
         return (lambda x: jnp.atleast_1d(fn(x))) if fn is not None else None
+
+    def timed(fn):
+        """``fn`` that raises once the deadline has passed: one SLSQP solve can run for minutes."""
+        if deadline is None:
+            return fn
+
+        def call(x):
+            if time.perf_counter() > deadline:
+                raise DomainTimeout()
+            return fn(x)
+
+        return call
 
     g, h = vec(ineq), vec(eq)
     fvg = jax.jit(jax.value_and_grad(f))
     cons = []
     if g is not None:
         gj = jax.jit(lambda x: (g(x), jax.jacfwd(g)(x)))
-        cons.append({"type": "ineq", "fun": lambda x: -np.asarray(gj(x)[0]), "jac": lambda x: -np.asarray(gj(x)[1])})
+        cons.append({"type": "ineq", "fun": timed(lambda x: -np.asarray(gj(x)[0])), "jac": lambda x: -np.asarray(gj(x)[1])})
     if h is not None:
         hj = jax.jit(lambda x: (h(x), jax.jacfwd(h)(x)))
-        cons.append({"type": "eq", "fun": lambda x: np.asarray(hj(x)[0]), "jac": lambda x: np.asarray(hj(x)[1])})
+        cons.append({"type": "eq", "fun": timed(lambda x: np.asarray(hj(x)[0])), "jac": lambda x: np.asarray(hj(x)[1])})
     bounds = [(a if np.isfinite(a) else None, b if np.isfinite(b) else None) for a, b in zip(lo, hi)]
 
     def viol(x):
@@ -88,10 +106,19 @@ def _feasible_points(f, ineq, eq, lo, hi, feas_tol, n_starts, seed, deadline=Non
         mid = np.where(fin, 0.5 * (np.where(fin, lo, 0.0) + np.where(fin, hi, 0.0)), np.clip(0.0, lo, hi))
         x0 = np.clip(mid + (rng.normal(size=lo.size) * scale if k else 0.0), lo, hi)
         try:
-            res = minimize(lambda x: tuple(np.asarray(v, np.float64) for v in fvg(x)), x0, jac=True,
+            res = minimize(timed(lambda x: tuple(np.asarray(v, np.float64) for v in fvg(x))), x0, jac=True,
                            method="SLSQP", bounds=bounds, constraints=cons,
                            options={"maxiter": 300, "ftol": 1e-10})  # fmt: skip
             x = np.clip(res.x, lo, hi)
+            if integer is not None and integer.any():
+                if deadline is not None and time.perf_counter() > deadline:
+                    break
+                xi = np.clip(np.round(x), lo, hi)
+                fixed = [(v, v) if i else bd for v, i, bd in zip(xi, integer, bounds)]
+                res = minimize(timed(lambda x: tuple(np.asarray(v, np.float64) for v in fvg(x))), np.where(integer, xi, x),
+                               jac=True, method="SLSQP", bounds=fixed, constraints=cons,
+                               options={"maxiter": 300, "ftol": 1e-10})  # fmt: skip
+                x = np.where(integer, xi, np.clip(res.x, lo, hi))
         except Exception:
             continue
         fx = float(f(jnp.asarray(x)))
@@ -100,8 +127,11 @@ def _feasible_points(f, ineq, eq, lo, hi, feas_tol, n_starts, seed, deadline=Non
     return best_x, best_f
 
 
-def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed=0, deadline=None):
+def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed=0, deadline=None, integer=None):
     """Derive finite bounds. Returns ``(lo, hi, infeasible, x_feasible, f_feasible)``.
+
+    ``integer`` (a mask): the feasible point, whose value bounds the objective
+    for FBBT, must have those variables integral.
 
     ``lo``/``hi`` may still contain infinities when nothing bounds a variable;
     ``x_feasible`` is a feasible point found on the way (or ``None``). With a
@@ -136,7 +166,7 @@ def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed
         lo, hi = np.where(unused, pt, lo), np.where(unused, pt, hi)
     xf, ff = None, np.inf
     if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
-        xf, ff = _feasible_points(f, ineq, eq, lo, hi, feas_tol, n_starts, seed, deadline)
+        xf, ff = _feasible_points(f, ineq, eq, lo, hi, feas_tol, n_starts, seed, deadline, integer)
         if xf is not None:
             cutoff = ff + 1e-9 * (1 + abs(ff))
             keep = lo.copy(), hi.copy()
