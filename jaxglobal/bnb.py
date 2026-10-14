@@ -763,6 +763,11 @@ def minimize(
         if obbt:
             for b in padded.sizes if obbt == "tree" else [1]:
                 K.obbt.start(b, lo.size, fp)
+    dive_exe = None
+    if K.dive is not None and padded.mesh is None:  # the dive kernel too, traced after the others
+        tracer, compiler = _pools()
+        box, cut = jax.ShapeDtypeStruct((_DIVES, lo.size), jnp.float64), jax.ShapeDtypeStruct((), jnp.float64)
+        dive_exe = tracer.submit(lambda: compiler.submit(K.dive.trace(box, box, box, cut).lower().compile))
     # integer variables are split even where they enter linearly: that is what makes them integral
     nl = K.nonlinear(lo.size)
     if nl is None:
@@ -865,8 +870,15 @@ def minimize(
             return
         k = min(len(points), _DIVES)
         pad = lambda A: np.concatenate([A[:k], np.repeat(A[:1], _DIVES - k, 0)])  # noqa: E731
-        DL, DH, F = (np.asarray(a) for a in K.dive(jnp.asarray(pad(blo)), jnp.asarray(pad(bhi)),
-                                                    jnp.asarray(pad(points)), jnp.asarray(ub, jnp.float64)))  # fmt: skip
+        run = K.dive
+        if dive_exe is not None:  # compiled in the background; skipped if not ready by the deadline
+            try:
+                wait = max(t0 + time_limit - time.perf_counter(), 0.0) if np.isfinite(time_limit) else None
+                run = dive_exe.result(timeout=wait).result(timeout=wait)
+            except TimeoutError:
+                return
+        DL, DH, F = (np.asarray(a) for a in run(jnp.asarray(pad(blo)), jnp.asarray(pad(bhi)),
+                                                jnp.asarray(pad(points)), jnp.asarray(ub, jnp.float64)))  # fmt: skip
         ok = ~F[:k] & np.all(DL[:k, imask] == DH[:k, imask], axis=1)
         if ok.any():
             fixed_solve(DL[:k][ok], DH[:k][ok], pad(points)[:k][ok])
