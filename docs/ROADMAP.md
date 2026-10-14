@@ -431,6 +431,51 @@ first vs second process (cold): 7.1 / 31.9 / 20.7 s -> 3.4 / 8.5 / 7.1 s.
 Hits do occur across processes; what is left is tracing and the
 non-compiled Python. Timings are from a loaded machine.
 
+### Setup cost
+
+On larger models the integer stage 5 profile found the search hardly starts
+in 60 s: setup takes the time. Two synchronous steps on the main thread were
+the largest, on `spectra2` (69 variables) and `syn05m02m` (60): finding the
+variables that enter nonlinearly (`nonlinear_variables` compiles a dense
+Hessian per function and samples it at 3 points: 33.8 and 5.1 s) and building
+the pounce local solver (26.5 and 10.1 s), almost all of it pounce probing the
+Jacobian and Lagrangian Hessian sparsity (compiling a dense probe of the
+Hessian).
+
+`jaxglobal/structure.py` reads all three off the scalarized tape instead:
+each scalar slot carries a bitmask of the variables it depends on, and a
+non-affine row marks its variables nonlinear and all their pairs as Hessian
+entries. That gives the nonlinear mask, the constraint Jacobian pattern
+(exact) and a superset of the Lagrangian Hessian pattern, with no compilation.
+On 8 MINLPLib instances both patterns contain every nonzero dense AD finds (0
+missing), the nonlinear masks equal Hessian sampling, and the analysis takes
+0.07 to 0.85 s. `minimize` uses the mask for branching and passes the patterns
+to pounce (`jac_pattern`, `hess_pattern`), which then skips probing: building
+the local solver went from 20 to 26 s to 0.2 s on `spectra2` and from 4 to 17
+s to 0.1 s on `nous1`, with the same time per solve (alternated A/B). Dense
+evaluation is kept: pounce's colored AD (`sparse=True`) did not measure faster
+per solve. Tapes that cannot be scalarized (vectorized code) keep the old
+paths: `structural_nonlinear` (`univariate._dep_masks`), then Hessian
+sampling, and pounce's own probing.
+
+*asdex, evaluated for the vectorized case.* [asdex](https://pypi.org/project/asdex/)
+(0.5.2) detects global Jacobian and Hessian sparsity by abstract
+interpretation of the jaxpr, which would cover vectorized code too. On the 9
+`.nl` models tried it is correct (0 missing) and tighter than
+`structure.py` (exact Hessian patterns: 112 against 178 entries on `nous1`, 70
+against 99 on `edgecross10-010`), but 1.1 to 3.6 times slower. It did not
+help where it was needed: its primitive dispatch is a fixed `match` with no
+way to register handlers, and an unknown primitive raises
+`NotImplementedError` (a few linear-algebra primitives fall back
+conservatively). It fails on `lax.one_minus_square`, which JAX 0.11 uses in
+the derivative of `tanh` (so any `tanh` network), and on jaxglobal's own
+primitives (`matern52`, `matern52_d1` in `gp_mean`, `gp_std`, EI). So it was not
+adopted. It becomes useful here if upstream adds (1) a `one_minus_square`
+handler and (2) either a registry for custom primitive handlers or an opt-in
+conservative fallback instead of the error. The alternative without it is to
+extend `univariate._dep_masks`, which already follows vectorized tapes and
+falls back conservatively, to produce the two patterns.
+
 ### Phase 3 — search (4 weeks)
 
 - **Branching.** Choose the variable by violation-weighted or pseudocost

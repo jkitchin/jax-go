@@ -40,6 +40,7 @@ from . import kcache
 from .fbbt import make_fbbt
 from .lifted import make_lifted_bounder
 from .lp import make_constrained_bounder, make_obbt, reduce_ranges
+from .structure import structure
 from .relax import SAFE_K
 from .univariate import make_relaxer
 
@@ -94,6 +95,49 @@ def make_bounder(f, n_fw=20, univariate=False, alphabb=False, multivariate=False
 
 def _hessian(fn):
     return jax.jit(jax.hessian(lambda x: jnp.atleast_1d(fn(x))))
+
+
+def structural_nonlinear(f, ineq, eq, n):
+    """Variables that enter some function nonlinearly, read off its tape: those an input of a
+    non-affine equation depends on (``univariate._dep_masks``). A node is affine in its variable
+    inputs when it is structural, a negation or difference, a product or ``dot_general`` with one
+    variable input, or a division by a constant (the rule of ``univariate``). Exact, and needs no
+    compilation; None if the functions close over a value being transformed."""
+    from .fbbt import Const, _has_tracer, joint_tape
+    from .fbbt_interp import scalarize, use_interpreter
+    from .univariate import AFFINE, _dep_masks
+
+    with jax.ensure_compile_time_eval():
+        tape = joint_tape(f, ineq, eq, np.zeros(n))
+    if _has_tracer(tape):
+        return None
+    prog = scalarize(tape, n) if use_interpreter(tape, n, min_rows=0) else None
+    if prog is not None:  # scalar tapes (.nl models): dependency bitmasks per scalar slot
+        const = ~np.isnan(prog.const_val)
+        deps = [1 << j for j in range(n)] + [0] * (len(prog.const_val) - n)
+        nl_bits = 0
+        for o, a, b, out in zip(prog.op.tolist(), prog.a.tolist(), prog.b.tolist(), prog.out.tolist()):
+            name, d = prog.opcodes[o][0], deps[a] | deps[b]
+            affine = (name in ("add", "add_any", "sub", "neg") or (name == "mul" and (const[a] or const[b]))
+                      or (name == "div" and const[b]))  # fmt: skip
+            if not affine:
+                nl_bits |= d
+            deps[out] = d
+        return np.array([(nl_bits >> j) & 1 for j in range(n)], bool)
+    with jax.ensure_compile_time_eval():
+        masks = _dep_masks(tape, n)
+    nl = np.zeros(n, bool)
+    for node in tape.nodes:
+        name = node.eqn.primitive.name
+        vin = [a for a in node.ins if not isinstance(a, Const) and a in masks]
+        if not vin:
+            continue
+        affine = (name in AFFINE or (name in ("mul", "dot_general") and len(vin) == 1)
+                  or (name == "div" and node.ins[1] not in vin))  # fmt: skip
+        if not affine:
+            for a in vin:
+                nl |= (np.asarray(masks[a]).reshape(-1, n) > 0).any(axis=0)
+    return nl
 
 
 def nonlinear_variables(fns, lo, hi, n_samples=3, seed=0, hessians=None):
@@ -329,7 +373,7 @@ class _Kernels:
 
         self.bound = _Precompiled(jax.jit(jax.vmap(node, in_axes=(0, 0, None))), "bound")
         self.obbt = _Precompiled(jax.jit(jax.vmap(node_obbt, in_axes=(0, 0, None))), "obbt") if obbt else None
-        self._problem, self._opts, self._fingerprints = (f, ineq, eq), opts, {}
+        self._problem, self._opts, self._fingerprints, self._nonlinear, self._structure = (f, ineq, eq), opts, {}, {}, {}
         self.viol = jax.jit(jax.vmap(violation))
         self.dive = None
         if idx.size and fbbt:
@@ -368,6 +412,28 @@ class _Kernels:
         self.fvals = jax.jit(jax.vmap(f))
         self.fns = [fn for fn in (f, ineq, eq) if fn is not None]
         self.hessians = [_hessian(fn) for fn in self.fns]
+
+    def structure(self, n):
+        """``structure.structure`` of the problem on ``n`` variables (cached), or None."""
+        if n not in self._structure:
+            try:
+                self._structure[n] = structure(*self._problem, n)
+            except Exception:  # an equation the analysis cannot follow
+                self._structure[n] = None
+        return self._structure[n]
+
+    def nonlinear(self, n):
+        """Variables entering nonlinearly (cached): from ``structure``, else ``structural_nonlinear``, else None."""
+        if n not in self._nonlinear:
+            st = self.structure(n)
+            if st is not None:
+                self._nonlinear[n] = st.nonlinear
+            else:
+                try:
+                    self._nonlinear[n] = structural_nonlinear(*self._problem, n)
+                except Exception:  # an equation the dependency masks cannot follow: sample Hessians
+                    self._nonlinear[n] = None
+        return self._nonlinear[n]
 
     def fingerprint(self, n):
         """Disk-cache key of this problem on ``n`` variables (``kcache.fingerprint``), or None."""
@@ -698,11 +764,16 @@ def minimize(
             for b in padded.sizes if obbt == "tree" else [1]:
                 K.obbt.start(b, lo.size, fp)
     # integer variables are split even where they enter linearly: that is what makes them integral
-    branchable = nonlinear_variables(K.fns, lo, hi, hessians=K.hessians) | imask
+    nl = K.nonlinear(lo.size)
+    if nl is None:
+        nl = nonlinear_variables(K.fns, lo, hi, hessians=K.hessians)
+    elif not nl.any():
+        nl = np.ones(lo.size, bool)  # as nonlinear_variables: nothing nonlinear, split anything
+    branchable = nl | imask
     width0 = np.where(branchable, width0, np.inf)  # never split linear variables
 
     solve_local = _cached(("local", f, ineq, eq, local_solver, lo.tobytes(), hi.tobytes()),
-                          lambda: make_local(f, ineq, eq, lo, hi, local_solver))
+                          lambda: make_local(f, ineq, eq, lo, hi, local_solver, patterns=K.structure(lo.size)))
 
     def local(starts):
         """Local solves from each start; returns (x, f) of the best feasible result.

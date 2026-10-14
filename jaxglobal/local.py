@@ -129,7 +129,7 @@ def make_local_solver(f, ineq=None, eq=None, inner=60, outer=12, rho0=10.0):
     return solve
 
 
-def _pounce_local(f, ineq, eq, lo, hi, options=None):
+def _pounce_local(f, ineq, eq, lo, hi, options=None, patterns=None):
     import pounce
     from pounce.jax import from_jax
 
@@ -137,6 +137,10 @@ def _pounce_local(f, ineq, eq, lo, hi, options=None):
     xm = jnp.asarray(0.5 * (lo + hi))
     mi, me = g(xm).size, h(xm).size
     kw = dict(n=lo.size, lb=lo, ub=hi)
+    if patterns is not None:
+        # structural patterns (structure.py): no probing at build time (dense evaluation: colored
+        # AD, sparse=True, made each solve 1.5 to 2.6 times slower on spectra2, syn05m02m, nous1)
+        kw.update(hess_pattern=patterns.hess, **({"jac_pattern": patterns.jac} if mi + me else {}))
     if mi + me:
         kw.update(m=mi + me, cl=np.r_[np.full(mi, -1e20), np.zeros(me)], cu=np.zeros(mi + me))
         prob = from_jax(f, lambda x: jnp.concatenate([g(x), h(x)]), **kw)
@@ -184,13 +188,15 @@ def _scipy_local(f, ineq, eq, lo, hi):
     return solve
 
 
-def make_local(f, ineq, eq, lo, hi, solver="auto"):
-    """Batched local solver ``X0 (k, n) -> X (k, n)`` on the box [lo, hi]."""
+def make_local(f, ineq, eq, lo, hi, solver="auto", patterns=None):
+    """Batched local solver ``X0 (k, n) -> X (k, n)`` on the box [lo, hi].
+
+    ``patterns`` (a ``structure.Structure``) gives pounce the derivative sparsity patterns."""
     lo, hi = np.asarray(lo, dtype=np.float64), np.asarray(hi, dtype=np.float64)
     if solver == "auto":
         solver = "pounce" if importlib.util.find_spec("pounce") else "optax"
     if solver == "pounce":
-        return _pounce_local(f, ineq, eq, lo, hi)
+        return _pounce_local(f, ineq, eq, lo, hi, patterns=patterns)
     if solver == "scipy":
         return _scipy_local(f, ineq, eq, lo, hi)
     if solver == "optax":
