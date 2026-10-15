@@ -1,0 +1,6 @@
+solver,name,status,time,primal,dual,nodes,message
+jaxglobal,pooling_haverly2stp,optimal,7.8992998749017715,-600.0000002499291,-600.0001044645807,5,optimal
+jaxglobal,pooling_foulds2tp,optimal,9.253615000052378,-1100.0000004109027,-1100.00077291171,1,optimal
+jaxglobal,pooling_rt2tp,time_limit,73.38984416704625,-4391.8259601861455,-5528.269397113489,1,time_limit
+jaxglobal,pooling_adhya1stp,time_limit,115.35673154203687,-549.8030509950561,-802.987259345518,1,time_limit
+jaxglobal,nous1,time_limit,148.32174720801413,1.567072007598846,-0.7450457113269856,1,time_limit

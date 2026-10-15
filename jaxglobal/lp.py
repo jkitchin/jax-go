@@ -10,9 +10,11 @@ the McCormick relaxations give a convex problem
 
 Subgradients from ``jax.jacfwd`` turn each convex function into affine cuts at
 a set of points (the box center, 2n axis points, then Kelley points: the LP
-solution of the previous round). A part that is affine in x (a linear
-constraint) gives the same cut at every point, so it gets one row, from the
-center. The resulting small dense LP is solved by a fixed-iteration primal-dual
+solution of the previous round). Moving along a variable that a part is
+linear in does not change its cut, so each part gets rows only from the center
+and the axis points of the variables it is nonlinear in (a linear constraint
+gets one row; a bilinear pooling balance five instead of 2n + 1). The
+resulting small dense LP is solved by a fixed-iteration primal-dual
 interior-point method written in JAX, so it ``vmap``s over hundreds of boxes.
 
 The bound returned does **not** trust the LP solver. For any multipliers
@@ -55,15 +57,18 @@ from .univariate import make_relaxer
 EPS = float(jnp.finfo(jnp.float64).eps)
 
 
-def _affine_parts(f, ineq, eq, n):
-    """Which of the convex parts [cv_f, cv_g..., cv_h..., -cc_h...] are affine in x, or None if unknown.
+def _nonlinear_vars(f, ineq, eq, n):
+    """``(K, n)`` bool: the variables each convex part [cv_f, cv_g..., cv_h..., -cc_h...] depends on
+    nonlinearly, or None if unknown.
 
-    Read off the scalarized tape (``fbbt_interp.scalarize``): x and constants
-    are affine, and so are sums, differences and negations of affine values
-    and their products with (or quotients by) constants. Tapes that are not
-    mostly scalar are not scalarized (None): all parts then count as
-    nonlinear. Calling an affine part nonlinear only keeps duplicate rows;
-    calling a nonlinear part affine would only drop valid cuts, never add an
+    Read off the scalarized tape (``fbbt_interp.scalarize``): each value
+    carries the variables it depends on and those it depends on nonlinearly.
+    Sums, differences, negations and products with (or quotients by)
+    constants pass both along; any other operation makes every variable of its
+    inputs nonlinear. A part with no nonlinear variable is affine. Tapes that
+    are not mostly scalar are not scalarized (None): all parts then count as
+    nonlinear in every variable. Calling a variable nonlinear only keeps
+    duplicate rows; calling it linear would only drop valid cuts, never add an
     invalid one.
     """
     from .fbbt import _has_tracer, joint_tape
@@ -76,46 +81,66 @@ def _affine_parts(f, ineq, eq, n):
     prog = scalarize(tape, n)
     if prog is None:
         return None
-    aff = np.ones(len(prog.const_val), bool)  # x, constants
+    S = len(prog.const_val)
+    dep = np.zeros((S, n), bool)  # the variables of each slot
+    dep[np.arange(n), np.arange(n)] = True
+    nl = np.zeros((S, n), bool)  # those it is nonlinear in
     const = ~np.isnan(prog.const_val)
+    const[:n] = False
     for o, a, b, out in zip(prog.op, prog.a, prog.b, prog.out):
         name = prog.opcodes[o][0]
-        if name in ("add", "add_any", "sub"):
-            aff[out] = aff[a] & aff[b]
-        elif name == "neg":
-            aff[out] = aff[a]
-        elif name == "mul":
-            aff[out] = (const[a] & aff[b]) | (const[b] & aff[a])
-        elif name == "div":
-            aff[out] = const[b] & aff[a]
+        dep[out] = dep[a] | dep[b]
+        if name in ("add", "add_any", "sub", "neg") or (name == "mul" and (const[a] or const[b])) or \
+                (name == "div" and const[b]):  # fmt: skip
+            nl[out] = nl[a] | nl[b]
         else:
-            aff[out] = False
-    out = [aff[s] for s in prog.outs]
+            nl[out] = dep[a] | dep[b]
+    out = [nl[s] for s in prog.outs]
     if eq is not None:
         out.append(out[-1])  # -cc_h
     return np.concatenate(out)
 
 
-def _affine_of(f, ineq, eq):
-    """``_affine_parts`` memoized on the number of variables."""
+def _affine_parts(f, ineq, eq, n):
+    """Which of the convex parts are affine in x (``_nonlinear_vars``), or None if unknown."""
+    nl = _nonlinear_vars(f, ineq, eq, n)
+    return None if nl is None else ~nl.any(axis=1)
+
+
+def _nonlinear_of(f, ineq, eq):
+    """``_nonlinear_vars`` memoized on the number of variables."""
     cache = {}
 
     def get(n):
         if n not in cache:
-            cache[n] = _affine_parts(f, ineq, eq, n)
+            cache[n] = _nonlinear_vars(f, ineq, eq, n)
         return cache[n]
 
     return get
 
 
-def _cut_rows(shape, aff):
-    """Flat indices of the LP rows to keep from cuts of shape ``(P, K)`` (P points, center first, K
-    parts; point-major rows): every part at the center, nonlinear parts at the other points. None: all."""
+def _cut_rows(shape, nl):
+    """Flat indices of the LP rows to keep from cuts of shape ``(P, K)`` (P points, K parts;
+    point-major rows), or None for all of them.
+
+    The points are the center, the 2n axis points ``c + e_j w_j / 4`` then
+    ``c - e_j w_j / 4``, then Kelley points. Part k keeps its cut at the center,
+    at the axis points of the variables it is nonlinear in (``nl[k]``) and at
+    every Kelley point unless it is affine. Moving along a variable a part is
+    linear in leaves its subgradient and its cut unchanged (McCormick, the
+    univariate hulls and alphaBB all keep the linear terms exact), so the
+    dropped rows repeat the center's cut.
+    """
     P, K = shape
-    if aff is None or len(aff) != K or not aff.any():
+    if nl is None or nl.shape[0] != K:
         return None
+    n = nl.shape[1]
     keep = np.ones((P, K), bool)
-    keep[1:, aff] = False
+    axes = np.concatenate([nl.T, nl.T])[: max(P - 1, 0)]  # (2n, K) for the axis points
+    keep[1 : 1 + len(axes)] = axes
+    keep[1 + 2 * n :] = nl.any(axis=1)
+    if keep.all():
+        return None
     return np.flatnonzero(keep.reshape(-1))
 
 
@@ -273,11 +298,11 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
     ``cutoff`` is infinite.
     """
     prepare, parts, _ = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate, safe)
-    affine = _affine_of(f, ineq, eq)
+    nonlinear = _nonlinear_of(f, ineq, eq)
 
     def bound(lo, hi, cutoff=jnp.inf):
         n = lo.size
-        aff = affine(n)
+        nl = nonlinear(n)
         w = hi - lo
         c = 0.5 * (lo + hi)
         data = prepare(lo, hi)
@@ -330,7 +355,7 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
             A = jnp.where(live[:, None], A / nrm[:, None], 0.0)
             bvec = jnp.where(live, bvec / nrm, 1.0)  # dead rows: 0 <= 1
             bvec = _row_margin(A, bvec, jnp.where(live, mag / nrm, 0.0), live, safe)
-            keep = _cut_rows(const.shape, aff)
+            keep = _cut_rows(const.shape, nl)
             return (A, bvec) if keep is None else (A[keep], bvec[keep])
 
         box_A = jnp.concatenate([jnp.eye(n + 1), -jnp.eye(n + 1)])
@@ -395,7 +420,7 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
 
 
 def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate=False, alphabb=False,
-              multivariate=False, safe=False):
+              multivariate=False, safe=False, own_cuts=True):
     """Return ``obbt(lo, hi, cutoff) -> (lo', hi', infeasible)`` for one box.
 
     Optimality-based bound tightening: each variable is minimized and
@@ -403,17 +428,20 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
 
         cut_f(u) <= cutoff,   cut_g(u) <= tol,   cut_h(u) <= tol,   -cut_cc_h(u) <= tol,
 
-    with cuts at the box center and 2n axis points (and, in later rounds, at the
-    previous round's 2n LP solutions). The 2n LPs are one ``vmap``. As in the
+    with cuts at the box center and 2n axis points (rows as in the node bound,
+    ``_cut_rows``) and, in later rounds, at LP solutions of the previous rounds:
+    with ``own_cuts`` each LP gets the cuts at its own earlier solutions, else
+    every LP gets the cuts at all 2n of them (2n times the rows, for about the
+    same tightening). The 2n LPs are one ``vmap``. As in the
     node bound, the new variable bounds are weak-duality certificates, so an
     inexact LP solve can only make them looser, never invalid.
     """
     prepare, parts, _ = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate, safe)
-    affine = _affine_of(f, ineq, eq)
+    nonlinear = _nonlinear_of(f, ineq, eq)
 
     def obbt(lo, hi, cutoff=jnp.inf):
         n = lo.size
-        aff = affine(n)
+        nl = nonlinear(n)
         w = hi - lo
         c = 0.5 * (lo + hi)
         data = prepare(lo, hi)
@@ -431,7 +459,7 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
             A = jnp.where(live[:, None], A / nrm[:, None], 0.0)
             b = jnp.where(live, rhs / nrm, 1.0)
             b = _row_margin(A, b, jnp.where(live, mag / nrm, 0.0), live, safe)
-            keep = _cut_rows(const.shape, aff)
+            keep = _cut_rows(const.shape, nl)
             return (A, b) if keep is None else (A[keep], b[keep])
 
         box_A = jnp.concatenate([jnp.eye(n), -jnp.eye(n)])
@@ -455,14 +483,23 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
         axis = jnp.concatenate([jnp.eye(n), -jnp.eye(n)]) * (w / 4)
         const, coef = jax.vmap(cuts_at)(jnp.concatenate([c[None], c + axis]))
         ulo, uhi = jnp.zeros(n), jnp.ones(n)
+        own_c = own_g = None  # per LP (own_cuts): cuts at its own earlier solutions
         for k in range(rounds):
-            A, bvec = rows(const, coef)
-            Z, B = jax.vmap(solve, (0, None, None))(C, A, bvec)
+            if not own_cuts or k == 0:
+                A, bvec = rows(const, coef)
+                Z, B = jax.vmap(solve, (0, None, None))(C, A, bvec)
+            else:
+                Z, B = jax.vmap(lambda cv, oc, og: solve(cv, *rows(jnp.concatenate([const, oc]),
+                                                                    jnp.concatenate([coef, og]))))(C, own_c, own_g)
             ulo = jnp.maximum(ulo, jnp.where(jnp.isfinite(B[:n]), B[:n], 0.0))
             uhi = jnp.minimum(uhi, jnp.where(jnp.isfinite(B[n:]), -B[n:], 1.0))
             if k < rounds - 1:  # cuts at this round's 2n LP solutions
                 ck, gk = jax.vmap(cuts_at)(lo + w * Z)
-                const, coef = jnp.concatenate([const, ck]), jnp.concatenate([coef, gk])
+                if own_cuts:
+                    own_c = ck[:, None] if k == 0 else jnp.concatenate([own_c, ck[:, None]], axis=1)
+                    own_g = gk[:, None] if k == 0 else jnp.concatenate([own_g, gk[:, None]], axis=1)
+                else:
+                    const, coef = jnp.concatenate([const, ck]), jnp.concatenate([coef, gk])
 
         infeasible = jnp.any(ulo > uhi + 1e-9)
         ulo, uhi = ulo - 1e-9, uhi + 1e-9  # floating-point slack
