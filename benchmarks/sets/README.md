@@ -52,6 +52,12 @@ cache (`JAXGLOBAL_CACHE_DIR`), so it measures search without compilation.
 | + one relaxation trace per cut, warm (`start50_cuts_warm.csv`) | 25 | 0 | 22 | 3 | 24.0 |
 | SCIP (`baseline.csv`) | 44 | 1 | 5 | 0 | 1.9 |
 
+The four pooling instances and `nous1` were rerun alone for issue #12 (LP rows
+only along each part's nonlinear variables, `results/issue12_before_*.csv`
+and `issue12_after_*.csv`, load 18 to 57): 2 of 5 solved, 0 wrong, before and
+after; at 60 s warm the `pooling_rt2tp` bound improved from -5528 to -4578
+(optimum -4392). The full set was not rerun.
+
 Most of the cold time is tracing and compiling the bounding kernels, whose
 size grows with the number of scalar operations in the model (a scalar `.nl`
 model of 1,166 operations gives a 500,000-equation bound kernel). In the cold

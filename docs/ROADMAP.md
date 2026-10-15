@@ -285,6 +285,31 @@ gaps on small boxes. Node counts against phase 1, with no regressions:
   haverly stays at −1550 under every relaxation. Pooling needs
   formulation-level structure (pq-cuts, RLT on the flow balances), which
   belongs with structure detection in a later phase.
+
+  *Issue #12 (measured on MINLPLib).* Two costs, one of them now fixed.
+  First, the node LP was mostly duplicate rows: every convex part got a cut
+  at all 2n + 1 axis points, but moving along a variable a part is linear in
+  does not change its cut, and a pooling balance is nonlinear in only two
+  variables. Each part now keeps the axis points of its own nonlinear
+  variables (`lp._nonlinear_vars`, `_cut_rows`): the root LP of
+  `pooling_adhya1stp` drops from 11,252 to 756 rows and of `nous1` from
+  8,925 to 781, with the same bound, and a 16-box bound call on
+  `pooling_adhya1stp` from 17.6 s to 2.3 s (both at load 40 to 50). OBBT's
+  second round now gives each LP the cuts at its own first-round solution
+  instead of all 2n of them: same tightening on `pooling_adhya1stp`, about
+  7x faster. With a long limit (load about 100) `pooling_rt2tp` then
+  solves in 71 nodes and `pooling_adhya1stp` in 737; at 60 s, warm, the
+  `rt2tp` bound reaches -4578 (was -5528, optimum -4392)
+  (`results/issue12_*.csv`, loaded machine, 0 wrong). Second, the
+  relaxation itself is too weak on `nous1`, and no reformulation of
+  McCormick fixes that: with the binaries fixed at the optimum (1, 1) the
+  exact lifted McCormick LP gives -0.27 against 1.567 (scipy check), four
+  rounds of exact OBBT only raise it to -0.16, and 4,737 nodes of our search
+  reach -0.39. RLT products of the linear balances with the nonlinear
+  variables raise the root to 0.83, but only when the product columns are
+  shared with the original constraints (a lifted LP with about 1,000
+  columns); added as redundant constraints in reduced space they change
+  nothing. That needs a lifted, sparse LP, beyond the dense IPM.
 - *Trilinear envelopes* (Meyer–Floudas facets): not implemented. No test
   problem has a trilinear term to validate against; trilinear terms are
   relaxed as nested bilinear McCormick (and lifted, with `lifted=True`).
