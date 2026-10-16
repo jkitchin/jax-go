@@ -310,6 +310,35 @@ gaps on small boxes. Node counts against phase 1, with no regressions:
   shared with the original constraints (a lifted LP with about 1,000
   columns); added as redundant constraints in reduced space they change
   nothing. That needs a lifted, sparse LP, beyond the dense IPM.
+
+  *Issue #14 (lifted LP with RLT rows, `quadratic.py`).* Problems whose
+  objective and constraints are quadratic polynomials (read off the
+  scalarized tape) are now bounded in the lifted space: one column per
+  product, McCormick facets on each, tangents and Kelley cuts on squares,
+  and RLT rows (a linear equality times a variable) kept only when all
+  their products are already columns, which on `nous1` is 34 rows and the
+  whole RLT gain. The LP is solved by an interior point method on a fixed
+  sparse pattern (Cholesky on the N x N normal matrix, about 1.5 ms per box
+  at batch 16), certified by the same weak-duality bound as `lp.py`, and
+  OBBT runs on the same LP. Its root bounds equal HiGHS on the same rows
+  and are at least the reduced-space bound on all 11 `start50` QCQPs.
+  Branching on these problems scores relative width times the McCormick
+  gap at the LP point, and failed local searches and dives back off
+  (`_LOCAL_BACKOFF`, `_DIVE_BACKOFF`). With both binaries of `nous1` fixed
+  at (1, 1) the bound after OBBT is 0.86 (the other three assignments are
+  infeasible by FBBT or OBBT); the "root bound at least 0.8" of issue #14
+  meant this fixed-binary bound, the 0.83 above. `nous1` solves in 2,597
+  nodes, 36 s alone on a quiet machine (load 4.5), 57.8 s in the benchmark
+  with four jobs; about 30 s of that is the root fix-and-solve of the
+  infeasible assignments, the next cost to remove. Cold, 60 s, baseline
+  (`ace5724`) against this change, each started at 15-minute load below 8:
+  `start50` 25 to 31 solved, SGM 40.9 to 32.6 s, all four pooling
+  instances solved (`rt2tp` 21 s, `adhya1stp` 39 s, `foulds2tp` 16 s,
+  `haverly2stp` 13 s); `int50` 25 to 29, SGM 49.2 to 35.9 s (`nous1`,
+  `ex4`, `tloss`, `meanvarx`, `spring` newly solved; `batch` timed out at
+  the limit under four parallel jobs, 23.5 s alone against 24.8 s for the
+  baseline, and does not take the quadratic path); 0 wrong on both
+  (`results/issue14_*_cold.csv`).
 - *Trilinear envelopes* (Meyer–Floudas facets): not implemented. No test
   problem has a trilinear term to validate against; trilinear terms are
   relaxed as nested bilinear McCormick (and lifted, with `lifted=True`).
@@ -949,7 +978,9 @@ it is a continuous problem: with its two binaries fixed it is a 50-variable
 pooling model whose bound calls take 6.5 s and whose relaxation stays at
 -0.75 against 1.567 after the first nodes. That is the continuous solver's
 bound on pooling (the same weakness that leaves the pooling instances of
-`start50` unsolved), not something the items below address; tracked in issue #12, and waived from this exit criterion. The remaining
+`start50` unsolved), not something the items below address; tracked in issue #12, and waived from this exit criterion. The lifted
+quadratic LP of issue #14 has since lifted the waiver: `nous1` solves in 36 s
+(57.8 s in the four-job benchmark). The remaining
 unsolved instances are weak bounds on big-M, cardinality and
 convex nonlinear constraints (`ex4`, `flay04m`, `smallinvDAX*`,
 `cvxnonsep_*`, `tln*`) and compile time on dense polynomials

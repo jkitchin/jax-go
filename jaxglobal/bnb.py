@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import functools
 import itertools
+import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -40,9 +41,27 @@ from . import kcache
 from .fbbt import make_fbbt
 from .lifted import make_lifted_bounder
 from .lp import make_constrained_bounder, make_obbt, reduce_ranges
+from .quadratic import make_quadratic_bounder, make_quadratic_obbt, quadratic_form
 from .structure import structure
 from .relax import SAFE_K
 from .univariate import make_relaxer
+
+
+def _gap_scores(Q, lo, hi, x):
+    """Per (box, variable): the sum, over the products it is a factor of, of the gap between
+    the McCormick over- and underestimators at the relaxation point ``x`` (how far the
+    product's LP column can be from the product there)."""
+    I, J = Q.pairs[:, 0], Q.pairs[:, 1]
+    li, ui, lj, uj = lo[:, I], hi[:, I], lo[:, J], hi[:, J]
+    xi, xj = np.clip(x[:, I], li, ui), np.clip(x[:, J], lj, uj)
+    sq = I == J
+    cv = np.where(sq, xi * xi, np.maximum(lj * xi + li * xj - li * lj, uj * xi + ui * xj - ui * uj))
+    cc = np.where(sq, (li + ui) * xi - li * ui, np.minimum(lj * xi + ui * xj - ui * lj, uj * xi + li * xj - li * uj))
+    gap = np.where(np.isfinite(cc - cv), np.maximum(cc - cv, 0.0), 0.0)
+    out = np.zeros_like(lo)
+    np.add.at(out.T, I, gap.T)
+    np.add.at(out.T, J, np.where(sq, 0.0, gap).T)
+    return out
 
 
 def make_bounder(f, n_fw=20, univariate=False, alphabb=False, multivariate=False, return_xr=False, safe=False):
@@ -284,7 +303,7 @@ class _Kernels:
     """
 
     def __init__(self, f, ineq, eq, *, n_fw, n_kelley, fbbt, fbbt_rounds, dbbt, obbt, obbt_rounds,
-                 univariate, alphabb, multivariate, lifted, crown, feas_tol, safe, integer=()):  # fmt: skip
+                 univariate, alphabb, multivariate, lifted, crown, feas_tol, safe, integer=(), quadratic=True):  # fmt: skip
         opts = {k: v for k, v in locals().items() if k not in ("self", "f", "ineq", "eq")}
         constrained = ineq is not None or eq is not None
         g, h = _vec(ineq), _vec(eq)
@@ -306,15 +325,23 @@ class _Kernels:
                                           alphabb=alphabb, multivariate=multivariate, safe=safe)
 
             def raw_bound(blo, bhi, cutoff):
-                lb, x, _, rlo, rhi = cb(blo, bhi, cutoff)
+                Q = self.quadratic(blo.size)
+                bounder = cb if Q is None else make_quadratic_bounder(Q, n_kelley=n_kelley, tol=feas_tol, safe=safe)
+                lb, x, _, rlo, rhi = bounder(blo, bhi, cutoff)
                 fx = jnp.where(violation(x) <= feas_tol, f(x), jnp.inf)
                 return lb, x, fx, rlo, rhi, x
         else:
             raw_bound = make_bounder(f, n_fw, univariate=univariate, alphabb=alphabb, multivariate=multivariate,
                                      return_xr=True, safe=safe)
         tighten = make_fbbt(f, ineq, eq, rounds=fbbt_rounds, feas_tol=feas_tol, safe=safe, integer=integer) if fbbt else None
-        lp_tighten = make_obbt(f, ineq, eq, rounds=obbt_rounds, tol=feas_tol, univariate=univariate,
-                                alphabb=alphabb, multivariate=multivariate, safe=safe) if obbt else None
+        cut_obbt = make_obbt(f, ineq, eq, rounds=obbt_rounds, tol=feas_tol, univariate=univariate,
+                             alphabb=alphabb, multivariate=multivariate, safe=safe) if obbt else None
+
+        def lp_tighten(blo, bhi, cutoff):
+            Q = self.quadratic(blo.size) if constrained else None
+            if Q is None:
+                return cut_obbt(blo, bhi, cutoff)
+            return make_quadratic_obbt(Q, rounds=obbt_rounds, tol=feas_tol, safe=safe)(blo, bhi, cutoff)
 
         crown_lb = make_crown(f, safe=safe) if crown else None
         idx = np.asarray(integer, dtype=np.int64)
@@ -374,6 +401,7 @@ class _Kernels:
         self.bound = _Precompiled(jax.jit(jax.vmap(node, in_axes=(0, 0, None))), "bound")
         self.obbt = _Precompiled(jax.jit(jax.vmap(node_obbt, in_axes=(0, 0, None))), "obbt") if obbt else None
         self._problem, self._opts, self._fingerprints, self._nonlinear, self._structure = (f, ineq, eq), opts, {}, {}, {}
+        self._quadratic, self._use_quadratic, self._qlock = {}, bool(quadratic) and not lifted, threading.Lock()
         self.viol = jax.jit(jax.vmap(violation))
         self.dive = None
         if idx.size and fbbt:
@@ -412,6 +440,14 @@ class _Kernels:
         self.fvals = jax.jit(jax.vmap(f))
         self.fns = [fn for fn in (f, ineq, eq) if fn is not None]
         self.hessians = [_hessian(fn) for fn in self.fns]
+
+    def quadratic(self, n):
+        """``quadratic.quadratic_form`` of the problem on ``n`` variables (cached; kernels are
+        traced on several threads), or None when the lifted quadratic LP is not used."""
+        with self._qlock:
+            if n not in self._quadratic:
+                self._quadratic[n] = quadratic_form(*self._problem, n) if self._use_quadratic else None
+            return self._quadratic[n]
 
     def structure(self, n):
         """``structure.structure`` of the problem on ``n`` variables (cached), or None."""
@@ -548,6 +584,8 @@ _DIVES = 16  # propagation dives per call (integer variables)
 _PROBE = True  # integer variables: root probing on binaries (``probe`` in ``minimize``)
 _ENUM = 32  # integer variables: at the root, fix-and-solve every assignment when there are at most this many
 _FLOOR = 0.05  # pseudocosts are floored at this fraction of the mean over observed variables
+_DIVE_BACKOFF = 80  # most iterations between periodic dives that do not improve the incumbent
+_LOCAL_BACKOFF = 16  # most iterations skipped between local searches that do not improve the incumbent
 _ETA, _M = 2, 4  # branch_var="reliability": observations to trust a pseudocost, strong-branching candidates
 _BAL = 10.0  # branch_var="strong": candidates are at least 1/_BAL as wide as the widest variable
 _Q, _ETA_MS = 2, 0.5  # branch_var="strong": split on up to _Q variables at once, those scoring >= _ETA_MS * best
@@ -612,6 +650,7 @@ def minimize(
     alphabb=True,
     multivariate=False,
     lifted=False,
+    quadratic=True,
     crown=False,
     safe=SAFE_DEFAULT,
     time_limit=np.inf,
@@ -628,6 +667,8 @@ def minimize(
     ``INT_TOL``). The relaxations are those of the continuous problem.
     ``local_solver`` picks the upper-bounding local NLP solver: ``"pounce"``,
     ``"optax"`` (pure JAX), ``"scipy"``, or ``"auto"`` (pounce if installed).
+    Once there is an incumbent, local searches and integer dives that fail to
+    improve it are run less often (``_LOCAL_BACKOFF``, ``_DIVE_BACKOFF``).
     The search stops with status ``"time_limit"`` after ``time_limit`` seconds,
     counted from the call: tracing and compiling the bounding kernels count, and
     if they are not ready in time the result has no bound (``lower_bound=-inf``)
@@ -652,7 +693,10 @@ def minimize(
     exact quadratics); ``multivariate`` relaxes products by the multivariate
     McCormick rule of Tsoukalas & Mitsos, written as up to two extra facets
     from its dual (tighter where a factor's interval straddles zero); ``lifted`` bounds nodes with the extended-space LP
-    (``lifted.py``) instead of the reduced-space cuts. ``crown`` adds the CROWN
+    (``lifted.py``) instead of the reduced-space cuts. ``quadratic``: a constrained problem whose
+    functions are all quadratic (and whose tape scalarizes) is bounded, and OBBT-tightened, over
+    the lifted LP with one McCormick-linked column per product (``quadratic.py``) instead of the
+    reduced-space cuts; others are unaffected. ``crown`` adds the CROWN
     backward linear bound of ``f`` (``crown.py``) to every node bound (the
     larger of the two is used): ``False``, ``True``, or ``"auto"`` (on when
     every primitive of ``f`` has a CROWN rule and ``f`` has a smooth
@@ -672,7 +716,8 @@ def minimize(
     Branching: ``branch_point`` is ``"mid"`` (bisect) or ``"relax"`` (split at
     the relaxation minimizer, pulled toward the midpoint and kept away from the
     faces, see ``_LAM`` and ``_BETA``); ``branch_var`` is ``"width"`` (largest
-    relative width among nonlinear variables), ``"pseudocost"`` (product score
+    relative width among nonlinear variables; on the lifted quadratic LP, relative width
+    times the McCormick gap of the variable's products at the relaxation point), ``"pseudocost"`` (product score
     of per-variable bound gains observed so far) or ``"reliability"`` (like
     pseudocost, but variables with fewer than ``_ETA`` observations are
     strong-branched, up to ``_M`` of them per box, within the ``batch`` budget)
@@ -753,7 +798,7 @@ def minimize(
     opts = dict(n_fw=n_fw, n_kelley=n_kelley, fbbt=bool(fbbt), fbbt_rounds=fbbt_rounds, dbbt=bool(dbbt),
                 obbt=obbt or False, obbt_rounds=obbt_rounds, univariate=univariate, alphabb=alphabb,
                 multivariate=multivariate, lifted=lifted, crown=bool(crown), feas_tol=feas_tol, safe=bool(safe),
-                integer=tuple(int(i) for i in np.flatnonzero(imask)))  # fmt: skip
+                integer=tuple(int(i) for i in np.flatnonzero(imask)), quadratic=bool(quadratic))  # fmt: skip
     K = _cached(("kernels", f, ineq, eq, tuple(sorted(opts.items()))), lambda: _Kernels(f, ineq, eq, **opts))
     padded = _Padder(batch, batch_sizes, jax.devices() if devices is None else list(devices))
     if padded.mesh is None:  # compile the kernels in the background while the setup below runs
@@ -775,6 +820,7 @@ def minimize(
     elif not nl.any():
         nl = np.ones(lo.size, bool)  # as nonlinear_variables: nothing nonlinear, split anything
     branchable = nl | imask
+    quad = K.quadratic(lo.size) if constrained else None  # the lifted quadratic LP's form, if used
     width0 = np.where(branchable, width0, np.inf)  # never split linear variables
 
     solve_local = _cached(("local", f, ineq, eq, local_solver, lo.tobytes(), hi.tobytes()),
@@ -836,6 +882,8 @@ def minimize(
     if seed_x is not None:  # feasible point found while bounding the domain
         ub, xbest = float(seed_f), np.asarray(seed_x)
 
+    backoff = [0, 0]  # local-search back-off: current wait length, iterations left to skip
+
     def update_incumbent(xc, fc, lb):
         """Improve the incumbent from candidate points and local solves."""
         nonlocal ub, xbest
@@ -852,9 +900,18 @@ def minimize(
                 if lb[i] < ub - tol():
                     starts.append(xc[i])
         if local_solve and starts:
+            # with an incumbent, back off after local searches that did not improve it (skip
+            # 1, 3, 7, ... iterations, up to _LOCAL_BACKOFF); an improvement resets the wait
+            if np.isfinite(ub) and backoff[1] > 0:
+                backoff[1] -= 1
+                return
             xl, fl = local(starts)
             if fl < ub:
                 ub, xbest = fl, xl
+                backoff[:] = [0, 0]
+            elif np.isfinite(ub):
+                backoff[0] = min(2 * backoff[0] + 1, _LOCAL_BACKOFF)
+                backoff[1] = backoff[0]
 
     def tol():
         return max(abs_tol, rel_tol * abs(ub)) if np.isfinite(ub) else abs_tol
@@ -996,6 +1053,8 @@ def minimize(
         return np.where(cand & np.isfinite(sc), sc, np.where(cand, 0.0, -1.0)), True
 
     pruned_lb = np.inf  # smallest lower bound among fathomed boxes
+    dive_every = 2 if not np.isfinite(ub) else 10
+    next_dive = dive_every
     nodes, history = 1, []
     it = 0
     converged = False
@@ -1026,6 +1085,10 @@ def minimize(
         if branch_var == "width":
             pp = np.arange(k)
             score = np.where(branchable & free, relw, -1.0)
+            if quad is not None:  # lifted quadratic LP: relative width times the McCormick gap
+                gsc = _gap_scores(quad, plo, phi, pxr)
+                gmax = gsc.max(axis=1, keepdims=True)
+                score = np.where(branchable & free & (gmax > 0), relw * gsc / np.where(gmax > 0, gmax, 1.0), score)
             if imask.any():  # integers fractional at the relaxation point first, most fractional first
                 frac = np.abs(pxr - np.round(pxr))
                 score = np.where(imask & free & (frac > INT_TOL), 2.0 + frac, score)
@@ -1124,9 +1187,14 @@ def minimize(
         except _CompileTimeout:  # out of time while a kernel compiles; the open boxes are unchanged
             break
         update_incumbent(cx, cf, clb)
-        if imask.any() and it % (2 if not np.isfinite(ub) else 10) == 0:  # dives from the most promising children
+        if imask.any() and it >= next_dive:  # dives from the most promising children
             o = np.argsort(clb)[:_DIVES]
+            before = ub
             dive(clo[o], chi[o], cxr[o])
+            # every 2 iterations without an incumbent, then every 10, doubling (up to
+            # _DIVE_BACKOFF) after dives that do not improve it
+            dive_every = 2 if not np.isfinite(ub) else (10 if ub < before else min(2 * dive_every, _DIVE_BACKOFF))
+            next_dive = it + dive_every
         if branch_var != "width":
             # pseudocost observations: bound gain per squared relative width
             gl, gr = np.maximum(clb[:M] - plb[pp], 0.0), np.maximum(clb[M:] - plb[pp], 0.0)
