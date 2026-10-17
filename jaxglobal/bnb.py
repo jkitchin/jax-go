@@ -589,6 +589,13 @@ _LOCAL_BACKOFF = 16  # most iterations skipped between local searches that do no
 _ETA, _M = 2, 4  # branch_var="reliability": observations to trust a pseudocost, strong-branching candidates
 _BAL = 10.0  # branch_var="strong": candidates are at least 1/_BAL as wide as the widest variable
 _Q, _ETA_MS = 2, 0.5  # branch_var="strong": split on up to _Q variables at once, those scoring >= _ETA_MS * best
+_PROFILE = None  # benchmarks/profile_root.py: a callable(stage) told when each setup / root stage of ``minimize`` begins
+
+
+def _mark(stage):
+    """Tell ``_PROFILE`` (off by default) that ``minimize`` enters ``stage``."""
+    if _PROFILE is not None:
+        _PROFILE(stage)
 
 
 @dataclass
@@ -746,6 +753,7 @@ def minimize(
     lo_user, hi_user = lo, hi
     seed_x, seed_f = None, np.inf
     imask = _integer_mask(integer, lo.size)
+    _mark("bound_domain")
     if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
         # derive finite bounds from the constraints and a feasible point (domain.py)
         try:
@@ -771,6 +779,7 @@ def minimize(
                 converged=bool(infeasible0), iterations=0, nodes=0, time=time.perf_counter() - t0,
                 status=status, message="" if infeasible0 else f"no finite bounds found for variables {free.tolist()}",
             )  # fmt: skip
+    _mark("setup")
     if imask.any():
         lo, hi = _round_bounds(lo, hi, imask)
         if np.any(lo > hi):
@@ -795,11 +804,13 @@ def minimize(
         crown = crown_auto(f, lo)
     elif crown:
         crown = crown_supported(f, lo)  # an unsupported f gets no CROWN kernel
+    _mark("kernels")
     opts = dict(n_fw=n_fw, n_kelley=n_kelley, fbbt=bool(fbbt), fbbt_rounds=fbbt_rounds, dbbt=bool(dbbt),
                 obbt=obbt or False, obbt_rounds=obbt_rounds, univariate=univariate, alphabb=alphabb,
                 multivariate=multivariate, lifted=lifted, crown=bool(crown), feas_tol=feas_tol, safe=bool(safe),
                 integer=tuple(int(i) for i in np.flatnonzero(imask)), quadratic=bool(quadratic))  # fmt: skip
     K = _cached(("kernels", f, ineq, eq, tuple(sorted(opts.items()))), lambda: _Kernels(f, ineq, eq, **opts))
+    _mark("start_compile")
     padded = _Padder(batch, batch_sizes, jax.devices() if devices is None else list(devices))
     if padded.mesh is None:  # compile the kernels in the background while the setup below runs
         fp = functools.partial(K.fingerprint, lo.size) if kcache.cache_root() else None
@@ -808,21 +819,25 @@ def minimize(
         if obbt:
             for b in padded.sizes if obbt == "tree" else [1]:
                 K.obbt.start(b, lo.size, fp)
+    _mark("start_dive_compile")
     dive_exe = None
     if K.dive is not None and padded.mesh is None:  # the dive kernel too, traced after the others
         tracer, compiler = _pools()
         box, cut = jax.ShapeDtypeStruct((_DIVES, lo.size), jnp.float64), jax.ShapeDtypeStruct((), jnp.float64)
         dive_exe = tracer.submit(lambda: compiler.submit(K.dive.trace(box, box, box, cut).lower().compile))
     # integer variables are split even where they enter linearly: that is what makes them integral
+    _mark("nonlinear")
     nl = K.nonlinear(lo.size)
     if nl is None:
         nl = nonlinear_variables(K.fns, lo, hi, hessians=K.hessians)
     elif not nl.any():
         nl = np.ones(lo.size, bool)  # as nonlinear_variables: nothing nonlinear, split anything
     branchable = nl | imask
+    _mark("quadratic")
     quad = K.quadratic(lo.size) if constrained else None  # the lifted quadratic LP's form, if used
     width0 = np.where(branchable, width0, np.inf)  # never split linear variables
 
+    _mark("make_local")
     solve_local = _cached(("local", f, ineq, eq, local_solver, lo.tobytes(), hi.tobytes()),
                           lambda: make_local(f, ineq, eq, lo, hi, local_solver, patterns=K.structure(lo.size)))
 
@@ -984,6 +999,7 @@ def minimize(
         if F[i] < ub:
             ub, xbest = float(F[i]), X[i]
 
+    _mark("root_bound")
     try:
         lb, xc, fc, rlo, rhi, rxr = evaluate(lo[None], hi[None])
     except _CompileTimeout as e:  # no bound at all yet: report what is known
@@ -993,7 +1009,9 @@ def minimize(
                       evaluations=evaluations, time=time.perf_counter() - t0, status="time_limit",
                       message=f"time_limit reached while compiling the '{e}' kernel; no bound computed",
                       max_violation=maxv, verified=verified)  # fmt: skip
+    _mark("root_incumbent")
     update_incumbent(xc, fc, lb)
+    _mark("root_dives")
     if imask.any() and np.all(np.isfinite(lb)) and np.all(np.isfinite(rxr)):  # root dives: relaxation point, perturbed
         P = np.clip(rxr + rng.normal(size=(_DIVES, lo.size)) * 0.1 * (rhi - rlo) * (np.arange(_DIVES) > 0)[:, None],
                     rlo, rhi)  # fmt: skip
@@ -1001,6 +1019,7 @@ def minimize(
         # few integer assignments: fix-and-solve every one (rounding and dives try one or two)
         ii = np.flatnonzero(imask)
         sizes = rhi[0, ii] - rlo[0, ii] + 1
+        _mark("root_enum")
         if np.prod(sizes) <= _ENUM:
             A = np.array(list(itertools.product(*[np.arange(rlo[0, j], rhi[0, j] + 1) for j in ii])))
             A = np.repeat(A, 4, 0)  # each from the relaxation point and 3 random points of the box
@@ -1008,6 +1027,7 @@ def minimize(
             L[:, ii] = H[:, ii] = A
             S = np.where((np.arange(len(A)) % 4 == 0)[:, None], rxr, rng.uniform(L, H))
             fixed_solve(L, H, S)
+    _mark("root_obbt")
     if obbt and (constrained or np.isfinite(ub)) and not (ub - float(lb.min()) <= tol()):
         # root OBBT once an incumbent cutoff is known (it is useless without
         # one when there are no constraints), and not when the root bound has
@@ -1020,12 +1040,15 @@ def minimize(
         else:
             rlo, rhi, rxr = rlo2, rhi2, rxr2
             lb = np.maximum(lb, lb2)
+            _mark("root_obbt_incumbent")
             update_incumbent(xc, fc, lb)
+    _mark("probe")
     if _PROBE and imask.any() and np.all(np.isfinite(lb)) and not (ub - float(lb.min()) <= tol()):
         try:
             rlo, rhi, lb = probe(rlo, rhi, lb)
         except _CompileTimeout:
             pass
+    _mark("search")
     open_lo, open_hi, open_lb, open_xr = rlo, rhi, lb, rxr
     sumL, sumR, cnt = np.zeros(lo.size), np.zeros(lo.size), np.zeros(lo.size)  # pseudocost sums, observations
 
