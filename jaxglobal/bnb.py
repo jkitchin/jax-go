@@ -964,7 +964,9 @@ def minimize(
         if np.any(np.isfinite(fc)):
             i = int(np.nanargmin(fc))
             if fc[i] < ub:
-                ub, xbest = float(fc[i]), xc[i]
+                fs = float(screen(np.asarray(xc[i])[None])[0])  # the kernel checked feasibility; screen re-checks
+                if fs < ub:                                     # it in float64 with the box and integrality
+                    ub, xbest = fs, xc[i]
                 starts.append(xc[i])
         if constrained:
             # relaxation minimizers of the most promising boxes are good starts
