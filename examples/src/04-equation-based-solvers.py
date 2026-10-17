@@ -106,6 +106,9 @@ print(inspect.getsource(compare._max))
 print(inspect.getsource(compare.piecewise_manual))
 
 # %% [markdown]
+# `jaxglobal.export` now does these rewrites automatically: `export.to_scip(P["piecewise_2d"].f, lo, hi)` rewrites the `max` as above and reformulates the `where` with a binary, and `tanh` becomes $1 - 2/(e^{2z} + 1)$; see `examples/export_scip.py`. The comparison below keeps the hand-written versions, so its stored numbers are unchanged.
+
+# %% [markdown]
 # These are small examples, but they are the general situation: every
 # conditional, table lookup, `min`/`max` or special function has to be rewritten
 # by the modeller, often with extra binary variables or with identities like the

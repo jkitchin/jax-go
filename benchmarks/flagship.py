@@ -4,7 +4,10 @@ Problems come from ``jaxglobal.applications`` (classes ``kinetics``, ``logic``, 
 jaxglobal solves the plain JAX function; SCIP, Couenne and BARON solve the Pyomo
 formulation of the *same* model written by hand in each class module (the same RK4
 steps, ``gdp``/binary reformulations of ``where``/``max``/``interp``). Pyomo models are
-written to ``.nl`` (SCIP, Couenne) or ``.gms`` (BARON through GAMS).
+written to ``.nl`` (SCIP, Couenne) or ``.gms`` (BARON through GAMS). The hand-written
+twins are kept as the reference formulations; ``jaxglobal.export.to_scip`` / ``to_nl``
+can now also export the JAX function itself (``where``/``max`` via binaries or exact
+identities), but the benchmark keeps the twins so its results stay comparable.
 
 Every (solver, problem) pair runs in its own subprocess with a wall-clock limit and is
 appended to the CSV as soon as it finishes, so an interrupted run resumes. All solvers

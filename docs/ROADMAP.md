@@ -63,6 +63,10 @@ The rest of the plan cannot be judged without this.
   Couenne, BARON (GAMS), EAGO and MAiNGO with equal tolerances and time limits.
   Report Dolan–Moré performance profiles, shifted geometric mean time, and
   solved/unsolved counts.
+- **Export (done).** `jaxglobal.export` writes a JAX problem as a PySCIPOpt
+  model or a `.nl` file. It rewrites or reformulates `where`/`max`/`tanh` exactly,
+  refuses what it cannot represent, and reports both. The reverse direction of
+  `read_nl`; see the README section "Export to SCIP and `.nl`".
 - **Exit:** a reproducible baseline table. Expect jaxglobal to fail on most
   instances with more than 10 variables; that is the point of measuring.
 
