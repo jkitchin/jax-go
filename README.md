@@ -194,7 +194,7 @@ variables are read with their integer mask.
 ## Gaussian-process surrogates
 
 A GP prediction written in `jax.numpy` is already a reduced-space model
-[schweidtmann2021deterministic]. Write its kernel with `jaxglobal.kernels`
+([Schweidtmann et al. 2021](#ref-schweidtmann2021deterministic)). Write its kernel with `jaxglobal.kernels`
 (`matern12`, `matern32`, `matern52`, `se`, each a function of the weighted
 squared distance `d`) instead of the `jnp` formula:
 
@@ -265,7 +265,7 @@ surrogates, and things Pyomo cannot express directly.
 
 **Flagship benchmark.** `jaxglobal.applications` holds code-defined models
 (ODE kinetics, regime-switching engineering models, tanh NN surrogates after
-[schweidtmann2019deterministic]), each with a hand-written Pyomo twin.
+[Schweidtmann & Mitsos 2018](#ref-schweidtmann2019deterministic)), each with a hand-written Pyomo twin.
 `benchmarks/flagship.py` runs jaxglobal, SCIP, Couenne and BARON on them and
 judges each answer against the best known optimum.
 
@@ -384,107 +384,372 @@ report has no online record and was checked against its title page.
 notebook sources that is not in the bibliography.
 
 **McCormick relaxations of code.** The relaxation arithmetic is McCormick's
-[mccormick1976computability], in the generalized and subgradient form of
-[mitsos2009mccormick, scott2011generalized]. That work relaxes whole programs
+([McCormick 1976](#ref-mccormick1976computability)), in the generalized and subgradient form of
+([Mitsos et al. 2009](#ref-mitsos2009mccormick); [Scott et al. 2011](#ref-scott2011generalized)). That work relaxes whole programs
 by operator overloading (MC++ [chachuatmcpp, chachuat2015settheoretic]); MAiNGO
-[bongartz2018maingo, bongartz2017deterministic] and EAGO.jl
-[wilhelm2022eagojl] are the solvers built on it. Reduced-space branching on
-the original variables follows [epperly1997reduced]. Convergence theory:
-[bompadre2012convergence, najman2016convergence]. Possible tightenings:
-multivariate rules [tsoukalas2014multivariate], subgradient bound tightening
-[najman2019tighter], reverse propagation [wechsung2015reverse], LP from
-linearizations [najman2021linearization], Taylor and McCormick–Taylor models
-[makino2003taylor, sahlodin2011convex, bompadre2013convergence], DAG interval propagation [schichl2005interval],
-differentiable relaxations [khan2017differentiable], and relaxations of implicit
-functions [stuber2015convex], a route to relaxing `lax.while_loop`.
-Embedded ML models: [schweidtmann2019deterministic,
-schweidtmann2021deterministic, wilhelm2023convex]. jaxglobal's difference: no
+([Bongartz et al. 2018](#ref-bongartz2018maingo); [Bongartz & Mitsos 2017](#ref-bongartz2017deterministic)) and EAGO.jl
+([Wilhelm & Stuber 2020](#ref-wilhelm2022eagojl)) are the solvers built on it. Reduced-space branching on
+the original variables follows ([Epperly & Pistikopoulos 1997](#ref-epperly1997reduced)). Convergence theory:
+([Bompadre & Mitsos 2011](#ref-bompadre2012convergence); [Najman & Mitsos 2016](#ref-najman2016convergence)). Possible tightenings:
+multivariate rules ([Tsoukalas & Mitsos 2014](#ref-tsoukalas2014multivariate)), subgradient bound tightening
+([Najman & Mitsos 2019](#ref-najman2019tighter)), reverse propagation ([Wechsung et al. 2015](#ref-wechsung2015reverse)), LP from
+linearizations ([Najman et al. 2021](#ref-najman2021linearization)), Taylor and McCormick–Taylor models
+([Makino & Berz 2003](#ref-makino2003taylor); [Sahlodin & Chachuat 2011](#ref-sahlodin2011convex); [Bompadre et al. 2012](#ref-bompadre2013convergence)), DAG interval propagation ([Schichl & Neumaier 2005](#ref-schichl2005interval)),
+differentiable relaxations ([Khan et al. 2016](#ref-khan2017differentiable)), and relaxations of implicit
+functions ([Stuber et al. 2014](#ref-stuber2015convex)), a route to relaxing `lax.while_loop`.
+Embedded ML models: ([Schweidtmann & Mitsos 2018](#ref-schweidtmann2019deterministic); [Schweidtmann et al. 2021](#ref-schweidtmann2021deterministic); [Wilhelm et al. 2022](#ref-wilhelm2023convex)). jaxglobal's difference: no
 operator overloading or code generation. The relaxation is a *re-interpretation
 of the jaxpr*, so `jit`, `vmap` and `grad` apply to the bounding itself.
 
-**αBB and interval Hessians.** αBB [androulakis1995alphabb,
-adjiman1996rigorous, adjiman1998global, adjiman1998globalii] with tighter α
-[hladik2015efficient, nerantzis2019tighter, kazazakis2018arbitrarily,
-skjal2012generalization] and univariate underestimators
-[gounaris2008tight, meyer2005convex]. The closest prior art to evaluating
+**αBB and interval Hessians.** αBB ([Androulakis et al. 1995](#ref-androulakis1995alphabb); [Adjiman & Floudas 1996](#ref-adjiman1996rigorous); [Adjiman et al. 1998](#ref-adjiman1998global); [Adjiman et al. 1998](#ref-adjiman1998globalii)) with tighter α
+([Hladík 2014](#ref-hladik2015efficient); [Nerantzis & Adjiman 2019](#ref-nerantzis2019tighter); [Kazazakis & Adjiman 2018](#ref-kazazakis2018arbitrarily); [Skjäl et al. 2012](#ref-skjal2012generalization)) and univariate underestimators
+([Gounaris & Floudas 2008](#ref-gounaris2008tight); [Meyer & Floudas 2005](#ref-meyer2005convex)). The closest prior art to evaluating
 `grad(grad(primitive))` on intervals is AD-based interval Hessian bounding
-[monnigmann2008efficient, schulzedarup2014efficient, schulzedarup2016improved,
-hladik2017effect]. We found no prior work that applies αBB *automatically per
+([Mönnigmann 2008](#ref-monnigmann2008efficient); [Schulze Darup et al. 2013](#ref-schulzedarup2014efficient); [Schulze Darup & Mönnigmann 2016](#ref-schulzedarup2016improved); [Hladík 2017](#ref-hladik2017effect)). We found no prior work that applies αBB *automatically per
 primitive* to every nonconvex primitive of a traced program.
 
 **GPU and parallel global optimization.** The most direct competitors:
 Gottlieb, Xu & Stuber generate McCormick kernels from Julia/Symbolics for
-GPU-batched lower bounding [gottlieb2024automatic, gottlieb2026automatic];
-Zhang et al. add GPU interval bounding to MAiNGO [zhang2025accelerating].
-Earlier GPU/parallel B&B: [barkalov2016parallel, bagoczki2017parallel,
-gillner2024gpuaccelerated, gendron1994parallel, crainic2006parallel,
-gmys2016gpubased]. Spatial B&B and its convergence theory: [falk1969algorithm,
-horst1990global, smith1999symbolic, kannan2018convergenceorder]. Rigorous
-and interval global optimization: [neumaier2004complete, kearfott1996rigorous,
-hansen2004global]. Branching rules: [achterberg2005branching].
+GPU-batched lower bounding ([Gottlieb et al. 2024](#ref-gottlieb2024automatic); [Gottlieb & Stuber 2026](#ref-gottlieb2026automatic));
+Zhang et al. add GPU interval bounding to MAiNGO ([Zhang et al. 2025](#ref-zhang2025accelerating)).
+Earlier GPU/parallel B&B: ([Barkalov & Gergel 2016](#ref-barkalov2016parallel); [Bagóczki & Bánhelyi 2017](#ref-bagoczki2017parallel); [Gillner & Auer 2024](#ref-gillner2024gpuaccelerated); [Gendron & Crainic 1994](#ref-gendron1994parallel); [Crainic et al. 2006](#ref-crainic2006parallel); [Gmys et al. 2016](#ref-gmys2016gpubased)). Spatial B&B and its convergence theory: ([Falk & Soland 1969](#ref-falk1969algorithm); [Horst & Tuy 1990](#ref-horst1990global); [Smith & Pantelides 1999](#ref-smith1999symbolic); [Kannan & Barton 2017](#ref-kannan2018convergenceorder)). Rigorous
+and interval global optimization: ([Neumaier 2004](#ref-neumaier2004complete); [Kearfott 1996](#ref-kearfott1996rigorous); [Global Optimization Using Interval Analysis 2003](#ref-hansen2004global)). Branching rules: ([Achterberg et al. 2005](#ref-achterberg2005branching)).
 
 **Bound propagation in ML and jaxpr interpreters.** jaxpr-interpreting
 bounders already exist, but for other jobs:
-- jax_verify [stanforth2020jaxverify]: NN verification, with bilinear McCormick
+- jax_verify ([Stanforth et al. 2020](#ref-stanforth2020jaxverify)): NN verification, with bilinear McCormick
   and B&B over activation/input splits.
-- AutoBound [streeter2022automatically, streeter2023sharp]: Taylor enclosures,
+- AutoBound ([Streeter & Dillon 2022](#ref-streeter2022automatically); [Streeter & Dillon 2023](#ref-streeter2023sharp)): Taylor enclosures,
   with a toy B&B.
-- immrax [harapanahalli2024immrax]: interval reachability.
+- immrax ([Harapanahalli et al. 2024](#ref-harapanahalli2024immrax)): interval reachability.
 
 The verification literature has GPU-batched bounding in B&B:
-- linear bounds: IBP [gowal2018effectiveness], CROWN [zhang2018efficient],
-  DeepPoly [singh2019abstract], auto_LiRPA [xu2020automatic];
-- B&B: α/β-CROWN [xu2021fast, wang2021beta], GenBaB [shi2025neural],
-  [bunel2020branch];
-- dual and SDP relaxations: [dvijotham2018dual, dvijotham2020efficient,
-  bunel2020lagrangian];
-- relaxation-gap results: [salman2019convex, tjandraatmadja2020convex].
+- linear bounds: IBP ([Gowal et al. 2018](#ref-gowal2018effectiveness)), CROWN ([Zhang et al. 2018](#ref-zhang2018efficient)),
+  DeepPoly ([Singh et al. 2019](#ref-singh2019abstract)), auto_LiRPA ([Xu et al. 2020](#ref-xu2020automatic));
+- B&B: α/β-CROWN ([Xu et al. 2021](#ref-xu2021fast); [Wang et al. 2021](#ref-wang2021beta)), GenBaB ([Shi et al. 2025](#ref-shi2025neural)),
+  ([Bunel et al. 2020](#ref-bunel2020branch));
+- dual and SDP relaxations: ([Dvijotham et al. 2018](#ref-dvijotham2018dual); [Dvijotham et al. 2020](#ref-dvijotham2020efficient); [Bunel et al. 2020](#ref-bunel2020lagrangian));
+- relaxation-gap results: ([Salman et al. 2019](#ref-salman2019convex); [Tjandraatmadja et al. 2020](#ref-tjandraatmadja2020convex)).
 
 AD at kinks can return values that are not subgradients
-[kakade2018provably, lee2020correctness, bolte2020mathematical,
-bolte2021conservative]. This is the failure mode behind jaxglobal's tie-aware
+([Kakade & Lee 2018](#ref-kakade2018provably); [Lee et al. 2020](#ref-lee2020correctness); [Bolte & Pauwels 2020](#ref-bolte2020mathematical); [Bolte & Pauwels 2020](#ref-bolte2021conservative)). This is the failure mode behind jaxglobal's tie-aware
 rules (see *Lessons* above). Nonsmooth implicit differentiation:
-[bolte2024differentiating]. Principled fixes: abs-normal forms
-[griewank2013stable, griewank2015solving] and lexicographic derivatives
-[nesterov2005lexicographic, khan2013evaluating, khan2015vector].
+([Bolte et al. 2024](#ref-bolte2024differentiating)). Principled fixes: abs-normal forms
+([Griewank 2013](#ref-griewank2013stable); [Griewank et al. 2015](#ref-griewank2015solving)) and lexicographic derivatives
+([Nesterov 2005](#ref-nesterov2005lexicographic); [Khan & Barton 2013](#ref-khan2013evaluating); [Khan & Barton 2015](#ref-khan2015vector)).
 
-**LP bounds.** Node bounds come from cuts [kelley1960cuttingplane,
-frank1956algorithm, jaggi2013revisiting], fed to an interior-point LP
-[mehrotra1992implementation, wright1997primaldual]. The bound is made safe by
-weak duality with box bounds, following [neumaier2004safe, jansson2004rigorous,
-keil2006computational]. That safety is what allows first-order GPU LP solvers
-in the tree: PDLP [applegate2021practical, applegate2026pdlp,
-applegate2023faster, applegate2024infeasibility], cuPDLP
-[lu2025cupdlpjl, lu2025practical], and MPAX in JAX [lu2024mpax]. Batched
-differentiable solvers: [amos2017optnet, agrawal2019differentiable].
+**LP bounds.** Node bounds come from cuts ([Kelley 1960](#ref-kelley1960cuttingplane); [Frank & Wolfe 1956](#ref-frank1956algorithm); [Jaggi 2013](#ref-jaggi2013revisiting)), fed to an interior-point LP
+([Mehrotra 1992](#ref-mehrotra1992implementation); [Wright 1997](#ref-wright1997primaldual)). The bound is made safe by
+weak duality with box bounds, following ([Neumaier & Shcherbina 2004](#ref-neumaier2004safe); [Jansson 2004](#ref-jansson2004rigorous); [Keil & Jansson 2006](#ref-keil2006computational)). That safety is what allows first-order GPU LP solvers
+in the tree: PDLP ([Applegate et al. 2021](#ref-applegate2021practical); [Applegate et al. 2026](#ref-applegate2026pdlp); [Applegate et al. 2022](#ref-applegate2023faster); [Applegate et al. 2024](#ref-applegate2024infeasibility)), cuPDLP
+([Lu & Yang 2025](#ref-lu2025cupdlpjl); [Lu & Yang 2025](#ref-lu2025practical)), and MPAX in JAX ([Lu et al. 2024](#ref-lu2024mpax)). Batched
+differentiable solvers: ([Amos & Kolter 2017](#ref-amos2017optnet); [Agrawal et al. 2019](#ref-agrawal2019differentiable)).
 
 **Global solvers and bound tightening** (comparison baselines and roadmap
 targets):
-- solvers: BARON [tawarmalani2005polyhedral, khajavirad2018hybrid], SCIP
-  [vigerske2018scip, bestuzheva2025global, bolusani2024scip, hojny2025scip],
-  Couenne [belotti2009branching], ANTIGONE [misener2014antigone],
-  LindoGlobal [lin2009global];
-- bound tightening: FBBT [belotti2010feasibilitybased], domain reduction
-  [puranik2017domain, ryoo1996branchandreduce];
-- checking solver claims against reference values: [neumaier2005comparison],
+- solvers: BARON ([Tawarmalani & Sahinidis 2005](#ref-tawarmalani2005polyhedral); [Khajavirad & Sahinidis 2018](#ref-khajavirad2018hybrid)), SCIP
+  ([Vigerske & Gleixner 2017](#ref-vigerske2018scip); [Bestuzheva et al. 2023](#ref-bestuzheva2025global); [Bolusani et al. 2024](#ref-bolusani2024scip); [Hojny et al. 2025](#ref-hojny2025scip)),
+  Couenne ([Belotti et al. 2009](#ref-belotti2009branching)), ANTIGONE ([Misener & Floudas 2014](#ref-misener2014antigone)),
+  LindoGlobal ([Lin & Schrage 2009](#ref-lin2009global));
+- bound tightening: FBBT ([Belotti et al. 2010](#ref-belotti2010feasibilitybased)), domain reduction
+  ([Puranik & Sahinidis 2017](#ref-puranik2017domain); [Ryoo & Sahinidis 1996](#ref-ryoo1996branchandreduce));
+- checking solver claims against reference values: ([Neumaier et al. 2005](#ref-neumaier2005comparison)),
   which `benchmarks/report.py` follows.
 
 **Local solvers and infrastructure.**
-- local solvers: pounce derives from Ipopt [wachter2006implementation];
-  L-BFGS(-B) [liu1989limited, byrd1995limited], SLSQP [kraft1988software];
-- augmented Lagrangian: [hestenes1969multiplier, powell1969method];
-- tools: SciPy [virtanen2020scipy], JAX [bradbury2018jax, frostig2018compiling],
-  optax [deepmind2020deepmind], AD [griewank2008evaluating];
-- modeling for the comparisons: Pyomo [hart2011pyomo, bynum2021pyomo], GAMS
-  [brooke1988gams];
-- related MINLP work by the author: discopt [kitchin2026discopt], which uses
+- local solvers: pounce derives from Ipopt ([Wächter & Biegler 2005](#ref-wachter2006implementation));
+  L-BFGS(-B) ([Liu & Nocedal 1989](#ref-liu1989limited); [Byrd et al. 1995](#ref-byrd1995limited)), SLSQP ([Kraft 1988](#ref-kraft1988software));
+- augmented Lagrangian: ([Hestenes 1969](#ref-hestenes1969multiplier); [Powell 1969](#ref-powell1969method));
+- tools: SciPy ([Virtanen et al. 2020](#ref-virtanen2020scipy)), JAX ([Bradbury et al. 2018](#ref-bradbury2018jax); [Frostig et al. 2018](#ref-frostig2018compiling)),
+  optax ([DeepMind et al. 2020](#ref-deepmind2020deepmind)), AD ([Griewank & Walther 2008](#ref-griewank2008evaluating));
+- modeling for the comparisons: Pyomo ([Hart et al. 2011](#ref-hart2011pyomo); [Bynum et al. 2021](#ref-bynum2021pyomo)), GAMS
+  ([Brook et al. 1988](#ref-brooke1988gams));
+- related MINLP work by the author: discopt ([Kitchin 2026](#ref-kitchin2026discopt)), which uses
   an algebraic modeling API rather than tracing;
-- ML-embedded optimization: [ceccon2022omlt, tsay2021partition,
-  kronqvist2025psplit, anderson2020strong, fischetti2018deep,
-  grimstad2019relu].
+- ML-embedded optimization: ([Ceccon et al. 2022](#ref-ceccon2022omlt); [Tsay et al. 2021](#ref-tsay2021partition); [Kronqvist et al. 2025](#ref-kronqvist2025psplit); [Anderson et al. 2020](#ref-anderson2020strong); [Fischetti & Jo 2018](#ref-fischetti2018deep); [Grimstad & Andersson 2019](#ref-grimstad2019relu)).
 
 **Test problems.**
-- sources: [floudas1999handbook, ryoo1995global, haverly1978studies,
-  michalewicz1996evolutionary, liang2006problem, surjanovic2013virtual,
-  jamil2013literature];
-- MINLPLib [bussieck2003minlplib].
+- sources: ([Floudas et al. 1999](#ref-floudas1999handbook); [Ryoo & Sahinidis 1995](#ref-ryoo1995global); [Haverly 1978](#ref-haverly1978studies); [Michalewicz & Schoenauer 1996](#ref-michalewicz1996evolutionary); [Liang et al. 2006](#ref-liang2006problem); [Surjanovic & Bingham 2013](#ref-surjanovic2013virtual); [Jamil & Yang 2013](#ref-jamil2013literature));
+- MINLPLib ([Bussieck et al. 2003](#ref-bussieck2003minlplib)).
+
+## References
+
+Generated from `docs/references.bib` by `docs/readme_bib.py`.
+
+<a id="ref-achterberg2005branching"></a>Achterberg, T., Koch, T., Martin, A. (2005). Branching rules revisited. *Operations Research Letters* 33(1), 42–54. [doi:10.1016/j.orl.2004.04.002](https://doi.org/10.1016/j.orl.2004.04.002)
+
+<a id="ref-adjiman1996rigorous"></a>Adjiman, C. S., Floudas, C. A. (1996). Rigorous convex underestimators for general twice-differentiable problems. *Journal of Global Optimization* 9(1), 23–40. [doi:10.1007/bf00121749](https://doi.org/10.1007/bf00121749)
+
+<a id="ref-adjiman1998global"></a>Adjiman, C., Dallwig, S., Floudas, C., Neumaier, A. (1998). A global optimization method, αBB, for general twice-differentiable constrained NLPs — I. Theoretical advances. *Computers & Chemical Engineering* 22(9), 1137–1158. [doi:10.1016/s0098-1354(98)00027-1](https://doi.org/10.1016/s0098-1354(98)00027-1)
+
+<a id="ref-adjiman1998globalii"></a>Adjiman, C., Androulakis, I., Floudas, C. (1998). A global optimization method, αBB, for general twice-differentiable constrained NLPs—II. Implementation and computational results. *Computers & Chemical Engineering* 22(9), 1159–1179. [doi:10.1016/s0098-1354(98)00218-x](https://doi.org/10.1016/s0098-1354(98)00218-x)
+
+<a id="ref-agrawal2019differentiable"></a>Agrawal, A., Amos, B., Barratt, S., Boyd, S., Diamond, S., Kolter, J. Z. (2019). Differentiable Convex Optimization Layers. *Advances in Neural Information Processing Systems* 32. <https://proceedings.neurips.cc/paper/2019/hash/9ce3c52fc54362e22053399d3181c638-Abstract.html>
+
+<a id="ref-amos2017optnet"></a>Amos, B., Kolter, J. Z. (2017). OptNet: Differentiable Optimization as a Layer in Neural Networks. *Proceedings of the 34th International Conference on Machine Learning* 70, 136–145. <https://proceedings.mlr.press/v70/amos17a.html>
+
+<a id="ref-anderson2020strong"></a>Anderson, R., Huchette, J., Ma, W., Tjandraatmadja, C., Vielma, J. P. (2020). Strong mixed-integer programming formulations for trained neural networks. *Mathematical Programming* 183(1-2), 3–39. [doi:10.1007/s10107-020-01474-5](https://doi.org/10.1007/s10107-020-01474-5)
+
+<a id="ref-androulakis1995alphabb"></a>Androulakis, I. P., Maranas, C. D., Floudas, C. A. (1995). αBB: A global optimization method for general constrained nonconvex problems. *Journal of Global Optimization* 7(4), 337–363. [doi:10.1007/bf01099647](https://doi.org/10.1007/bf01099647)
+
+<a id="ref-applegate2021practical"></a>Applegate, D., Díaz, M., Hinder, O., Lu, H., Lubin, M., O'Donoghue, B., Schudy, W. (2021). Practical Large-Scale Linear Programming using Primal-Dual Hybrid Gradient. *Advances in Neural Information Processing Systems* 34. <https://proceedings.neurips.cc/paper/2021/hash/a8fbbd3b11424ce032ba813493d95ad7-Abstract.html>
+
+<a id="ref-applegate2023faster"></a>Applegate, D., Hinder, O., Lu, H., Lubin, M. (2022). Faster first-order primal-dual methods for linear programming using restarts and sharpness. *Mathematical Programming* 201(1-2), 133–184. [doi:10.1007/s10107-022-01901-9](https://doi.org/10.1007/s10107-022-01901-9)
+
+<a id="ref-applegate2024infeasibility"></a>Applegate, D., Díaz, M., Lu, H., Lubin, M. (2024). Infeasibility Detection with Primal-Dual Hybrid Gradient for Large-Scale Linear Programming. *SIAM Journal on Optimization* 34(1), 459–484. [doi:10.1137/22m1510467](https://doi.org/10.1137/22m1510467)
+
+<a id="ref-applegate2026pdlp"></a>Applegate, D., Díaz, M., Hinder, O., Lu, H., Lubin, M., O’Donoghue, B., Schudy, W. (2026). PDLP: a practical first-order method for large-scale linear programming. *Mathematical Programming Computation*. [doi:10.1007/s12532-026-00309-2](https://doi.org/10.1007/s12532-026-00309-2)
+
+<a id="ref-bagoczki2017parallel"></a>Bagóczki, Z., Bánhelyi, B. (2017). A Parallel Interval Arithmetic-based Reliable Computing Method on a GPU. *Acta Cybernetica* 23(2), 491–501. [doi:10.14232/actacyb.23.2.2017.4](https://doi.org/10.14232/actacyb.23.2.2017.4)
+
+<a id="ref-barkalov2016parallel"></a>Barkalov, K., Gergel, V. (2016). Parallel global optimization on GPU. *Journal of Global Optimization* 66(1), 3–20. [doi:10.1007/s10898-016-0411-y](https://doi.org/10.1007/s10898-016-0411-y)
+
+<a id="ref-belotti2009branching"></a>Belotti, P., Lee, J., Liberti, L., Margot, F., Wächter, A. (2009). Branching and bounds tightening techniques for non-convex MINLP. *Optimization Methods and Software* 24(4-5), 597–634. [doi:10.1080/10556780903087124](https://doi.org/10.1080/10556780903087124)
+
+<a id="ref-belotti2010feasibilitybased"></a>Belotti, P., Cafieri, S., Lee, J., Liberti, L. (2010). Feasibility-Based Bounds Tightening via Fixed Points. *Combinatorial Optimization and Applications*, 65–76. [doi:10.1007/978-3-642-17458-2_7](https://doi.org/10.1007/978-3-642-17458-2_7)
+
+<a id="ref-bestuzheva2025global"></a>Bestuzheva, K., Chmiela, A., Müller, B., Serrano, F., Vigerske, S., Wegscheider, F. (2023). Global optimization of mixed-integer nonlinear programs with SCIP 8. *Journal of Global Optimization* 91(2), 287–310. [doi:10.1007/s10898-023-01345-1](https://doi.org/10.1007/s10898-023-01345-1)
+
+<a id="ref-bolte2020mathematical"></a>Bolte, J., Pauwels, E. (2020). A mathematical model for automatic differentiation in machine learning. *Advances in Neural Information Processing Systems* 33.
+
+<a id="ref-bolte2021conservative"></a>Bolte, J., Pauwels, E. (2020). Conservative set valued fields, automatic differentiation, stochastic gradient methods and deep learning. *Mathematical Programming* 188(1), 19–51. [doi:10.1007/s10107-020-01501-5](https://doi.org/10.1007/s10107-020-01501-5)
+
+<a id="ref-bolte2024differentiating"></a>Bolte, J., Pauwels, E., Silveti-Falls, A. (2024). Differentiating Nonsmooth Solutions to Parametric Monotone Inclusion Problems. *SIAM Journal on Optimization* 34(1), 71–97. [doi:10.1137/22m1541630](https://doi.org/10.1137/22m1541630)
+
+<a id="ref-bolusani2024scip"></a>Bolusani, S., Besançon, M., Bestuzheva, K., Chmiela, A., Dionísio, J., et al. (2024). The SCIP Optimization Suite 9.0. <https://arxiv.org/abs/2402.17702>
+
+<a id="ref-bompadre2012convergence"></a>Bompadre, A., Mitsos, A. (2011). Convergence rate of McCormick relaxations. *Journal of Global Optimization* 52(1), 1–28. [doi:10.1007/s10898-011-9685-2](https://doi.org/10.1007/s10898-011-9685-2)
+
+<a id="ref-bompadre2013convergence"></a>Bompadre, A., Mitsos, A., Chachuat, B. (2012). Convergence analysis of Taylor models and McCormick-Taylor models. *Journal of Global Optimization* 57(1), 75–114. [doi:10.1007/s10898-012-9998-9](https://doi.org/10.1007/s10898-012-9998-9)
+
+<a id="ref-bongartz2017deterministic"></a>Bongartz, D., Mitsos, A. (2017). Deterministic global optimization of process flowsheets in a reduced space using McCormick relaxations. *Journal of Global Optimization* 69(4), 761–796. [doi:10.1007/s10898-017-0547-4](https://doi.org/10.1007/s10898-017-0547-4)
+
+<a id="ref-bongartz2018maingo"></a>Bongartz, D., Najman, J., Sass, S., Mitsos, A. (2018). MAiNGO – McCormick-based Algorithm for mixed-integer Nonlinear Global Optimization. <http://permalink.avt.rwth-aachen.de/?id=729717>
+
+<a id="ref-bradbury2018jax"></a>Bradbury, J., Frostig, R., Hawkins, P., Johnson, M. J., Leary, C., Maclaurin, D., Necula, G., Paszke, A., et al. (2018). JAX: composable transformations of Python+NumPy programs. *Software, <http://github.com/jax-ml/jax>*.
+
+<a id="ref-brooke1988gams"></a>Brook, A., Kendrick, D., Meeraus, A. (1988). GAMS, a user’s guide. *ACM SIGNUM Newsletter* 23(3-4), 10–11. [doi:10.1145/58859.58863](https://doi.org/10.1145/58859.58863)
+
+<a id="ref-bunel2020branch"></a>Bunel, R., Lu, J., Turkaslan, I., Torr, P. H. S., Kohli, P., Kumar, M. P. (2020). Branch and Bound for Piecewise Linear Neural Network Verification. *Journal of Machine Learning Research* 21(42), 1–39.
+
+<a id="ref-bunel2020lagrangian"></a>Bunel, R., De Palma, A., Desmaison, A., Dvijotham, K., Kohli, P., Torr, P. H. S., Kumar, M. P. (2020). Lagrangian Decomposition for Neural Network Verification. *Proceedings of the 36th Conference on Uncertainty in Artificial Intelligence (UAI)* 124, 370–379.
+
+<a id="ref-bussieck2003minlplib"></a>Bussieck, M. R., Drud, A. S., Meeraus, A. (2003). MINLPLib—A Collection of Test Models for Mixed-Integer Nonlinear Programming. *INFORMS Journal on Computing* 15(1), 114–119. [doi:10.1287/ijoc.15.1.114.15159](https://doi.org/10.1287/ijoc.15.1.114.15159)
+
+<a id="ref-bynum2021pyomo"></a>Bynum, M. L., Hackebeil, G. A., Hart, W. E., Laird, C. D., Nicholson, B. L., Siirola, J. D., Watson, J., Woodruff, D. L. (2021). Pyomo — Optimization Modeling in Python. *Springer Optimization and Its Applications*. [doi:10.1007/978-3-030-68928-5](https://doi.org/10.1007/978-3-030-68928-5)
+
+<a id="ref-byrd1995limited"></a>Byrd, R. H., Lu, P., Nocedal, J., Zhu, C. (1995). A Limited Memory Algorithm for Bound Constrained Optimization. *SIAM Journal on Scientific Computing* 16(5), 1190–1208. [doi:10.1137/0916069](https://doi.org/10.1137/0916069)
+
+<a id="ref-ceccon2022omlt"></a>Ceccon, F., Jalving, J., Haddad, J., Thebelt, A., Tsay, C., Laird, C. D., Misener, R. (2022). OMLT: Optimization & Machine Learning Toolkit. *Journal of Machine Learning Research* 23(349), 1–8. <https://jmlr.org/papers/v23/22-0277.html>
+
+<a id="ref-crainic2006parallel"></a>Crainic, T. G., Le Cun, B., Roucairol, C. (2006). Parallel Branch‐and‐Bound Algorithms. *Parallel Combinatorial Optimization*, 1–28. [doi:10.1002/9780470053928.ch1](https://doi.org/10.1002/9780470053928.ch1)
+
+<a id="ref-deepmind2020deepmind"></a>DeepMind, Babuschkin, I., et al. (2020). The DeepMind JAX Ecosystem. *<https://github.com/google-deepmind>*.
+
+<a id="ref-dvijotham2018dual"></a>Dvijotham, K., Stanforth, R., Gowal, S., Mann, T., Kohli, P. (2018). A Dual Approach to Scalable Verification of Deep Networks. *Proceedings of the Thirty-Fourth Conference on Uncertainty in Artificial Intelligence (UAI)*, 550–559.
+
+<a id="ref-dvijotham2020efficient"></a>Dvijotham, K., Stanforth, R., Gowal, S., Qin, C., De, S., Kohli, P. (2020). Efficient Neural Network Verification with Exactness Characterization. *Proceedings of the 35th Uncertainty in Artificial Intelligence Conference* 115, 497–507. <https://proceedings.mlr.press/v115/dvijotham20a.html>
+
+<a id="ref-epperly1997reduced"></a>Epperly, T. G. W., Pistikopoulos, E. N. (1997). A Reduced Space Branch and Bound Algorithm for Global optimization. *Journal of Global Optimization* 11(3), 287–311. [doi:10.1023/a:1008212418949](https://doi.org/10.1023/a:1008212418949)
+
+<a id="ref-falk1969algorithm"></a>Falk, J. E., Soland, R. M. (1969). An Algorithm for Separable Nonconvex Programming Problems. *Management Science* 15(9), 550–569. [doi:10.1287/mnsc.15.9.550](https://doi.org/10.1287/mnsc.15.9.550)
+
+<a id="ref-fischetti2018deep"></a>Fischetti, M., Jo, J. (2018). Deep neural networks and mixed integer linear optimization. *Constraints* 23(3), 296–309. [doi:10.1007/s10601-018-9285-6](https://doi.org/10.1007/s10601-018-9285-6)
+
+<a id="ref-floudas1999handbook"></a>Floudas, C. A., Pardalos, P. M., Adjiman, C. S., Esposito, W. R., Gümüş, Z. H., Harding, S. T., Klepeis, J. L., Meyer, C. A., et al. (1999). Handbook of Test Problems in Local and Global Optimization. *Nonconvex Optimization and Its Applications*. [doi:10.1007/978-1-4757-3040-1](https://doi.org/10.1007/978-1-4757-3040-1)
+
+<a id="ref-frank1956algorithm"></a>Frank, M., Wolfe, P. (1956). An algorithm for quadratic programming. *Naval Research Logistics Quarterly* 3(1-2), 95–110. [doi:10.1002/nav.3800030109](https://doi.org/10.1002/nav.3800030109)
+
+<a id="ref-frostig2018compiling"></a>Frostig, R., Johnson, M. J., Leary, C. (2018). Compiling machine learning programs via high-level tracing. *SysML Conference*. <https://research.google/pubs/compiling-machine-learning-programs-via-high-level-tracing/>
+
+<a id="ref-gendron1994parallel"></a>Gendron, B., Crainic, T. G. (1994). Parallel Branch-and-Branch Algorithms: Survey and Synthesis. *Operations Research* 42(6), 1042–1066. [doi:10.1287/opre.42.6.1042](https://doi.org/10.1287/opre.42.6.1042)
+
+<a id="ref-gillner2024gpuaccelerated"></a>Gillner, L., Auer, E. (2024). GPU-Accelerated, Interval-Based Parameter Identification Methods Illustrated Using the Two-Compartment Problem. *Acta Cybernetica* 26(4), 913–932. [doi:10.14232/actacyb.306774](https://doi.org/10.14232/actacyb.306774)
+
+<a id="ref-hansen2004global"></a>(2003). Global Optimization Using Interval Analysis. *CRC Press*. [doi:10.1201/9780203026922](https://doi.org/10.1201/9780203026922)
+
+<a id="ref-gmys2016gpubased"></a>Gmys, J., Mezmaz, M., Melab, N., Tuyttens, D. (2016). A GPU-based Branch-and-Bound algorithm using Integer–Vector–Matrix data structure. *Parallel Computing* 59, 119–139. [doi:10.1016/j.parco.2016.01.008](https://doi.org/10.1016/j.parco.2016.01.008)
+
+<a id="ref-gottlieb2026automatic"></a>Gottlieb, R. X., Stuber, M. D. (2026). Automatic generation of GPU kernels for evaluators of McCormick-based relaxations and subgradients. *Mathematical Programming Computation*. [doi:10.1007/s12532-026-00339-w](https://doi.org/10.1007/s12532-026-00339-w)
+
+<a id="ref-gottlieb2024automatic"></a>Gottlieb, R. X., Xu, P., Stuber, M. D. (2024). Automatic source code generation for deterministic global optimization with parallel architectures. *Optimization Methods and Software* 41(2), 308–346. [doi:10.1080/10556788.2024.2396297](https://doi.org/10.1080/10556788.2024.2396297)
+
+<a id="ref-gounaris2008tight"></a>Gounaris, C. E., Floudas, C. A. (2008). Tight convex underestimators for $C^2$-continuous problems: I. univariate functions. *Journal of Global Optimization* 42(1), 51–67. [doi:10.1007/s10898-008-9287-9](https://doi.org/10.1007/s10898-008-9287-9)
+
+<a id="ref-gowal2018effectiveness"></a>Gowal, S., Dvijotham, K., Stanforth, R., Bunel, R., Qin, C., Uesato, J., Arandjelovic, R., Mann, T., et al. (2018). On the Effectiveness of Interval Bound Propagation for Training Verifiably Robust Models. <https://arxiv.org/abs/1810.12715>
+
+<a id="ref-griewank2008evaluating"></a>Griewank, A., Walther, A. (2008). Evaluating Derivatives: Principles and Techniques of Algorithmic Differentiation, Second Edition. *Society for Industrial and Applied Mathematics*. [doi:10.1137/1.9780898717761](https://doi.org/10.1137/1.9780898717761)
+
+<a id="ref-griewank2013stable"></a>Griewank, A. (2013). On stable piecewise linearization and generalized algorithmic differentiation. *Optimization Methods and Software* 28(6), 1139–1178. [doi:10.1080/10556788.2013.796683](https://doi.org/10.1080/10556788.2013.796683)
+
+<a id="ref-griewank2015solving"></a>Griewank, A., Bernt, J., Radons, M., Streubel, T. (2015). Solving piecewise linear systems in abs-normal form. *Linear Algebra and its Applications* 471, 500–530. [doi:10.1016/j.laa.2014.12.017](https://doi.org/10.1016/j.laa.2014.12.017)
+
+<a id="ref-grimstad2019relu"></a>Grimstad, B., Andersson, H. (2019). ReLU networks as surrogate models in mixed-integer linear programs. *Computers & Chemical Engineering* 131, 106580. [doi:10.1016/j.compchemeng.2019.106580](https://doi.org/10.1016/j.compchemeng.2019.106580)
+
+<a id="ref-harapanahalli2024immrax"></a>Harapanahalli, A., Jafarpour, S., Coogan, S. (2024). immrax: A Parallelizable and Differentiable Toolbox for Interval Analysis and Mixed Monotone Reachability in JAX. *IFAC-PapersOnLine* 58(11), 75–80. [doi:10.1016/j.ifacol.2024.07.428](https://doi.org/10.1016/j.ifacol.2024.07.428)
+
+<a id="ref-hart2011pyomo"></a>Hart, W. E., Watson, J., Woodruff, D. L. (2011). Pyomo: modeling and solving mathematical programs in Python. *Mathematical Programming Computation* 3(3), 219–260. [doi:10.1007/s12532-011-0026-8](https://doi.org/10.1007/s12532-011-0026-8)
+
+<a id="ref-haverly1978studies"></a>Haverly, C. A. (1978). Studies of the behavior of recursion for the pooling problem. *ACM SIGMAP Bulletin*, 19–28. [doi:10.1145/1111237.1111238](https://doi.org/10.1145/1111237.1111238)
+
+<a id="ref-hestenes1969multiplier"></a>Hestenes, M. R. (1969). Multiplier and gradient methods. *Journal of Optimization Theory and Applications* 4(5), 303–320. [doi:10.1007/bf00927673](https://doi.org/10.1007/bf00927673)
+
+<a id="ref-hladik2015efficient"></a>Hladík, M. (2014). On the efficient Gerschgorin inclusion usage in the global optimization αBB method. *Journal of Global Optimization* 61(2), 235–253. [doi:10.1007/s10898-014-0161-7](https://doi.org/10.1007/s10898-014-0161-7)
+
+<a id="ref-hladik2017effect"></a>Hladík, M. (2017). The Effect of Hessian Evaluations in the Global Optimization αBB Method. *Modeling, Simulation and Optimization of Complex Processes HPSC 2015*, 67–79. [doi:10.1007/978-3-319-67168-0_6](https://doi.org/10.1007/978-3-319-67168-0_6)
+
+<a id="ref-hojny2025scip"></a>Hojny, C., Besançon, M., Bestuzheva, K., Borst, S., Dionísio, J., et al. (2025). The SCIP Optimization Suite 10.0. <https://arxiv.org/abs/2511.18580>
+
+<a id="ref-horst1990global"></a>Horst, R., Tuy, H. (1990). Global Optimization. *Springer Berlin Heidelberg*. [doi:10.1007/978-3-662-02598-7](https://doi.org/10.1007/978-3-662-02598-7)
+
+<a id="ref-jaggi2013revisiting"></a>Jaggi, M. (2013). Revisiting Frank-Wolfe: Projection-Free Sparse Convex Optimization. *Proceedings of the 30th International Conference on Machine Learning* 28(1), 427–435. <https://proceedings.mlr.press/v28/jaggi13.html>
+
+<a id="ref-jamil2013literature"></a>Jamil, M., Yang, X. S. (2013). A literature survey of benchmark functions for global optimisation problems. *International Journal of Mathematical Modelling and Numerical Optimisation* 4(2), 150. [doi:10.1504/ijmmno.2013.055204](https://doi.org/10.1504/ijmmno.2013.055204)
+
+<a id="ref-jansson2004rigorous"></a>Jansson, C. (2004). Rigorous Lower and Upper Bounds in Linear Programming. *SIAM Journal on Optimization* 14(3), 914–935. [doi:10.1137/s1052623402416839](https://doi.org/10.1137/s1052623402416839)
+
+<a id="ref-kakade2018provably"></a>Kakade, S. M., Lee, J. D. (2018). Provably correct automatic sub-differentiation for qualified programs. *Advances in Neural Information Processing Systems* 31. <https://proceedings.neurips.cc/paper_files/paper/2018/hash/142c65e00f4f7cf2e6c4c996e34005df-Abstract.html>
+
+<a id="ref-kannan2018convergenceorder"></a>Kannan, R., Barton, P. I. (2017). Convergence-order analysis of branch-and-bound algorithms for constrained problems. *Journal of Global Optimization* 71(4), 753–813. [doi:10.1007/s10898-017-0532-y](https://doi.org/10.1007/s10898-017-0532-y)
+
+<a id="ref-kazazakis2018arbitrarily"></a>Kazazakis, N., Adjiman, C. S. (2018). Arbitrarily tight αBB underestimators of general non-linear functions over sub-optimal domains. *Journal of Global Optimization* 71(4), 815–844. [doi:10.1007/s10898-018-0632-3](https://doi.org/10.1007/s10898-018-0632-3)
+
+<a id="ref-kearfott1996rigorous"></a>Kearfott, R. B. (1996). Rigorous Global Search: Continuous Problems. *Nonconvex Optimization and Its Applications*. [doi:10.1007/978-1-4757-2495-0](https://doi.org/10.1007/978-1-4757-2495-0)
+
+<a id="ref-keil2006computational"></a>Keil, C., Jansson, C. (2006). Computational Experience with Rigorous Error Bounds for the Netlib Linear Programming Library. *Reliable Computing* 12(4), 303–321. [doi:10.1007/s11155-006-9004-7](https://doi.org/10.1007/s11155-006-9004-7)
+
+<a id="ref-kelley1960cuttingplane"></a>Kelley, J. J. E. (1960). The Cutting-Plane Method for Solving Convex Programs. *Journal of the Society for Industrial and Applied Mathematics* 8(4), 703–712. [doi:10.1137/0108053](https://doi.org/10.1137/0108053)
+
+<a id="ref-khajavirad2018hybrid"></a>Khajavirad, A., Sahinidis, N. V. (2018). A hybrid LP/NLP paradigm for global optimization relaxations. *Mathematical Programming Computation* 10(3), 383–421. [doi:10.1007/s12532-018-0138-5](https://doi.org/10.1007/s12532-018-0138-5)
+
+<a id="ref-khan2013evaluating"></a>Khan, K. A., Barton, P. I. (2013). Evaluating an element of the Clarke generalized Jacobian of a composite piecewise differentiable function. *ACM Transactions on Mathematical Software* 39(4), 1–28. [doi:10.1145/2491491.2491493](https://doi.org/10.1145/2491491.2491493)
+
+<a id="ref-khan2015vector"></a>Khan, K. A., Barton, P. I. (2015). A vector forward mode of automatic differentiation for generalized derivative evaluation. *Optimization Methods and Software* 30(6), 1185–1212. [doi:10.1080/10556788.2015.1025400](https://doi.org/10.1080/10556788.2015.1025400)
+
+<a id="ref-khan2017differentiable"></a>Khan, K. A., Watson, H. A. J., Barton, P. I. (2016). Differentiable McCormick relaxations. *Journal of Global Optimization* 67(4), 687–729. [doi:10.1007/s10898-016-0440-6](https://doi.org/10.1007/s10898-016-0440-6)
+
+<a id="ref-kitchin2026discopt"></a>Kitchin, J. R. (2026). discopt: a hybrid MINLP solver combining Rust, JAX, and Python. *Zenodo*. [doi:10.5281/zenodo.19762815](https://doi.org/10.5281/zenodo.19762815)
+
+<a id="ref-kraft1988software"></a>Kraft, D. (1988). A software package for sequential quadratic programming.
+
+<a id="ref-kronqvist2025psplit"></a>Kronqvist, J., Misener, R., Tsay, C. (2025). P-split formulations: a class of intermediate formulations between big-M and convex hull for disjunctive constraints. *Mathematical Programming* 218(1-2), 57–94. [doi:10.1007/s10107-025-02232-1](https://doi.org/10.1007/s10107-025-02232-1)
+
+<a id="ref-lee2020correctness"></a>Lee, W., Yu, H., Rival, X., Yang, H. (2020). On correctness of automatic differentiation for non-differentiable functions. *Advances in Neural Information Processing Systems* 33.
+
+<a id="ref-liang2006problem"></a>Liang, J. J., Runarsson, T. P., Mezura-Montes, E., Clerc, M., Suganthan, P. N., Coello Coello, C. A., Deb, K. (2006). Problem definitions and evaluation criteria for the CEC 2006 special session on constrained real-parameter optimization. <https://github.com/P-N-Suganthan/CEC2006/blob/master/technical_report.pdf>
+
+<a id="ref-lin2009global"></a>Lin, Y., Schrage, L. (2009). The global solver in the LINDO API. *Optimization Methods and Software* 24(4-5), 657–668. [doi:10.1080/10556780902753221](https://doi.org/10.1080/10556780902753221)
+
+<a id="ref-liu1989limited"></a>Liu, D. C., Nocedal, J. (1989). On the limited memory BFGS method for large scale optimization. *Mathematical Programming* 45(1-3), 503–528. [doi:10.1007/bf01589116](https://doi.org/10.1007/bf01589116)
+
+<a id="ref-lu2025cupdlpjl"></a>Lu, H., Yang, J. (2025). cuPDLP.jl: A GPU Implementation of Restarted Primal-Dual Hybrid Gradient for Linear Programming in Julia. *Operations Research* 73(6), 3440–3452. [doi:10.1287/opre.2024.1069](https://doi.org/10.1287/opre.2024.1069)
+
+<a id="ref-lu2025practical"></a>Lu, H., Yang, J. (2025). A Practical and Optimal First-Order Method for Large-Scale Convex Quadratic Programming. *Mathematical Programming* 215(1-2), 771–808. [doi:10.1007/s10107-025-02241-0](https://doi.org/10.1007/s10107-025-02241-0)
+
+<a id="ref-lu2024mpax"></a>Lu, H., Peng, Z., Yang, J. (2024). MPAX: Mathematical Programming in JAX. [doi:10.48550/arXiv.2412.09734](https://doi.org/10.48550/arXiv.2412.09734)
+
+<a id="ref-makino2003taylor"></a>Makino, K., Berz, M. (2003). Taylor models and other validated functional inclusion methods. *International Journal of Pure and Applied Mathematics* 4(4), 379–456.
+
+<a id="ref-mccormick1976computability"></a>McCormick, G. P. (1976). Computability of global solutions to factorable nonconvex programs: Part I — Convex underestimating problems. *Mathematical Programming* 10(1), 147–175. [doi:10.1007/bf01580665](https://doi.org/10.1007/bf01580665)
+
+<a id="ref-mehrotra1992implementation"></a>Mehrotra, S. (1992). On the Implementation of a Primal-Dual Interior Point Method. *SIAM Journal on Optimization* 2(4), 575–601. [doi:10.1137/0802028](https://doi.org/10.1137/0802028)
+
+<a id="ref-meyer2005convex"></a>Meyer, C. A., Floudas, C. A. (2005). Convex Underestimation of Twice Continuously Differentiable Functions by Piecewise Quadratic Perturbation: Spline αBB Underestimators. *Journal of Global Optimization* 32(2), 221–258. [doi:10.1007/s10898-004-2704-9](https://doi.org/10.1007/s10898-004-2704-9)
+
+<a id="ref-michalewicz1996evolutionary"></a>Michalewicz, Z., Schoenauer, M. (1996). Evolutionary Algorithms for Constrained Parameter Optimization Problems. *Evolutionary Computation* 4(1), 1–32. [doi:10.1162/evco.1996.4.1.1](https://doi.org/10.1162/evco.1996.4.1.1)
+
+<a id="ref-misener2014antigone"></a>Misener, R., Floudas, C. A. (2014). ANTIGONE: Algorithms for coNTinuous / Integer Global Optimization of Nonlinear Equations. *Journal of Global Optimization* 59(2-3), 503–526. [doi:10.1007/s10898-014-0166-2](https://doi.org/10.1007/s10898-014-0166-2)
+
+<a id="ref-mitsos2009mccormick"></a>Mitsos, A., Chachuat, B., Barton, P. I. (2009). McCormick-Based Relaxations of Algorithms. *SIAM Journal on Optimization* 20(2), 573–601. [doi:10.1137/080717341](https://doi.org/10.1137/080717341)
+
+<a id="ref-monnigmann2008efficient"></a>Mönnigmann, M. (2008). Efficient Calculation of Bounds on Spectra of Hessian Matrices. *SIAM Journal on Scientific Computing* 30(5), 2340–2357. [doi:10.1137/070704186](https://doi.org/10.1137/070704186)
+
+<a id="ref-najman2016convergence"></a>Najman, J., Mitsos, A. (2016). Convergence analysis of multivariate McCormick relaxations. *Journal of Global Optimization* 66(4), 597–628. [doi:10.1007/s10898-016-0408-6](https://doi.org/10.1007/s10898-016-0408-6)
+
+<a id="ref-najman2019tighter"></a>Najman, J., Mitsos, A. (2019). Tighter McCormick relaxations through subgradient propagation. *Journal of Global Optimization* 75(3), 565–593. [doi:10.1007/s10898-019-00791-0](https://doi.org/10.1007/s10898-019-00791-0)
+
+<a id="ref-najman2021linearization"></a>Najman, J., Bongartz, D., Mitsos, A. (2021). Linearization of McCormick relaxations and hybridization with the auxiliary variable method. *Journal of Global Optimization* 80(4), 731–756. [doi:10.1007/s10898-020-00977-x](https://doi.org/10.1007/s10898-020-00977-x)
+
+<a id="ref-nerantzis2019tighter"></a>Nerantzis, D., Adjiman, C. S. (2019). Tighter αBB relaxations through a refinement scheme for the scaled Gerschgorin theorem. *Journal of Global Optimization* 73(3), 467–483. [doi:10.1007/s10898-018-0718-y](https://doi.org/10.1007/s10898-018-0718-y)
+
+<a id="ref-nesterov2005lexicographic"></a>Nesterov, Y. (2005). Lexicographic differentiation of nonsmooth functions. *Mathematical Programming* 104(2-3), 669–700. [doi:10.1007/s10107-005-0633-0](https://doi.org/10.1007/s10107-005-0633-0)
+
+<a id="ref-neumaier2004safe"></a>Neumaier, A., Shcherbina, O. (2004). Safe bounds in linear and mixed-integer linear programming. *Mathematical Programming* 99(2), 283–296. [doi:10.1007/s10107-003-0433-3](https://doi.org/10.1007/s10107-003-0433-3)
+
+<a id="ref-neumaier2004complete"></a>Neumaier, A. (2004). Complete search in continuous global optimization and constraint satisfaction. *Acta Numerica* 13, 271–369. [doi:10.1017/s0962492904000194](https://doi.org/10.1017/s0962492904000194)
+
+<a id="ref-neumaier2005comparison"></a>Neumaier, A., Shcherbina, O., Huyer, W., Vinkó, T. (2005). A comparison of complete global optimization solvers. *Mathematical Programming* 103(2), 335–356. [doi:10.1007/s10107-005-0585-4](https://doi.org/10.1007/s10107-005-0585-4)
+
+<a id="ref-powell1969method"></a>Powell, M. J. D. (1969). A method for nonlinear constraints in minimization problems. *Optimization*, 283–298.
+
+<a id="ref-puranik2017domain"></a>Puranik, Y., Sahinidis, N. V. (2017). Domain reduction techniques for global NLP and MINLP optimization. *Constraints* 22(3), 338–376. [doi:10.1007/s10601-016-9267-5](https://doi.org/10.1007/s10601-016-9267-5)
+
+<a id="ref-ryoo1995global"></a>Ryoo, H., Sahinidis, N. (1995). Global optimization of nonconvex NLPs and MINLPs with applications in process design. *Computers & Chemical Engineering* 19(5), 551–566. [doi:10.1016/0098-1354(94)00097-2](https://doi.org/10.1016/0098-1354(94)00097-2)
+
+<a id="ref-ryoo1996branchandreduce"></a>Ryoo, H. S., Sahinidis, N. V. (1996). A branch-and-reduce approach to global optimization. *Journal of Global Optimization* 8(2), 107–138. [doi:10.1007/bf00138689](https://doi.org/10.1007/bf00138689)
+
+<a id="ref-sahlodin2011convex"></a>Sahlodin, A., Chachuat, B. (2011). Convex/concave relaxations of parametric ODEs using Taylor models. *Computers & Chemical Engineering* 35(5), 844–857. [doi:10.1016/j.compchemeng.2011.01.031](https://doi.org/10.1016/j.compchemeng.2011.01.031)
+
+<a id="ref-salman2019convex"></a>Salman, H., Yang, G., Zhang, H., Hsieh, C., Zhang, P. (2019). A Convex Relaxation Barrier to Tight Robustness Verification of Neural Networks. *Advances in Neural Information Processing Systems* 32, 9835–9846.
+
+<a id="ref-schichl2005interval"></a>Schichl, H., Neumaier, A. (2005). Interval Analysis on Directed Acyclic Graphs for Global Optimization. *Journal of Global Optimization* 33(4), 541–562. [doi:10.1007/s10898-005-0937-x](https://doi.org/10.1007/s10898-005-0937-x)
+
+<a id="ref-schulzedarup2016improved"></a>Schulze Darup, M., Mönnigmann, M. (2016). Improved Automatic Computation of Hessian Matrix Spectral Bounds. *SIAM Journal on Scientific Computing* 38(4), A2068–A2090. [doi:10.1137/15m1025773](https://doi.org/10.1137/15m1025773)
+
+<a id="ref-schulzedarup2014efficient"></a>Schulze Darup, M., Kastsian, M., Mross, S., Mönnigmann, M. (2013). Efficient computation of spectral bounds for Hessian matrices on hyperrectangles for global optimization. *Journal of Global Optimization* 58(4), 631–652. [doi:10.1007/s10898-013-0099-1](https://doi.org/10.1007/s10898-013-0099-1)
+
+<a id="ref-schweidtmann2019deterministic"></a>Schweidtmann, A. M., Mitsos, A. (2018). Deterministic Global Optimization with Artificial Neural Networks Embedded. *Journal of Optimization Theory and Applications* 180(3), 925–948. [doi:10.1007/s10957-018-1396-0](https://doi.org/10.1007/s10957-018-1396-0)
+
+<a id="ref-schweidtmann2021deterministic"></a>Schweidtmann, A. M., Bongartz, D., Grothe, D., Kerkenhoff, T., Lin, X., Najman, J., Mitsos, A. (2021). Deterministic global optimization with Gaussian processes embedded. *Mathematical Programming Computation* 13(3), 553–581. [doi:10.1007/s12532-021-00204-y](https://doi.org/10.1007/s12532-021-00204-y)
+
+<a id="ref-scott2011generalized"></a>Scott, J. K., Stuber, M. D., Barton, P. I. (2011). Generalized McCormick relaxations. *Journal of Global Optimization* 51(4), 569–606. [doi:10.1007/s10898-011-9664-7](https://doi.org/10.1007/s10898-011-9664-7)
+
+<a id="ref-shi2025neural"></a>Shi, Z., Jin, Q., Kolter, Z., Jana, S., Hsieh, C., Zhang, H. (2025). Neural Network Verification with Branch-and-Bound for General Nonlinearities. *Tools and Algorithms for the Construction and Analysis of Systems*, 315–335. [doi:10.1007/978-3-031-90643-5_17](https://doi.org/10.1007/978-3-031-90643-5_17)
+
+<a id="ref-singh2019abstract"></a>Singh, G., Gehr, T., Püschel, M., Vechev, M. (2019). An abstract domain for certifying neural networks. *Proceedings of the ACM on Programming Languages* 3(POPL), 1–30. [doi:10.1145/3290354](https://doi.org/10.1145/3290354)
+
+<a id="ref-skjal2012generalization"></a>Skjäl, A., Westerlund, T., Misener, R., Floudas, C. A. (2012). A Generalization of the Classical αBB Convex Underestimation via Diagonal and Nondiagonal Quadratic Terms. *Journal of Optimization Theory and Applications* 154(2), 462–490. [doi:10.1007/s10957-012-0033-6](https://doi.org/10.1007/s10957-012-0033-6)
+
+<a id="ref-smith1999symbolic"></a>Smith, E., Pantelides, C. (1999). A symbolic reformulation/spatial branch-and-bound algorithm for the global optimisation of nonconvex MINLPs. *Computers & Chemical Engineering* 23(4-5), 457–478. [doi:10.1016/s0098-1354(98)00286-5](https://doi.org/10.1016/s0098-1354(98)00286-5)
+
+<a id="ref-stanforth2020jaxverify"></a>Stanforth, R., Dvijotham, K., Gowal, S., et al. (2020). jax_verify: Neural network verification in JAX. *Software, <https://github.com/google-deepmind/jax_verify>*.
+
+<a id="ref-streeter2022automatically"></a>Streeter, M., Dillon, J. V. (2022). Automatically Bounding the Taylor Remainder Series: Tighter Bounds and New Applications. <https://arxiv.org/abs/2212.11429>
+
+<a id="ref-streeter2023sharp"></a>Streeter, M., Dillon, J. V. (2023). Sharp Taylor Polynomial Enclosures in One Dimension. <https://arxiv.org/abs/2308.00679>
+
+<a id="ref-stuber2015convex"></a>Stuber, M. D., Scott, J. K., Barton, P. I. (2014). Convex and concave relaxations of implicit functions. *Optimization Methods and Software* 30(3), 424–460. [doi:10.1080/10556788.2014.924514](https://doi.org/10.1080/10556788.2014.924514)
+
+<a id="ref-surjanovic2013virtual"></a>Surjanovic, S., Bingham, D. (2013). Virtual Library of Simulation Experiments: Test Functions and Datasets. *<https://www.sfu.ca/~ssurjano/>*.
+
+<a id="ref-tawarmalani2005polyhedral"></a>Tawarmalani, M., Sahinidis, N. V. (2005). A polyhedral branch-and-cut approach to global optimization. *Mathematical Programming* 103(2), 225–249. [doi:10.1007/s10107-005-0581-8](https://doi.org/10.1007/s10107-005-0581-8)
+
+<a id="ref-tjandraatmadja2020convex"></a>Tjandraatmadja, C., Anderson, R., Huchette, J., Ma, W., Patel, K. K., Vielma, J. P. (2020). The Convex Relaxation Barrier, Revisited: Tightened Single-Neuron Relaxations for Neural Network Verification. *Advances in Neural Information Processing Systems* 33, 21675–21686.
+
+<a id="ref-tsay2021partition"></a>Tsay, C., Kronqvist, J., Thebelt, A., Misener, R. (2021). Partition-based formulations for mixed-integer optimization of trained ReLU neural networks. *Advances in Neural Information Processing Systems* 34.
+
+<a id="ref-tsoukalas2014multivariate"></a>Tsoukalas, A., Mitsos, A. (2014). Multivariate McCormick relaxations. *Journal of Global Optimization* 59(2-3), 633–662. [doi:10.1007/s10898-014-0176-0](https://doi.org/10.1007/s10898-014-0176-0)
+
+<a id="ref-vigerske2018scip"></a>Vigerske, S., Gleixner, A. (2017). SCIP: global optimization of mixed-integer nonlinear programs in a branch-and-cut framework. *Optimization Methods and Software* 33(3), 563–593. [doi:10.1080/10556788.2017.1335312](https://doi.org/10.1080/10556788.2017.1335312)
+
+<a id="ref-virtanen2020scipy"></a>Virtanen, P., Gommers, R., Oliphant, T. E., Haberland, M., Reddy, T., Cournapeau, D., Burovski, E., Peterson, P., et al. (2020). SciPy 1.0: fundamental algorithms for scientific computing in Python. *Nature Methods* 17(3), 261–272. [doi:10.1038/s41592-019-0686-2](https://doi.org/10.1038/s41592-019-0686-2)
+
+<a id="ref-wang2021beta"></a>Wang, S., Zhang, H., Xu, K., Lin, X., Jana, S., Hsieh, C., Kolter, J. Z. (2021). Beta-CROWN: Efficient Bound Propagation with Per-neuron Split Constraints for Neural Network Robustness Verification. *Advances in Neural Information Processing Systems* 34.
+
+<a id="ref-wechsung2015reverse"></a>Wechsung, A., Scott, J. K., Watson, H. A. J., Barton, P. I. (2015). Reverse propagation of McCormick relaxations. *Journal of Global Optimization* 63(1), 1–36. [doi:10.1007/s10898-015-0303-6](https://doi.org/10.1007/s10898-015-0303-6)
+
+<a id="ref-wilhelm2022eagojl"></a>Wilhelm, M. E., Stuber, M. D. (2020). EAGO.jl: easy advanced global optimization in Julia. *Optimization Methods and Software* 37(2), 425–450. [doi:10.1080/10556788.2020.1786566](https://doi.org/10.1080/10556788.2020.1786566)
+
+<a id="ref-wilhelm2023convex"></a>Wilhelm, M. E., Wang, C., Stuber, M. D. (2022). Convex and concave envelopes of artificial neural network activation functions for deterministic global optimization. *Journal of Global Optimization* 85(3), 569–594. [doi:10.1007/s10898-022-01228-x](https://doi.org/10.1007/s10898-022-01228-x)
+
+<a id="ref-wright1997primaldual"></a>Wright, S. J. (1997). Primal-Dual Interior-Point Methods. *Society for Industrial and Applied Mathematics*. [doi:10.1137/1.9781611971453](https://doi.org/10.1137/1.9781611971453)
+
+<a id="ref-wachter2006implementation"></a>Wächter, A., Biegler, L. T. (2005). On the implementation of an interior-point filter line-search algorithm for large-scale nonlinear programming. *Mathematical Programming* 106(1), 25–57. [doi:10.1007/s10107-004-0559-y](https://doi.org/10.1007/s10107-004-0559-y)
+
+<a id="ref-xu2020automatic"></a>Xu, K., Shi, Z., Zhang, H., Wang, Y., Chang, K., Huang, M., Kailkhura, B., Lin, X., et al. (2020). Automatic Perturbation Analysis for Scalable Certified Robustness and Beyond. *Advances in Neural Information Processing Systems* 33, 1129–1141.
+
+<a id="ref-xu2021fast"></a>Xu, K., Zhang, H., Wang, S., Wang, Y., Jana, S., Lin, X., Hsieh, C. (2021). Fast and Complete: Enabling Complete Neural Network Verification with Rapid and Massively Parallel Incomplete Verifiers. *International Conference on Learning Representations (ICLR)*.
+
+<a id="ref-zhang2018efficient"></a>Zhang, H., Weng, T., Chen, P., Hsieh, C., Daniel, L. (2018). Efficient Neural Network Robustness Certification with General Activation Functions. *Advances in Neural Information Processing Systems* 31.
+
+<a id="ref-zhang2025accelerating"></a>Zhang, H., Kerkenhoff, T., Kichler, N., Dahmen, M., Mitsos, A., Naumann, U., Bongartz, D. (2025). Accelerating Deterministic Global Optimization via GPU-parallel Interval Arithmetic. [doi:10.48550/arXiv.2507.20769](https://doi.org/10.48550/arXiv.2507.20769)
