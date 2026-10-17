@@ -227,17 +227,17 @@ def child(name, nl_dir, tl):
 
     def make_taylor2(tape, n, ictx, d):
         run = _taylor2(tape, n, ictx, d)
-        size = None if run is None else int(run.program.const_val.size) * n * n
+        size = None if run is None else alphabb.taylor2_bytes(int(run.program.const_val.size), d)
         with lock:
-            paths.append(dict(what="taylor2", who=sys._getframe(1).f_code.co_name, size=size,
-                              budget=alphabb.TAYLOR_BUDGET, over=None if size is None else size > alphabb.TAYLOR_BUDGET))  # fmt: skip
+            paths.append(dict(what="taylor2", who=sys._getframe(1).f_code.co_name, bytes=size,
+                              budget=alphabb.TAYLOR_BYTES, over=None if size is None else size > alphabb.TAYLOR_BYTES))  # fmt: skip
         return run
 
     relax_interp.make_taylor2 = make_taylor2
     _evmc = alphabb.eval_jaxpr_mc
 
     def eval_jaxpr_mc(*a, **k):
-        if sys._getframe(1).f_code.co_name == "prepare":
+        if sys._getframe(1).f_code.co_name == "hess":  # alphabb's traced interval Hessian
             with lock:
                 paths.append(dict(what="alphabb_jacfwd_fallback", eqns=len(a[0].eqns)))
         return _evmc(*a, **k)

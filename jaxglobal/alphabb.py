@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+from jax.extend import core as jcore
 
 from .fbbt import Const, _has_tracer, make_tape, tape_cache
 from .relax import MC, SAFE_K, Ctx, eval_jaxpr_mc, is_mc
@@ -57,7 +58,86 @@ def is_smooth(tape):
     return True
 
 
-TAYLOR_BUDGET = 30_000  # slots * n**2: the interpreted Hessian keeps every slot's (n, n) interval Hessian
+# Which interval Hessian (``interpret="auto"``). The traced one is ``jacfwd(jacfwd(fn))``
+# evaluated in interval mode, straight-line code whose operations on (n, n) arrays make
+# XLA's compile time explode on large dense Hessians (hadamard_5: minutes, see
+# ``hessian_size``); the interpreted one (``relax_interp.make_taylor2``) compiles in
+# well under a second whatever the tape, but runs 1.5-6x slower per box and carries
+# every slot's interval Hessian, ``taylor2_bytes``. The interpreter is used when the
+# traced Hessian is large and the interpreter's memory fits ``TAYLOR_BYTES``.
+HESSIAN_OPS = 15_000  # hessian_size: above either, the traced Hessian is not compiled
+HESSIAN_VOLUME = 200_000
+TAYLOR_BATCH = 16  # boxes per kernel call the memory budget assumes (minimize's batch_sizes)
+TAYLOR_BYTES = 512 * 2**20  # taylor2_bytes(slots, n, TAYLOR_BATCH) allowed
+TAYLOR_BUDGET = TAYLOR_BYTES  # former name (it was slots * n**2)
+
+
+def taylor2_bytes(slots, d, batch=TAYLOR_BATCH):
+    """Estimated working memory of ``make_taylor2(tape, n, ictx, d)`` over ``batch`` boxes.
+
+    The interpreter's carry holds ``(lo, hi)`` of every slot's value, gradient and
+    Hessian, ``2 + 2d + 2d^2`` float64 per slot; XLA keeps a second copy of it
+    (``memory_analysis().temp_size_in_bytes`` is 1.97-2.0 times the carry on the
+    batch, ramsey, portfol_buyin, cvxnonsep_nsig30 and hadamard_5 tapes of MINLPLib;
+    ``tests/test_alphabb_budget.py`` checks it on a synthetic one), hence the 2.
+    """
+    return 2 * slots * (2 + 2 * d + 2 * d * d) * 8 * batch
+
+
+def _live_eqns(jaxpr):
+    """The equations of ``jaxpr`` that its outputs depend on (what ``jit`` keeps after dead-code
+    elimination), with those of the jaxprs nested in their parameters."""
+    live = {v for v in jaxpr.outvars if isinstance(v, jcore.Var)}
+    keep = []
+    for e in reversed(jaxpr.eqns):
+        if e.effects or any(v in live for v in e.outvars):
+            keep.append(e)
+            live.update(v for v in e.invars if isinstance(v, jcore.Var))
+    for e in reversed(keep):
+        yield e
+        for p in e.params.values():
+            for q in p if isinstance(p, (tuple, list)) else (p,):
+                inner = getattr(q, "jaxpr", q)
+                if isinstance(inner, jcore.Jaxpr):
+                    yield from _live_eqns(inner)
+
+
+def _has_tracer_consts(closed):
+    return any(isinstance(c, jax.core.Tracer) for c in closed.consts)
+
+
+# elementwise primitives: XLA fuses them, so on (n, n) arrays they cost compile time
+# like any other operation (``ops``), not like a reduction or a re-layout (``volume``)
+ELEMENTWISE = frozenset(
+    "abs acos add add_any and asin atan atan2 broadcast_in_dim convert_element_type copy copy_p "
+    "cos cosh div eq exp expm1 ge gt integer_pow is_finite jit le log log1p logistic lt max min "
+    "mul ne neg nextafter not or pow rsqrt select_n sign sin sinh sqrt square stop_gradient sub "
+    "tan tanh".split()
+)
+
+
+def hessian_size(closed, n):
+    """``(ops, volume)`` of a traced interval Hessian ``closed``: its live operations, and
+    its non-elementwise operations (reductions, stacks, transposes) on arrays of at least
+    ``n^2`` elements, times ``n^2``.
+
+    XLA's compile time grows faster than linearly in both (CPU, 16 boxes, measured on
+    the start50/int50 tapes): ``kriging_peaks-red030`` (n = 2) has 50k small
+    operations and compiles in 160 s; ``ex6_2_6`` with ``safe`` (outward rounding
+    multiplies the operations) 25k, 77 s; ``hadamard_5`` (n = 26) 16k, 500 s;
+    ``cvxnonsep_nsig30`` 11k with a volume of 326k, 4-14 s, ``launch``'s objective
+    387k, 11 s. Every tape below both thresholds compiled in under 2.5 s.
+    """
+    ops = big = 0
+    for e in _live_eqns(closed.jaxpr):
+        ops += 1
+        if e.primitive.name not in ELEMENTWISE:
+            big += any(getattr(v.aval, "size", 1) >= n * n for v in e.outvars)
+    return ops, big * n * n
+
+
+def _too_big(ops, volume):
+    return ops > HESSIAN_OPS or volume > HESSIAN_VOLUME
 
 
 def make_alphabb(fn, eigen=True, safe=False, interpret="auto"):
@@ -75,8 +155,12 @@ def make_alphabb(fn, eigen=True, safe=False, interpret="auto"):
 
     ``interpret`` (``"auto"``, True, False): get the interval Hessian from the
     second-order tape interpreter ``relax_interp.make_taylor2`` instead of
-    tracing ``jacfwd(jacfwd(fn))`` (large scalar tapes whose per-slot Hessians
-    fit ``TAYLOR_BUDGET``).
+    tracing ``jacfwd(jacfwd(fn))``. ``"auto"`` interprets when the traced
+    Hessian's ``hessian_size`` exceeds ``HESSIAN_OPS`` or ``HESSIAN_VOLUME`` and the
+    interpreter's ``taylor2_bytes`` fit ``TAYLOR_BYTES``. Both are interval
+    enclosures of the Hessian on the box, so either gives a valid alpha.
+    ``prepare.path(lo)`` says which one is used (``"interpret"``,
+    ``"traced"``, or None when ``fn`` is not smooth).
     """
 
     ictx = SAFE_INTERVAL_CTX if safe else INTERVAL_CTX
@@ -91,24 +175,45 @@ def make_alphabb(fn, eigen=True, safe=False, interpret="auto"):
         with jax.ensure_compile_time_eval():
             return tape, is_smooth(tape)
 
-    taylors = {}
+    def traced(lo):
+        """``jaxpr(lo, hi) -> (H.lo, H.hi)``: the traced interval Hessian, or None (no interval rule)."""
 
-    def taylor(tape, lo):
-        """The interpreted interval Hessian of ``tape`` (cached), or None."""
-        if interpret is False or jnp.ndim(lo) != 1 or _has_tracer(tape):
+        def hess(a, b):
+            closed = jax.make_jaxpr(jax.jacfwd(jax.jacfwd(flat)))(a)
+            (H,) = eval_jaxpr_mc(closed.jaxpr, closed.consts, [MC(a, b, a, b)], ictx)
+            H = H if is_mc(H) else MC(H, H, H, H)
+            return H.lo, H.hi
+
+        try:
+            return jax.make_jaxpr(hess)(lo, lo)
+        except NotImplementedError:
             return None
-        if id(tape) not in taylors:
-            from .relax_interp import make_taylor2, use_relax_interpreter
 
-            n = lo.shape[0]
-            run = None
-            if interpret is True or use_relax_interpreter(tape, n):
+    hessians = {}
+
+    def hessian(tape, lo):
+        """``(path, how)`` for ``tape`` (cached): ``("interpret", taylor2)``, ``("traced", jaxpr)``, or ``(None, None)``."""
+        if id(tape) in hessians:
+            return hessians[id(tape)][1]
+        local = jnp.ndim(lo) != 1 or _has_tracer(tape)  # belongs to one trace: traced, not cached
+        n = jnp.size(lo)
+        closed = None if interpret is True and not local else traced(lo)
+        run = None
+        if not local and interpret is not False:
+            big = closed is None or _too_big(*hessian_size(closed, n))
+            if interpret is True or big:
+                from .relax_interp import make_taylor2
+
                 with jax.ensure_compile_time_eval():
                     run = make_taylor2(tape, n, ictx, n)
-                if run is not None and interpret is not True and run.program.const_val.size * n * n > TAYLOR_BUDGET:
+                if run is not None and interpret is not True and taylor2_bytes(run.program.const_val.size, n) > TAYLOR_BYTES:
                     run = None
-            taylors[id(tape)] = (tape, run)
-        return taylors[id(tape)][1]
+            if run is None and closed is None and interpret is True:
+                closed = traced(lo)
+        how = ("interpret", run) if run is not None else ("traced", closed) if closed is not None else (None, None)
+        if not local and not (closed is not None and _has_tracer_consts(closed)):
+            hessians[id(tape)] = (tape, how)
+        return how
 
     def prepare(lo, hi):
         tape, smooth = smoothness(lo)
@@ -116,18 +221,16 @@ def make_alphabb(fn, eigen=True, safe=False, interpret="auto"):
             return None
         n = lo.size
         m = jnp.size(flat(lo))
-        run = taylor(tape, lo)
-        if run is not None:
-            ids = jnp.asarray(run.program.outs[0])
-            r = run(lo, hi, jnp.eye(n, dtype=lo.dtype))
+        path, how = hessian(tape, lo)
+        if path == "interpret":
+            ids = jnp.asarray(how.program.outs[0])
+            r = how(lo, hi, jnp.eye(n, dtype=lo.dtype))
             H = MC(r[4][ids], r[5][ids], r[4][ids], r[5][ids])
+        elif path == "traced":
+            Hlo, Hhi = jax.core.eval_jaxpr(how.jaxpr, how.consts, lo, hi)
+            H = MC(Hlo, Hhi, Hlo, Hhi)
         else:
-            try:
-                closed = jax.make_jaxpr(jax.jacfwd(jax.jacfwd(flat)))(lo)
-                (H,) = eval_jaxpr_mc(closed.jaxpr, closed.consts, [MC(lo, hi, lo, hi)], ictx)
-            except NotImplementedError:
-                return None
-            H = H if is_mc(H) else MC(H, H, H, H)
+            return None
         hlo = jnp.broadcast_to(H.lo, (m, n, n))
         hhi = jnp.broadcast_to(H.hi, (m, n, n))
         hlo = jnp.where(jnp.isnan(hlo), -jnp.inf, hlo)
@@ -205,4 +308,10 @@ def make_alphabb(fn, eigen=True, safe=False, interpret="auto"):
         cc = jnp.minimum(jnp.where(jnp.isnan(cc), jnp.inf, cc), jnp.where(jnp.isnan(ecc), jnp.inf, ecc))
         return cv, cc
 
+    def path(lo):
+        """Which interval Hessian ``prepare`` uses on boxes like ``lo``: ``"interpret"``, ``"traced"`` or None."""
+        tape, smooth = smoothness(lo)
+        return hessian(tape, lo)[0] if smooth else None
+
+    prepare.path = path
     return prepare, apply
