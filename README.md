@@ -269,6 +269,34 @@ surrogates, and things Pyomo cannot express directly.
 `benchmarks/flagship.py` runs jaxglobal, SCIP, Couenne and BARON on them and
 judges each answer against the best known optimum.
 
+**Export to SCIP or `.nl`.** `jaxglobal.export` turns the same problem
+description that `minimize` takes into a PySCIPOpt model or an AMPL `.nl` file,
+with no hand-written twin. It traces the functions and unrolls `scan`,
+`fori_loop` and loops whose trip count is fixed. Each operation is translated
+exactly, replaced by an exact identity (`tanh`, `sigmoid`, `softplus`,
+`log1p`, `sinh`, `tan`, `max`/`min` as `(a + b ± |a - b|)/2`, ...) or
+reformulated with auxiliary variables (`jnp.where`, comparisons and `sign` get
+binaries, with big-M constants from interval bounds over the box). Anything
+else is refused with an error that names the primitive, for example `erf`, a
+`while_loop` whose condition depends on `x`, or an index computed from `x`.
+Nothing is approximated, and the report lists which route each operation took.
+
+```python
+from jaxglobal import export
+
+m = export.to_scip(f, lo, hi, ineq=g, eq=h, integer=[2])   # a pyscipopt.Model
+print(m.data.report)                  # exact / rewritten / reformulated / refused
+m.setParam("limits/time", 60); m.optimize()
+x = export.solution(m)                # best point, in the order of x
+
+r = export.to_nl(f, lo, hi, "model.nl", ineq=g)   # for couenne, scip, BARON, read_nl
+# r.var_order[k] is the variable of .nl column k (integers are written last)
+export.inspect(f, lo, hi, target="scip")          # report only; does not raise
+```
+
+By default the `.nl` writer keeps `max`, `min`, `if` and comparisons as native
+operators. Pass `nonsmooth="reformulate"` for solvers that reject `if`.
+
 ## Correctness checks
 
 `minimize(..., safe=True)` widens every relaxation outward by a few ulps so
