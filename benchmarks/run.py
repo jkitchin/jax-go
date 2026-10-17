@@ -38,7 +38,9 @@ LIB = HERE / "minlplib"
 REL_GAP, ABS_GAP, FEAS_TOL = 1e-4, 1e-6, 1e-6
 EXTRA = {"safe": True} if os.environ.get("JAXGLOBAL_SAFE") == "1" else {}  # check_wrong.py --safe
 EXTRA.update(json.loads(os.environ.get("JAXGLOBAL_OPTS", "{}")))  # extra minimize options, e.g. '{"branch_var": "reliability"}'
-FIELDS = ["solver", "name", "status", "time", "primal", "dual", "nodes", "message"]
+# "load" (1-min load average when the run started) was added for the SCIP-gap re-baseline; CSVs
+# written before it have no such column and are appended to with their own header
+FIELDS = ["solver", "name", "status", "time", "primal", "dual", "nodes", "message", "load"]
 TAG = "JAXGLOBAL-RESULT "  # marks the worker's result line among solver log output
 COUENNE = shutil.which("couenne") or "/Applications/AMPL/couenne"
 
@@ -65,7 +67,6 @@ def worker(name, tl):
     import jax
 
     jax.config.update("jax_enable_x64", True)
-    import numpy as np
 
     sys.path.insert(0, str(HERE.parent))
     from jaxglobal import minimize
@@ -206,6 +207,7 @@ def instances(max_vars, names=None):
 
 def solve(solver, inst, tl):
     name, sense = inst["name"], (-1 if inst["objsense"] == "max" else 1)
+    load = f"{os.getloadavg()[0]:.2f}"
     t0 = time.perf_counter()
     try:
         if solver == "jaxglobal":
@@ -221,7 +223,7 @@ def solve(solver, inst, tl):
     except Exception as e:  # a crashing adapter must not stop the run
         r = dict(status="error", message=repr(e)[:200])
     r.setdefault("time", time.perf_counter() - t0)
-    return {k: r.get(k, "") for k in FIELDS} | dict(solver=solver, name=name)
+    return {k: r.get(k, "") for k in FIELDS} | dict(solver=solver, name=name, load=load)
 
 
 def main():
@@ -244,9 +246,12 @@ def main():
 
     out = HERE / "results" / f"{a.tag}.csv"
     out.parent.mkdir(exist_ok=True)
-    done = set()
+    done, fields = set(), FIELDS
     if out.exists():
-        done = {(r["solver"], r["name"]) for r in csv.DictReader(open(out))}
+        with open(out) as fh:
+            rd = csv.DictReader(fh)
+            done = {(r["solver"], r["name"]) for r in rd}
+            fields = rd.fieldnames or FIELDS  # an older CSV keeps its columns (no "load")
     else:
         with open(out, "w", newline="") as fh:
             csv.DictWriter(fh, FIELDS).writeheader()
@@ -257,7 +262,7 @@ def main():
     def go(job):
         r = solve(job[0], job[1], a.time_limit)
         with open(out, "a", newline="") as fh:
-            csv.DictWriter(fh, FIELDS).writerow(r)
+            csv.DictWriter(fh, fields, extrasaction="ignore").writerow(r)
         print(f"{r['solver']:10s} {r['name']:28s} {r['status']:11s} {float(r['time'] or 0):8.2f}s "
               f"primal {r['primal']} dual {r['dual']}", flush=True)  # fmt: skip
 

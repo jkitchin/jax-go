@@ -8,7 +8,7 @@ couenne.opt
 *.lst
 *.gdx
 # downloaded by benchmarks/minlplib/fetch.py
-benchmarks/minlplib/nl/
+benchmarks/minlplib/nl
 benchmarks/minlplib/gms/
 benchmarks/minlplib/instancedata.csv
 # benchmark runs in progress; commit finished results deliberately

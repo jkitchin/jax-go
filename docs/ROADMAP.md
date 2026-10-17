@@ -756,6 +756,41 @@ Re-baseline first: the `issue14` cold CSVs were taken under heavy load. Run
 start50 and int50 cold again, with load recorded, before using them to measure
 A.
 
+#### R0 baseline
+
+R0 of `docs/PLAN-scip-gap-v2.md`: the reference numbers every later item of the
+plan is measured against. **Pending**: the machine has stayed at load 10-16
+(other projects benchmarking), above the plan's gate of 10, so no run has been
+made yet. Everything is scripted:
+
+```
+python benchmarks/scipgap_r0.py run       # all of R0, resumable, ~2.5-3 h at low load
+python benchmarks/scipgap_r0.py summary   # the tables for this section
+```
+
+`run` takes the shared benchmark lock (`mkdir
+/private/tmp/claude-501/jaxglobal-bench.lock`) for each step and waits for the
+1-min load to fall below 10 (at most 30 min, then it proceeds and flags the step
+`gate=timeout` in `scipgap_r0_loads.csv`). Steps:
+
+- start50 and int50 with `benchmarks/run.py --solvers jaxglobal --jobs 4
+  --time-limit 60`: cold (`JAXGLOBAL_CACHE=0`), prime (an empty
+  `JAXGLOBAL_CACHE_DIR`) and warm (the primed directory), written to
+  `benchmarks/results/scipgap_r0_{start50,int50}_{cold,prime,warm}.csv`.
+  `run.py` now records the 1-min load at the start of each instance in a `load`
+  column (additive; CSVs without the column are appended to with their own
+  header, and `report.classify` is unchanged).
+- The seven W0 instances, one at a time, `benchmarks/profile_root.py --modes
+  cold` at 60 s and 120 s, 3 repeats each, in
+  `benchmarks/results/scipgap_r0_seven_cold.csv` (mode `cold_tl60_r1` …
+  `cold_tl120_r3`).
+
+`summary` gives solved / wrong / SGM per set and mode beside SCIP on the same
+instances (start50: 44 solved, 1 wrong, SGM 1.9 s from `baseline.csv`; int50:
+45 solved, 0 wrong, SGM 1.3 s from `int50_scip.csv`), and per seven-instance
+run the medians of wall time, overrun past the limit, nodes, primal, dual and
+first-bound time, with the load of each repeat.
+
 ### Phase 3 — search (4 weeks)
 
 - **Branching.** Choose the variable by violation-weighted or pseudocost
