@@ -152,9 +152,9 @@ def _pounce_local(f, ineq, eq, lo, hi, options=None, patterns=None):
         return pounce.Problem(n=lo.size, m=mi + me, problem_obj=prob.problem_obj, lb=lb, ub=ub,
                               cl=kw.get("cl"), cu=kw.get("cu"))  # fmt: skip
 
-    def solve(X0, LO=None, HI=None):
+    def solve(X0, LO=None, HI=None, options=None):
         probs = [prob] * len(X0) if LO is None else [with_bounds(a, b) for a, b in zip(LO, HI)]
-        res = pounce.solve_nlp_batch(probs, list(X0), options=opts)
+        res = pounce.solve_nlp_batch(probs, list(X0), options={**opts, **(options or {})})
         return np.stack([x for x, _ in res])
 
     return solve
@@ -181,16 +181,39 @@ def _scipy_local(f, ineq, eq, lo, hi):
         return minimize(fun, x0, jac=True, method="SLSQP", bounds=bounds, constraints=cons,
                         options={"maxiter": 200, "ftol": 1e-12}).x  # fmt: skip
 
-    def solve(X0, LO=None, HI=None):
+    def solve(X0, LO=None, HI=None, options=None):  # ``options`` (pounce's) are ignored
         LO, HI = (np.broadcast_to(lo, np.shape(X0)), np.broadcast_to(hi, np.shape(X0))) if LO is None else (LO, HI)
         return np.stack([one(x0, list(zip(a, b))) for x0, a, b in zip(X0, LO, HI)])
 
     return solve
 
 
+NEAR_ZERO = 0.1  # |incumbent| below which local solves are repeated with the objective scaled up
+MAX_OBJ_SCALE = 1e6
+
+
+def near_zero_options(fun, abs_tol=1e-6):
+    """Extra pounce options for an objective whose incumbent value ``fun`` is near zero, or None.
+
+    An interior-point solve with the default barrier start (``mu_init = 0.1``)
+    and an objective of size ~1e-6 is steered by the barrier, not by ``f``: on
+    ex6_2_6 (optimum -2.6e-6 at a bound) every start ends at the interior KKT
+    point +7.1e-7. Scaling the objective by ``1 / max(|fun|, abs_tol)`` (at most
+    ``MAX_OBJ_SCALE``) and starting the barrier small lets ``f`` steer. Only
+    used for extra solves: their results are checked like any other.
+    """
+    if not np.isfinite(fun) or abs(fun) >= NEAR_ZERO:
+        return None
+    scale = min(MAX_OBJ_SCALE, 1.0 / max(abs(fun), abs_tol))
+    return {"obj_scaling_factor": float(scale), "mu_init": 1e-6}
+
+
 def make_local(f, ineq, eq, lo, hi, solver="auto", patterns=None):
     """Batched local solver ``X0 (k, n) -> X (k, n)`` on the box [lo, hi].
 
+    The solver is called as ``solve(X0, LO=None, HI=None, options=None)``: ``LO``/``HI``
+    are per-start boxes; ``options`` are extra pounce (Ipopt-style) options for this
+    call, e.g. ``near_zero_options(...)`` (the other backends ignore them).
     ``patterns`` (a ``structure.Structure``) gives pounce the derivative sparsity patterns."""
     lo, hi = np.asarray(lo, dtype=np.float64), np.asarray(hi, dtype=np.float64)
     if solver == "auto":
@@ -203,7 +226,7 @@ def make_local(f, ineq, eq, lo, hi, solver="auto", patterns=None):
         one = make_local_solver(f, ineq, eq)
         batched = jax.jit(jax.vmap(one, in_axes=(0, 0, 0)))
 
-        def solve(X0, LO=None, HI=None, k=8):  # pad to a multiple of k starts so jit compiles once
+        def solve(X0, LO=None, HI=None, options=None, k=8):  # pad to a multiple of k starts; ``options`` ignored
             n = len(X0)
             LO, HI = (np.broadcast_to(lo, np.shape(X0)), np.broadcast_to(hi, np.shape(X0))) if LO is None else (LO, HI)
             pad = lambda A: np.concatenate([A, np.repeat(A[:1], -n % k, 0)])  # noqa: E731
