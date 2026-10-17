@@ -41,7 +41,7 @@ from . import kcache
 from .fbbt import make_fbbt
 from .lifted import make_lifted_bounder
 from .lp import make_constrained_bounder, make_obbt, reduce_ranges
-from .quadratic import make_quadratic_bounder, make_quadratic_obbt, quadratic_form
+from .quadratic import make_quadratic_bounder, make_quadratic_obbt, polynomial_form, quadratic_form
 from .structure import structure
 from .relax import SAFE_K
 from .univariate import make_relaxer
@@ -332,6 +332,21 @@ class _Kernels:
         def violation(x):
             return jnp.maximum(jnp.max(jnp.maximum(g(x), 0.0), initial=0.0), jnp.max(jnp.abs(h(x)), initial=0.0))
 
+        poly_forms, poly_lock = {}, threading.Lock()
+
+        def lifted_form(n):
+            """The lifted LP's form on ``n`` variables: the quadratic one (``self.quadratic``), else
+            the polynomial one (``quadratic.polynomial_form``: every monomial a column that is the
+            product of two earlier columns), else None (reduced-space cuts)."""
+            Q = self.quadratic(n)
+            if Q is None and quadratic and not lifted:
+                with poly_lock:
+                    if n not in poly_forms:
+                        poly_forms[n] = polynomial_form(f, ineq, eq, n)
+                    Q = poly_forms[n]
+            return Q
+
+        self.lifted_form = lifted_form
         if lifted:
             lb_lifted = make_lifted_bounder(f, ineq, eq, n_kelley=n_kelley, fbbt_rounds=fbbt_rounds, tol=feas_tol,
                                             univariate=univariate, alphabb=alphabb,
@@ -346,7 +361,7 @@ class _Kernels:
                                           alphabb=alphabb, multivariate=multivariate, safe=safe)
 
             def raw_bound(blo, bhi, cutoff):
-                Q = self.quadratic(blo.size)
+                Q = lifted_form(blo.size)
                 bounder = cb if Q is None else make_quadratic_bounder(Q, n_kelley=n_kelley, tol=feas_tol, safe=safe)
                 lb, x, _, rlo, rhi = bounder(blo, bhi, cutoff)
                 fx = jnp.where(violation(x) <= feas_tol, f(x), jnp.inf)
@@ -359,7 +374,7 @@ class _Kernels:
                              alphabb=alphabb, multivariate=multivariate, safe=safe) if obbt else None
 
         def lp_tighten(blo, bhi, cutoff):
-            Q = self.quadratic(blo.size) if constrained else None
+            Q = lifted_form(blo.size) if constrained else None
             if Q is None:
                 return cut_obbt(blo, bhi, cutoff)
             return make_quadratic_obbt(Q, rounds=obbt_rounds, tol=feas_tol, safe=safe)(blo, bhi, cutoff)
