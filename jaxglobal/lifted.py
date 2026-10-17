@@ -185,7 +185,13 @@ def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_ro
                     aff[s] = (E, c)
 
         def flat(a):
-            E, c = aff[a]
+            # an output that does not depend on the variables (a constant objective, or a
+            # constraint the tracer could not fold to a Const) has no MC slot: E = 0, c = value
+            if a in aff:
+                E, c = aff[a]
+            else:
+                c = jnp.asarray(vals[a], dt)
+                E = jnp.zeros(c.shape + (N,), dt)
             return jnp.reshape(E, (-1, N)), jnp.reshape(c, (-1,))
 
         # --- cuts of one lifted node at input points ------------------------
