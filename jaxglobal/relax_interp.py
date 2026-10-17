@@ -33,19 +33,59 @@ import numpy as np
 from jax import lax
 from jax.custom_derivatives import SymbolicZero
 
-from .fbbt_interp import layout, scalarize, use_interpreter
+from .fbbt_interp import layout, scalarize, tape_size, use_interpreter
 from .relax import MC, apply_rule, is_mc
 
 F64 = jnp.float64
-# Interpret only tapes this large. Straight-line relaxation kernels compile in a few seconds up to
-# several hundred rows (480-row st_rv7 constraints: 2 s) and run 10-300x faster per call than the
-# interpreter, which under vmap evaluates every opcode's branch at every row; at 1,162 rows
-# (kriging_peaks) the traced gradient kernel takes minutes to compile and the interpreter 0.4 s.
+
+# Which tapes the McCormick relaxation (and the hull's g'') interprets.
+# ``RULE = "rows"`` (default, unchanged): tapes of at least ``MIN_ROWS`` rows.
+# ``RULE = "ops"`` (opt-in, ``--set relax_interp.RULE=ops``): also tapes whose straight-line node bound
+# would evaluate at least ``MIN_OPS`` scalar rules per box (``kernel_ops``: wide models, where the n
+# tangents at 2n + 1 + n_kelley cut points make a few hundred rows expensive to compile and run, e.g.
+# hadamard_5's 503-row constraints at n = 26). ``MIN_OPS`` is a candidate, not yet calibrated: the A3
+# ablation (docs/ROADMAP.md) has to show no node-rate loss on the instances it flips before it becomes
+# the default.
+# Straight-line relaxation kernels compile in a few seconds up to several hundred rows (480-row st_rv7
+# constraints: 2 s) and usually run faster per call than the interpreter, which runs one loop step per
+# schedule step; at 1,162 rows (kriging_peaks) the traced gradient kernel takes minutes to compile and
+# the interpreter 0.4 s.
+RULE = "rows"
 MIN_ROWS = 600
+MIN_OPS = 600_000
+N_KELLEY = 4  # minimize's default n_kelley
+
+
+def cut_points(n, n_kelley=N_KELLEY):
+    """Points per box at which the node bound linearizes each relaxation: the center, the 2n axis
+    points and one point per Kelley round (``lp.make_constrained_bounder``)."""
+    return 2 * n + 1 + n_kelley
+
+
+def kernel_ops(tape, n, n_kelley=N_KELLEY):
+    """Scalar relaxation rules the straight-line node bound evaluates per box for this tape.
+
+    Each of the ``rows`` scalar operations is a McCormick rule, evaluated with its forward-mode
+    derivative in all ``n`` directions (``jax.jacfwd``: value plus ``n`` tangents) at every cut
+    point (``cut_points``): ``rows * (n + 1) * cut_points(n, n_kelley)``.
+    """
+    rows, _ = tape_size(tape)
+    return rows * ops_per_row(n, n_kelley)
+
+
+def ops_per_row(n, n_kelley=N_KELLEY):
+    """Rule evaluations per box for one scalar row: ``(n + 1) * cut_points(n, n_kelley)``."""
+    return (n + 1) * cut_points(n, n_kelley)
 
 
 def use_relax_interpreter(tape, n):
-    return use_interpreter(tape, n, min_rows=MIN_ROWS)
+    """Interpret this tape in the relaxation kernels (see ``RULE``)."""
+    if not use_interpreter(tape, n, min_rows=0):  # vectorized code: scalarizing multiplies the work
+        return False
+    rows, _ = tape_size(tape)
+    if RULE == "rows":
+        return rows >= MIN_ROWS
+    return rows >= MIN_ROWS or rows * ops_per_row(n) >= MIN_OPS
 
 
 def _stand(name, same, n_in, eqn):

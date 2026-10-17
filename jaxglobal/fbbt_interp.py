@@ -360,12 +360,43 @@ def _propagate_rows(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds, integer=()):
     return fbbt
 
 
-def use_interpreter(tape, n, min_rows=50, max_expansion=1.5):
-    """Interpret large tapes that are mostly scalar already (scalarizing vectorized code multiplies the work)."""
+def tape_size(tape):
+    """``(rows, eqns)``: scalar rows ``scalarize`` would make (elements of non-structural outputs) and equations."""
     rows = sum(int(np.prod(tape.shapes[s][0])) for node in tape.nodes for s in node.outs
                if node.eqn.primitive.name not in STRUCTURAL)  # fmt: skip
     eqns = sum(1 for node in tape.nodes if node.eqn.primitive.name not in STRUCTURAL)
-    return rows >= min_rows and rows <= max_expansion * max(eqns, 1)
+    return rows, eqns
+
+
+# ``use_interpreter``'s rule for FBBT: "ops" interprets when the straight-line FBBT kernel would
+# evaluate at least ``FBBT_MIN_OPS`` scalar rules per box (``fbbt_ops``); "rows" is the former fixed
+# threshold of 50 rows (kept for ablations: ``--set fbbt_interp.RULE=rows``).
+RULE = "ops"
+MIN_ROWS = 50
+FBBT_ROUNDS = 5  # minimize's default fbbt_rounds
+FBBT_MIN_OPS = MIN_ROWS * (2 * FBBT_ROUNDS + 1)
+
+
+def fbbt_ops(rows, rounds=FBBT_ROUNDS):
+    """Scalar rule evaluations per box of the straight-line FBBT kernel: a forward and a backward
+    sweep over the rows per round, and the final forward sweep."""
+    return rows * (2 * rounds + 1)
+
+
+def use_interpreter(tape, n, min_rows=None, max_expansion=1.5, rounds=FBBT_ROUNDS):
+    """Interpret large tapes that are mostly scalar already (scalarizing vectorized code multiplies the work).
+
+    ``min_rows`` (given): at least that many rows (``min_rows=0`` only asks whether the tape is
+    mostly scalar). Otherwise the FBBT rule ``RULE``.
+    """
+    rows, eqns = tape_size(tape)
+    if rows > max_expansion * max(eqns, 1):
+        return False
+    if min_rows is not None:
+        return rows >= min_rows
+    if RULE == "rows":
+        return rows >= MIN_ROWS
+    return fbbt_ops(rows, rounds) >= FBBT_MIN_OPS
 
 
 class Schedule(NamedTuple):
