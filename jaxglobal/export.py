@@ -23,14 +23,33 @@ call. The walker here handles those, unrolls ``scan`` / ``fori_loop`` and
 while loops whose condition is a constant, and inlines ``jit`` and
 ``custom_jvp`` / ``custom_vjp`` calls.
 
-Nothing is approximated. Every operation is translated exactly, rewritten into
-an identity (``tanh(x) = 1 - 2 / (exp(2x) + 1)``), reformulated with
-auxiliary variables (``jnp.where`` and ``sign`` with binaries and big-M
-constants from interval bounds over the box), or refused with ``ExportError``
-naming the primitive. The ``ExportReport`` (``model.data.report`` for SCIP, the
-return value of ``to_nl``) lists which operations took which route, and the
-assumptions made (``isnan`` / ``isfinite`` of a model value are taken as False /
-True: a solver only returns finite points).
+Each operation is translated exactly, rewritten into an identity
+(``tanh(x) = 1 - 2 / (exp(2x) + 1)``), reformulated with auxiliary variables
+(``jnp.where``, comparisons and ``sign`` with binaries and big-M constants from
+interval bounds over the box), or refused with ``ExportError`` naming the
+primitive. The ``ExportReport`` (``model.data.report`` for SCIP, the return
+value of ``to_nl``) lists which operations took which route, the assumptions
+made (``isnan`` / ``isfinite`` of a model value are taken as False / True: a
+solver only returns finite points), and what is not exact (``approximated``):
+
+- A reformulated comparison cannot be strict. With ``strict_eps=0`` (the
+  default), at a tie ``u == v`` either branch is allowed, so the model is a
+  relaxation where the branches of a ``jnp.where`` (or the values of ``sign``)
+  differ at the tie: a piecewise-constant function can then reach a value at a
+  breakpoint that JAX never produces. ``strict_eps > 0`` makes the comparison
+  strict by excluding ``0 < |u - v| < strict_eps`` on the wrong side, a
+  restriction instead. Either way, evaluate ``f`` with JAX at the returned
+  ``x``.
+- ``reduce_precision`` and float64 -> float32 casts are exported as identities
+  (the solvers compute in double precision).
+
+Refused rather than exported wrongly: a ``jnp.where`` branch (or comparison
+operand) that is undefined on part of the box, such as ``sqrt(x)`` with
+``x < 0`` possible, because the reformulation evaluates both branches
+everywhere and would cut that part of the box off (write
+``jnp.sqrt(jnp.maximum(x, 0))``); big-M constants of 1e20 or more (SCIP's
+infinity; above 1e8 they are reported and warned about, ``ExportBigMWarning``);
+division by the constant 0.
 """
 
 from __future__ import annotations
@@ -45,7 +64,8 @@ import jax.numpy as jnp
 import numpy as np
 from jax.extend import core as jcore
 
-__all__ = ["ExportError", "ExportReport", "ExportSizeWarning", "inspect", "solution", "to_nl", "to_scip"]
+__all__ = ["ExportBigMWarning", "ExportError", "ExportReport", "ExportSizeWarning", "inspect", "solution", "to_nl",
+           "to_scip"]  # fmt: skip
 
 
 class ExportError(ValueError):
@@ -54,6 +74,15 @@ class ExportError(ValueError):
 
 class ExportSizeWarning(UserWarning):
     """The exported model is larger than ``max_size`` scalar operations."""
+
+
+class ExportBigMWarning(UserWarning):
+    """A big-M constant above ``BIGM_WARN``: the reformulation is numerically weak."""
+
+
+BIGM_WARN = 1e8  # big-M constants above this are reported and warned about
+BIGM_REFUSE = 1e20  # ... and refused from here on (SCIP treats 1e20 as infinity)
+MAX_TERMS = 1000  # SCIP: lift a product operand to a variable before pyscipopt expands it past this
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +124,8 @@ class Graph:
         self._key = {}
         self.assumptions = set()
         self.notes = Counter()
+        self.approximated = {}  # op -> [count, how]
+        self.partial = set()  # nodes whose expression is undefined somewhere (sqrt, log, div, ...)
 
     def _add(self, op, args=(), param=None):
         k = (op, tuple(args), param)
@@ -103,6 +134,8 @@ class Graph:
             i = len(self.nodes)
             self.nodes.append(k)
             self._key[k] = i
+            if _partial_op(self, op, args) or any(a in self.partial for a in args):
+                self.partial.add(i)
         return i
 
     def const(self, v):
@@ -157,7 +190,8 @@ class Graph:
                 return b
             if c[1] == 1.0:
                 return a
-            if c[0] == 0.0 or c[1] == 0.0:
+            # 0 * a = 0 only where a is defined (JAX: 0 * nan = nan)
+            if (c[0] == 0.0 and b not in self.partial) or (c[1] == 0.0 and a not in self.partial):
                 return self.const(0.0)
             if c[0] == -1.0:
                 return self.op("neg", b)
@@ -166,8 +200,6 @@ class Graph:
         elif name == "div":
             if c[1] == 1.0:
                 return a
-            if c[0] == 0.0:
-                return self.const(0.0)
         elif name == "neg":
             if self.nodes[a][0] == "neg":
                 return self.nodes[a][1][0]
@@ -209,6 +241,19 @@ class Graph:
             if args[1] == args[2]:
                 return args[1]
         return self._add(name, args)
+
+
+PARTIAL = {"sqrt", "log", "log1p", "div", "acosh", "asin", "acos", "atanh", "tan", "unsupported"}
+
+
+def _partial_op(g, op, args):
+    """Whether ``op(*args)`` itself is undefined for some real arguments."""
+    if op == "pow":
+        if not g.is_const(args[1]):
+            return True
+        k = g.value(args[1])
+        return not (float(k).is_integer() and k >= 0)
+    return op in PARTIAL
 
 
 def _reachable(g, roots):
@@ -394,7 +439,7 @@ STRUCTURAL = {"slice", "squeeze", "reshape", "broadcast_in_dim", "concatenate", 
               "copy", "copy_p"}  # fmt: skip
 # positions of the operands that are data (moved around); the others are indices / predicates
 DATA = {"gather": (0,), "dynamic_slice": (0,), "dynamic_update_slice": (0, 1), "scatter": (0, 2)}
-IDENTITY = {"stop_gradient", "reduce_precision", "copy", "copy_p", "optimization_barrier"}
+IDENTITY = {"stop_gradient", "copy", "copy_p", "optimization_barrier"}
 UNARY = {"neg", "exp", "log", "sqrt", "abs", "sign", "sin", "cos", "tan", "tanh", "logistic", "log1p", "expm1",
          "sinh", "cosh", "atan", "asin", "acos", "atanh", "asinh", "acosh"}  # fmt: skip
 BINARY = {"add": "add", "add_any": "add", "sub": "sub", "mul": "mul", "div": "div", "max": "max", "min": "min",
@@ -468,11 +513,19 @@ class _Walker:
             return [np.asarray(o) for o in out] if eqn.primitive.multiple_results else [np.asarray(out)]
         if name in IDENTITY:
             return list(ins)
+        if name == "reduce_precision":
+            how = "exported as the identity (the solvers compute in double precision)"
+            self.g.approximated.setdefault("reduce_precision", [0, how])[0] += 1
+            return list(ins)
         if name in STRUCTURAL and not (name == "select_n" and _is_sym(ins[0])):
             return self.structural(eqn, ins)
         if name == "convert_element_type":
             src, dst = eqn.invars[0].aval.dtype, p["new_dtype"]
             if jnp.issubdtype(dst, jnp.floating) or not jnp.issubdtype(src, jnp.floating):
+                if jnp.issubdtype(src, jnp.floating) and np.dtype(dst).itemsize < np.dtype(src).itemsize:
+                    key = f"convert_element_type {np.dtype(src).name} -> {np.dtype(dst).name}"
+                    how = "exported as the identity (the solvers compute in double precision)"
+                    self.g.approximated.setdefault(key, [0, how])[0] += 1
                 return [ins[0]]
             return self.unsupported(eqn, f"convert_element_type from {src} to {dst} (rounds a model value)")
         g = self.g
@@ -591,7 +644,7 @@ class _Walker:
         order = range(a.shape[0] - 1, -1, -1) if eqn.params.get("reverse") else range(a.shape[0])
         acc = None
         for t in order:
-            acc = a[t] if acc is None else np.vectorize(lambda u, v: g.op(op, u, v), otypes=[object])(acc, a[t])
+            acc = a[t] if acc is None else np.frompyfunc(lambda u, v: g.op(op, u, v), 2, 1)(acc, a[t])
             out[t] = acc
         return np.moveaxis(out, 0, eqn.params["axis"])
 
@@ -729,7 +782,11 @@ class ExportReport:
     ``rewritten``: operations written as an exact identity in other operators (``how``).
     ``reformulated``: operations replaced by auxiliary variables and constraints (``how``).
     ``refused``: operations the target cannot represent (``to_*`` raise ``ExportError``).
-    ``approximated`` is always empty: the export never approximates.
+    ``approximated``: operations whose export is not exact (``how``): comparisons
+    and ``sign`` (relaxed at ties, or restricted near them with ``strict_eps``),
+    ``reduce_precision`` and float64 -> float32 casts (identities). When it is not
+    empty, evaluate ``f`` with JAX at the solver's ``x`` before trusting the
+    objective value.
     """
 
     target: str
@@ -744,7 +801,7 @@ class ExportReport:
     rewritten: dict = field(default_factory=dict)  # op -> [count, how]
     reformulated: dict = field(default_factory=dict)  # op -> [count, how]
     refused: list = field(default_factory=list)
-    approximated: list = field(default_factory=list)
+    approximated: dict = field(default_factory=dict)  # op -> [count, how]
     assumptions: list = field(default_factory=list)
     notes: list = field(default_factory=list)
     var_order: np.ndarray | None = None  # .nl: model variable of each .nl variable (first n_vars are x)
@@ -758,7 +815,7 @@ class ExportReport:
                  f"{self.n_cons} constraints (+{self.n_aux_cons}), {self.n_ops} operations"]  # fmt: skip
         if self.exact:
             lines.append("  exact: " + ", ".join(f"{k} x{v}" for k, v in sorted(self.exact.items())))
-        for kind in ("rewritten", "reformulated"):
+        for kind in ("rewritten", "reformulated", "approximated"):
             for k, (c, how) in sorted(getattr(self, kind).items()):
                 lines.append(f"  {kind}: {k} x{c} -> {how}")
         if self.epigraph:
@@ -773,24 +830,39 @@ class _Lowering:
     """Rebuild a problem's graph for a target, adding auxiliary variables where needed.
 
     ``mode``: ``"scip"`` (SCIP's operators), ``"nl"`` (.nl operators, nonsmooth
-    ones native) or ``"nl-reformulate"`` (.nl operators, nonsmooth ones
-    reformulated as for SCIP). ``minmax``: ``"abs"`` or ``"bigm"`` for max / min
-    where they are not native.
+    ones native), ``"nl-reformulate"`` (.nl operators, nonsmooth ones
+    reformulated as for SCIP) or ``"nl-portable"`` (only the .nl operators SCIP's
+    and Couenne's readers accept: SCIP's set, nonsmooth ones reformulated).
+    ``minmax``: ``"abs"`` or ``"bigm"`` for max / min where they are not native.
+    ``strict_eps``: margin making reformulated strict comparisons strict (0: ties
+    allowed either way).
     """
 
-    def __init__(self, prob, mode, minmax="abs"):
+    TARGETS = {"scip": "SCIP", "nl": ".nl", "nl-reformulate": ".nl", "nl-portable": ".nl (portable)"}
+
+    def __init__(self, prob, mode, minmax="abs", strict_eps=0.0):
         if minmax not in ("abs", "bigm"):
             raise ValueError(f"minmax must be 'abs' or 'bigm', not {minmax!r}")
-        self.p, self.mode, self.minmax = prob, mode, minmax
+        if not (np.isfinite(strict_eps) and strict_eps >= 0):
+            raise ValueError(f"strict_eps must be finite and >= 0, not {strict_eps!r}")
+        self.p, self.mode, self.minmax, self.eps = prob, mode, minmax, float(strict_eps)
         self.g = Graph()
         self.lo, self.hi = list(prob.lo), list(prob.hi)
         self.integer, self.labels = list(prob.integer), list(prob.labels)
         self.cons = []
         self.binary = 0
-        self.report = ExportReport(target="SCIP" if mode == "scip" else ".nl")
+        self.bigm_max = 0.0
+        self.report = ExportReport(target=self.TARGETS[mode])
         roots = [prob.obj] + [c[0] for c in prob.cons]
         self.order = _reachable(prob.g, roots)
         self.iv = _intervals(prob.g, self.order, prob.lo, prob.hi)
+        self.undefined = {}  # node -> why its expression is undefined somewhere on the box
+        for i in self.order:
+            why = self._domain(i)
+            if why is None:
+                why = next((self.undefined[k] for k in prob.g.nodes[i][1] if k in self.undefined), None)
+            if why is not None:
+                self.undefined[i] = why
         self.map = {}
         for i in self.order:
             self.map[i] = self.lower(i)
@@ -798,6 +870,78 @@ class _Lowering:
         r.n_vars, r.n_cons = prob.n, len(prob.cons)
         r.assumptions = sorted(prob.g.assumptions)
         r.notes += [f"{k}: {v}" for k, v in sorted(prob.g.notes.items())]
+        for k, (c, how) in prob.g.approximated.items():
+            r.approximated.setdefault(k, [0, how])[0] += c
+        if self.bigm_max > BIGM_WARN:
+            msg = (f"largest big-M constant is {self.bigm_max:.3g} (> {BIGM_WARN:g}): the reformulation is "
+                   "numerically weak; tighten the variable bounds")  # fmt: skip
+            r.notes.append(msg)
+            warnings.warn(msg, ExportBigMWarning, stacklevel=4)
+
+    def _domain(self, i):
+        """Why node ``i``'s own operation is undefined somewhere on the box (None if it is defined everywhere)."""
+        g = self.p.g
+        op, args, _ = g.nodes[i]
+        if not args or op not in PARTIAL | {"pow"}:
+            return None
+        lo, hi = self.iv[args[0]]
+
+        def why(cond):
+            return f"{op} of an operand in [{lo:.4g}, {hi:.4g}]{cond}"
+
+        if op == "sqrt" and lo < 0:
+            return why(" (sqrt needs >= 0)")
+        if op == "log" and lo <= 0:
+            return why(" (log needs > 0)")
+        if op == "log1p" and lo <= -1:
+            return why(" (log1p needs > -1)")
+        if op == "acosh" and lo < 1:
+            return why(" (acosh needs >= 1)")
+        if op in ("asin", "acos") and (lo < -1 or hi > 1):
+            return why(f" ({op} needs [-1, 1])")
+        if op == "atanh" and (lo <= -1 or hi >= 1):
+            return why(" (atanh needs (-1, 1))")
+        if op == "tan" and not np.all(np.isfinite(self.iv[i])):
+            return why(" (tan has a pole there)")
+        if op == "div":
+            bl, bh = self.iv[args[1]]
+            if bl <= 0 <= bh:
+                return f"division by an operand in [{bl:.4g}, {bh:.4g}] (can be 0)"
+        if op == "pow":
+            if not g.is_const(args[1]):
+                return why(" (x ** y needs x > 0)") if lo <= 0 else None
+            k = g.value(args[1])
+            if float(k).is_integer():
+                return why(f" (x ** {k:g} needs x != 0)") if k < 0 and lo <= 0 <= hi else None
+            if lo < 0 or (k < 0 and lo <= 0):
+                return why(f" (x ** {k:g} needs x {'>' if k < 0 else '>='} 0)")
+        return None
+
+    def defined(self, k, what):
+        """Refuse when node ``k`` (a branch or operand the reformulation evaluates everywhere) is undefined somewhere."""
+        if k in self.undefined:
+            raise ExportError(
+                f"{what} contains {self.undefined[k]}, which is undefined on part of the box: the reformulation "
+                "evaluates it everywhere and would cut that part off (JAX masks it); make it defined everywhere, "
+                "e.g. jnp.sqrt(jnp.maximum(x, 0)) or jnp.log(jnp.maximum(x, 1e-12))"
+            )
+
+    def bigm(self, what, *vals):
+        """Check big-M constants / auxiliary bounds: refuse at ``BIGM_REFUSE``, remember the largest."""
+        m = max(abs(float(v)) for v in vals)
+        if not m < BIGM_REFUSE:
+            raise ExportError(f"{what}: big-M constant {m:.3g} >= {BIGM_REFUSE:g} (SCIP's infinity); "
+                              "tighten the variable bounds")  # fmt: skip
+        self.bigm_max = max(self.bigm_max, m)
+
+    def tie(self, op, n=1):
+        if self.eps == 0:
+            how = ("relaxed at ties: where the compared values are equal either branch is allowed (pass "
+                   "strict_eps > 0, and evaluate f with JAX at the returned x)")  # fmt: skip
+        else:
+            how = (f"restricted near ties: values within strict_eps={self.eps:g} of the tie on the wrong side are "
+                   "excluded (evaluate f with JAX at the returned x)")  # fmt: skip
+        self.report._count("approximated", op, how)
 
     # helpers -------------------------------------------------------------
     def new_var(self, lo, hi, label, binary=False):
@@ -846,7 +990,9 @@ class _Lowering:
             return g.const(p)
         if op == "unsupported":
             raise ExportError(p)
-        exact = NL_EXACT if nl else SCIP_EXACT
+        if op == "div" and self.p.g.is_const(args[1], 0.0):
+            raise ExportError("division by the constant 0")
+        exact = SCIP_EXACT if self.mode in ("scip", "nl-portable") else NL_EXACT
         if op in exact:
             r.exact[op] += 1
             return g.sum(a) if op == "sum" else g.op(op, *a)
@@ -863,8 +1009,10 @@ class _Lowering:
             raise ExportError("pow(x, y) with a variable exponent needs x > 0 over the box (SCIP has no x**y)")
         if op in REWRITES and op not in ("max", "min", "sign"):
             r._count("rewritten", op, REWRITES[op])
-            return self.rewrite(op, a[0])
+            return self.rewrite(i, op, a[0])
         if op in ("atan", "asin", "acos", "atan2"):
+            if self.mode == "nl-portable":
+                raise ExportError(f"{op} is not read by SCIP's or Couenne's .nl readers (use portable=False)")
             raise ExportError(f"{op} has no SCIP expression (write to .nl instead)")
         if native and op in NL_NATIVE_NONSMOOTH:
             r.exact[op] += 1
@@ -909,7 +1057,7 @@ class _Lowering:
             return self.select(i, args, a)
         raise ExportError(f"operation '{op}' is not supported for {r.target}")
 
-    def rewrite(self, op, x):
+    def rewrite(self, i, op, x):
         g = self.g
 
         def c(v):
@@ -928,8 +1076,18 @@ class _Lowering:
         if op in ("sinh", "cosh"):
             e, em = g.op("exp", x), g.op("exp", g.op("neg", x))
             return g.op("mul", c(0.5), g.op("sub" if op == "sinh" else "add", e, em))
-        if op == "asinh":
-            return g.op("log", g.op("add", x, g.op("sqrt", g.op("add", g.op("pow", x, c(2)), c(1.0)))))
+        if op == "asinh":  # odd: x + sqrt(x^2 + 1) cancels for x << 0
+            xl, xh = self.iv[self.p.g.nodes[i][1][0]]
+            if xl >= -1e4:
+                return g.op("log", g.op("add", x, g.op("sqrt", g.op("add", g.op("pow", x, c(2)), c(1.0)))))
+            mag = g.op("log", g.op("add", g.op("abs", x), g.op("sqrt", g.op("add", g.op("pow", x, c(2)), c(1.0)))))
+            if xh <= 0:
+                return g.op("neg", mag)
+            if not np.isfinite(xl) or not np.isfinite(xh):
+                how = "log(x + sqrt(x^2 + 1)) loses accuracy for x < -1e4 (no finite bound for sign(x))"
+                self.report._count("approximated", "asinh", how)
+                return g.op("log", g.op("add", x, g.op("sqrt", g.op("add", g.op("pow", x, c(2)), c(1.0)))))
+            return g.op("mul", self.sign(i, x, "asinh (sign(x) log(|x| + sqrt(x^2 + 1)))", ties=False), mag)
         if op == "acosh":
             return g.op("log", g.op("add", x, g.op("sqrt", g.op("sub", g.op("pow", x, c(2)), c(1.0)))))
         if op == "atanh":
@@ -937,20 +1095,26 @@ class _Lowering:
         raise AssertionError(op)
 
     def compare(self, i, op, args, a):
-        """Binary z = [u < v] (or <=): z = 1 => u - v <= 0, z = 0 => u - v >= 0 (either at a tie)."""
-        self.report._count("reformulated", op, "binary z with big-M: z=1 => u <= v, z=0 => u >= v (ties: either)")
+        """Binary z = [u < v] (or <=) on d = u - v: z = 1 => d <= 0, z = 0 => d >= 0, with ``strict_eps``
+        moving the strict side (lt: z = 1 => d <= -eps; le: z = 0 => d >= eps)."""
+        self.report._count("reformulated", op, "binary z with big-M: z=1 => u <= v, z=0 => u >= v")
+        self.tie(op)
         u, v = (0, 1) if op in ("lt", "le") else (1, 0)
+        for k in (u, v):
+            self.defined(args[k], f"an operand of comparison '{op}'")
         (ul, uh), (vl, vh) = (self.bounds(args[k], f"comparison '{op}'") for k in (u, v))
         dl, dh = ul - vh, uh - vl
+        e = self.eps
+        self.bigm(f"comparison '{op}'", dl - e, dh + e)
         d = self.g.op("sub", a[u], a[v])
         z = self.new_var(0, 1, f"{op}[{i}]", binary=True)
         lbl = f"{op}[{i}]"
-        # d <= dh (1 - z)  and  d >= dl z
-        self.add_con(self.g.op("add", d, self.lin((dh, z))), -np.inf, dh, lbl)
-        self.add_con(self.g.op("sub", d, self.lin((dl, z))), 0.0, np.inf, lbl)
-        self.report.notes.append(
-            f"{op}[{i}]: comparison is non-strict in the export (at a tie either branch is allowed)"
-        )
+        if op in ("lt", "gt"):  # strict: z = 1 => d <= -eps
+            self.add_con(self.g.op("add", d, self.lin((dh + e, z))), -np.inf, dh, lbl)  # d <= dh (1-z) - eps z
+            self.add_con(self.g.op("sub", d, self.lin((dl, z))), 0.0, np.inf, lbl)  # d >= dl z
+        else:  # non-strict: z = 0 => d >= eps
+            self.add_con(self.g.op("add", d, self.lin((dh, z))), -np.inf, dh, lbl)  # d <= dh (1-z)
+            self.add_con(self.g.op("sub", d, self.lin((dl - e, z))), e, np.inf, lbl)  # d >= dl z + eps (1-z)
         return z
 
     def select(self, i, args, a):
@@ -960,8 +1124,11 @@ class _Lowering:
             self.report._count("reformulated", "select", "f + (t - f) p with the predicate's binary")
             return self.lin((g.value(F), None), (g.value(T) - g.value(F), P))
         self.report._count("reformulated", "select", "aux y with big-M: p=1 => y = t, p=0 => y = f")
+        self.defined(args[2], "the true branch of jnp.where / select_n")
+        self.defined(args[1], "the false branch of jnp.where / select_n")
         (fl, fh), (tl, th) = self.bounds(args[1], "select_n (jnp.where)"), self.bounds(args[2], "select_n (jnp.where)")
         yl, yh = min(fl, tl), max(fh, th)
+        self.bigm("select_n (jnp.where)", yl, yh, yh - tl, yl - th, yh - fl, yl - fh)
         y = self.new_var(yl, yh, f"select[{i}]")
         lbl = f"select[{i}]"
         # p = 1: y - t in [0, 0]; else |y - t| <= its range.  p = 0: y - f in [0, 0].
@@ -974,22 +1141,28 @@ class _Lowering:
         self.add_con(g.op("sub", yf, self.lin((mf_lo, P))), 0.0, np.inf, lbl)  # y - f >= mf_lo p
         return y
 
-    def sign(self, i, x):
-        self.report._count("reformulated", "sign", "binaries zp, zn: sign = zp - zn (at x = 0 any of -1, 0, 1)")
-        xl, xh = self.bounds(self.p.g.nodes[i][1][0], "sign")
+    def sign(self, i, x, what="sign", ties=True):
+        """sign(x) = zp - zn with binaries; ``ties``: whether the value at x = 0 matters (else exact)."""
+        self.report._count("reformulated", what, "binaries zp, zn: sign = zp - zn")
+        e = self.eps if ties else 0.0
+        if ties:
+            self.tie("sign")
+        xl, xh = self.bounds(self.p.g.nodes[i][1][0], what)
+        self.bigm(what, xl - e, xh + e)
         zp = self.new_var(0, 1, f"sign+[{i}]", binary=True)
         zn = self.new_var(0, 1, f"sign-[{i}]", binary=True)
         lbl = f"sign[{i}]"
         self.add_con(self.lin((1, zp), (1, zn)), -np.inf, 1.0, lbl)
         self.add_con(self.g.op("sub", x, self.lin((xh, zp))), -np.inf, 0.0, lbl)  # x <= xh zp
         self.add_con(self.g.op("sub", x, self.lin((xl, zn))), 0.0, np.inf, lbl)  # x >= xl zn
-        self.add_con(self.g.op("add", x, self.lin((xl, zp))), xl, np.inf, lbl)  # x >= xl (1 - zp)
-        self.add_con(self.g.op("add", x, self.lin((xh, zn))), -np.inf, xh, lbl)  # x <= xh (1 - zn)
+        self.add_con(self.g.op("add", x, self.lin((xl - e, zp))), xl, np.inf, lbl)  # x >= xl (1 - zp) + eps zp
+        self.add_con(self.g.op("add", x, self.lin((xh + e, zn))), -np.inf, xh, lbl)  # x <= xh (1 - zn) - eps zn
         return self.lin((1, zp), (-1, zn))
 
     def maxmin(self, i, op, args, a):
         self.report._count("reformulated", op, "aux y and binary z with big-M")
         (al, ah), (bl, bh) = (self.bounds(k, op) for k in args)
+        self.bigm(op, al, ah, bl, bh, bh - al, ah - bl)
         g, A, B = self.g, a[0], a[1]
         lbl = f"{op}[{i}]"
         z = self.new_var(0, 1, f"{op}z[{i}]", binary=True)
@@ -1031,9 +1204,9 @@ class _Lowering:
                         np.asarray(self.integer, bool), self.map[self.p.obj], cons, self.labels)  # fmt: skip
 
 
-def _lower(f, lo, hi, ineq, eq, integer, mode, minmax, max_size, strict=True):
+def _lower(f, lo, hi, ineq, eq, integer, mode, minmax, max_size, strict=True, strict_eps=0.0):
     prob = _build(f, lo, hi, ineq, eq, integer)
-    low = _Lowering(prob, mode, minmax)
+    low = _Lowering(prob, mode, minmax, strict_eps)
     if low.report.refused and strict:
         msgs = sorted(set(low.report.refused))
         raise ExportError(f"cannot export to {low.report.target}: " + "; ".join(msgs))
@@ -1044,11 +1217,18 @@ def _lower(f, lo, hi, ineq, eq, integer, mode, minmax, max_size, strict=True):
     return out, low.report
 
 
-def inspect(f, lo, hi, *, ineq=None, eq=None, integer=None, target="scip", minmax="abs", nonsmooth="native"):
+def inspect(f, lo, hi, *, ineq=None, eq=None, integer=None, target="scip", minmax="abs", nonsmooth="native",
+            portable=False, strict_eps=0.0):  # fmt: skip
     """The ``ExportReport`` of exporting to ``target`` (``"scip"`` or ``"nl"``), without raising on refusals."""
-    mode = "scip" if target == "scip" else ("nl" if nonsmooth == "native" else "nl-reformulate")
-    _, report = _lower(f, lo, hi, ineq, eq, integer, mode, minmax, None, strict=False)
+    mode = "scip" if target == "scip" else _nl_mode(nonsmooth, portable)
+    _, report = _lower(f, lo, hi, ineq, eq, integer, mode, minmax, None, strict=False, strict_eps=strict_eps)
     return report
+
+
+def _nl_mode(nonsmooth, portable):
+    if nonsmooth not in ("native", "reformulate"):
+        raise ValueError(f"nonsmooth must be 'native' or 'reformulate', not {nonsmooth!r}")
+    return "nl-portable" if portable else ("nl" if nonsmooth == "native" else "nl-reformulate")
 
 
 # ---------------------------------------------------------------------------
@@ -1066,7 +1246,7 @@ class SCIPExport:
 
 
 def to_scip(f, lo, hi, *, ineq=None, eq=None, integer=None, name="jaxglobal", minmax="abs", max_size=1e5,
-            share_min=50):  # fmt: skip
+            share_min=50, strict_eps=0.0):  # fmt: skip
     """A ``pyscipopt.Model`` for: minimize ``f(x)`` s.t. ``ineq(x) <= 0``, ``eq(x) == 0``, ``lo <= x <= hi``.
 
     The arguments are those of ``jaxglobal.minimize``. ``model.data`` is a
@@ -1077,16 +1257,21 @@ def to_scip(f, lo, hi, *, ineq=None, eq=None, integer=None, name="jaxglobal", mi
     identities ``(a + b +- |a - b|) / 2``; ``"bigm"`` uses a binary and big-M
     constraints instead. ``jnp.where`` and ``sign`` always use binaries with big-M
     constants from interval bounds over the box, and are refused when those are
-    not finite. A shared subexpression with at least ``share_min`` operations
-    becomes an auxiliary variable (``w == expr``), so unrolled loops do not grow
-    into exponentially large expression trees. A nonlinear objective is moved
-    into a constraint ``f(x) <= t`` with ``minimize t``. Warns
-    (``ExportSizeWarning``) above ``max_size`` scalar operations. Raises
-    ``ExportError`` naming the operation when something cannot be exported.
+    not finite. Reformulated comparisons (and ``sign``) are relaxed at ties
+    unless ``strict_eps > 0`` (see the module docstring and
+    ``report.approximated``). A shared subexpression with at least
+    ``share_min`` operations becomes an auxiliary variable (``w == expr``), so
+    unrolled loops do not grow into exponentially large expression trees, and a
+    product operand becomes one before pyscipopt would expand the product past
+    ``MAX_TERMS`` monomials. A nonlinear objective is moved into a constraint
+    ``f(x) <= t`` with ``minimize t``. Warns (``ExportSizeWarning``) above
+    ``max_size`` scalar operations and (``ExportBigMWarning``) for big-M
+    constants above ``BIGM_WARN``. Raises ``ExportError`` naming the operation
+    when something cannot be exported.
     """
     import pyscipopt as ps
 
-    prob, report = _lower(f, lo, hi, ineq, eq, integer, "scip", minmax, max_size)
+    prob, report = _lower(f, lo, hi, ineq, eq, integer, "scip", minmax, max_size, strict_eps=strict_eps)
     g = prob.g
     model = ps.Model(name)
     xs = []
@@ -1100,8 +1285,27 @@ def to_scip(f, lo, hi, *, ineq=None, eq=None, integer=None, name="jaxglobal", mi
     roots = [prob.obj] + [c[0] for c in prob.cons]
     order = _reachable(g, roots)
     share = _shared(g, order, roots, share_min)
-    iv = _intervals(g, order, prob.lo, prob.hi) if share else {}
+    iv = _intervals(g, order, prob.lo, prob.hi)
     E = {}
+    n_lift = 0
+
+    def aux(k, e, label):
+        wl, wh = _pad(*iv[k])
+        w = model.addVar(name=f"{label}[{k}]", lb=None if wl <= -1e20 else wl, ub=None if wh >= 1e20 else wh)
+        model.addCons(w - e == 0, name=f"def_{label}[{k}]")
+        xs.append(w)
+        return w
+
+    def nterms(e):
+        return len(e.terms) if isinstance(e, ps.scip.Expr) else 1
+
+    def lift(k):  # E[k] as a variable, so a product does not expand it
+        nonlocal n_lift
+        if nterms(E[k]) > 1:
+            E[k] = aux(k, E[k], "p")
+            n_lift += 1
+        return E[k]
+
     for i in order:
         op, args, p = g.nodes[i]
         a = [E[k] for k in args]
@@ -1114,8 +1318,15 @@ def to_scip(f, lo, hi, *, ineq=None, eq=None, integer=None, name="jaxglobal", mi
         elif op == "sub":
             e = a[0] - a[1]
         elif op == "mul":
+            if nterms(a[0]) * nterms(a[1]) > MAX_TERMS:
+                big, small = (0, 1) if nterms(a[0]) >= nterms(a[1]) else (1, 0)
+                a[big] = lift(args[big])
+                if nterms(a[0]) * nterms(a[1]) > MAX_TERMS:
+                    a[small] = lift(args[small])
             e = a[0] * a[1]
         elif op == "div":
+            if isinstance(a[1], float) and a[1] == 0.0:
+                raise ExportError("division by the constant 0")
             e = a[0] * (1.0 / a[1]) if isinstance(a[1], float) else a[0] / a[1]
         elif op == "neg":
             e = -a[0]
@@ -1123,6 +1334,8 @@ def to_scip(f, lo, hi, *, ineq=None, eq=None, integer=None, name="jaxglobal", mi
             e = ps.quicksum(a)
         elif op == "pow":
             k = a[1]
+            if float(k).is_integer() and k > 1 and float(nterms(a[0])) ** k > MAX_TERMS:
+                a[0] = lift(args[0])
             e = a[0] ** (int(k) if float(k).is_integer() else k)
         elif op in ("exp", "log", "sqrt", "sin", "cos"):
             e = getattr(ps, op)(a[0])
@@ -1131,12 +1344,12 @@ def to_scip(f, lo, hi, *, ineq=None, eq=None, integer=None, name="jaxglobal", mi
         else:  # pragma: no cover - the lowering only leaves the operators above
             raise ExportError(f"internal: operation '{op}' reached the SCIP writer")
         if i in share:
-            wl, wh = _pad(*iv[i])
-            w = model.addVar(name=f"w[{i}]", lb=None if wl == -np.inf else wl, ub=None if wh == np.inf else wh)
-            model.addCons(w - e == 0, name=f"def_w[{i}]")
-            xs.append(w)
-            e = w
+            e = aux(i, e, "w")
         E[i] = e
+    if n_lift:
+        report.n_aux += n_lift
+        report.n_aux_cons += n_lift
+        report._count("reformulated", "product operand", f"aux p == expr (product past {MAX_TERMS} monomials)")
     if share:
         report.n_aux += len(share)
         report.n_aux_cons += len(share)
@@ -1206,25 +1419,37 @@ NL_OPS = {
 
 
 def to_nl(f, lo, hi, path, *, ineq=None, eq=None, integer=None, nonsmooth="native", minmax="abs", x0=None,
-          max_size=1e5):  # fmt: skip
+          max_size=1e5, portable=False, strict_eps=0.0, share_min=50):  # fmt: skip
     """Write the problem (arguments as for ``minimize``) to the text ``.nl`` file ``path``.
 
     ``nonsmooth="native"`` keeps ``max``, ``min``, ``jnp.where`` (``if``) and
-    comparisons as .nl operators: exact, no extra variables, but not every
-    solver accepts ``if`` (SCIP and Couenne handle ``min`` / ``max`` / ``abs``;
-    BARON and Couenne reject ``if``). ``"reformulate"`` replaces them with
-    binaries and big-M constraints as ``to_scip`` does. Variables are written
+    comparisons as .nl operators: exact, no extra variables, read by
+    ``jaxglobal.nl.read_nl`` and ASL-based solvers that implement them.
+    ``"reformulate"`` replaces them with binaries and big-M constraints as
+    ``to_scip`` does (``strict_eps`` as there).
+
+    Which operators a reader accepts varies. SCIP's .nl reader (``scip`` binary)
+    takes ``+ - * / neg pow exp log sqrt abs sin cos`` and n-ary sums only;
+    Couenne also takes ``tan tanh sinh cosh``. Neither takes ``min`` / ``max``,
+    ``if`` and comparisons, ``atan asin acos atan2`` or the inverse hyperbolic
+    functions. ``portable=True`` writes only operators both accept: the
+    others are rewritten as for ``to_scip`` (``tanh`` with ``exp``, ...),
+    nonsmooth ones are reformulated (``nonsmooth`` is ignored), and inverse
+    trigonometric functions are refused. Variables are written
     continuous first, then integer (the order ASL requires); the report's
     ``var_order[k]`` is the model variable of .nl variable ``k`` (the first
     ``n_vars`` model variables are ``x``, the rest auxiliary). Shared
-    subexpressions become defined variables (``V`` segments). Returns the
-    ``ExportReport``.
+    subexpressions become defined variables (``V`` segments); with
+    ``portable=True`` there are none (Couenne 0.5 misreads some files that
+    have them), and a shared subexpression with at least ``share_min``
+    operations becomes an auxiliary variable with ``w == expr`` instead.
+    Returns the ``ExportReport``.
     """
-    if nonsmooth not in ("native", "reformulate"):
-        raise ValueError(f"nonsmooth must be 'native' or 'reformulate', not {nonsmooth!r}")
-    prob, report = _lower(f, lo, hi, ineq, eq, integer, "nl" if nonsmooth == "native" else "nl-reformulate",
-                          minmax, max_size)  # fmt: skip
-    text, order = _nl_text(prob, x0)
+    mode = _nl_mode(nonsmooth, portable)
+    prob, report = _lower(f, lo, hi, ineq, eq, integer, mode, minmax, max_size, strict_eps=strict_eps)
+    if portable:
+        prob = _lift_shared(prob, share_min, report)
+    text, order = _nl_text(prob, x0, defined_vars=not portable)
     report.var_order = order
     with open(path, "w") as fh:
         fh.write(text)
@@ -1236,7 +1461,45 @@ def _fmt(v):
     return repr(int(v)) if v.is_integer() and abs(v) < 1e15 else repr(v)
 
 
-def _nl_text(prob, x0=None):
+def _lift_shared(prob, share_min, report):
+    """``prob`` with each large shared subexpression (``_shared``) replaced by a variable ``w`` and ``w == expr``."""
+    g = prob.g
+    roots = [prob.obj] + [c[0] for c in prob.cons]
+    order = _reachable(g, roots)
+    share = _shared(g, order, roots, share_min)
+    if not share:
+        return prob
+    iv = _intervals(g, order, prob.lo, prob.hi)
+    h, M, new = Graph(), {}, []
+    lo, hi, integer, labels = list(prob.lo), list(prob.hi), list(prob.integer), list(prob.labels)
+    for i in order:
+        op, args, p = g.nodes[i]
+        if op == "var":
+            M[i] = h.var(p)
+        elif op == "const":
+            M[i] = h.const(p)
+        elif op == "sum":
+            M[i] = h.sum([M[k] for k in args])
+        else:
+            M[i] = h.op(op, *[M[k] for k in args])
+        if i in share:
+            wl, wh = _pad(*iv[i])
+            lo.append(wl)
+            hi.append(wh)
+            integer.append(False)
+            labels.append(f"w[{i}]")
+            w = h.var(len(lo) - 1)
+            new.append((h.op("sub", M[i], w), 0.0, 0.0, f"def_w[{i}]"))
+            M[i] = w
+    report.n_aux += len(share)
+    report.n_aux_cons += len(share)
+    report._count("reformulated", "shared subexpression", f"aux w == expr (>= {share_min} operations, used twice+)")
+    cons = [(M[c[0]],) + tuple(c[1:]) for c in prob.cons] + new
+    return _Problem(h, prob.n, np.asarray(lo, float), np.asarray(hi, float), np.asarray(integer, bool), M[prob.obj],
+                    cons, labels)  # fmt: skip
+
+
+def _nl_text(prob, x0=None, defined_vars=True):
     g = prob.g
     nv, m = len(prob.lo), len(prob.cons)
     order = np.concatenate([np.flatnonzero(~prob.integer), np.flatnonzero(prob.integer)])  # nl index -> var
@@ -1254,10 +1517,35 @@ def _nl_text(prob, x0=None):
         deps[i] = (1 << int(pos[p])) if op == "var" else 0
         for k in args:
             deps[i] |= deps[k]
-    defined = [
-        i for i in reach if uses[i] > 1 and g.nodes[i][0] not in ("var", "const") and g.nodes[i][0] not in LOGICAL
-    ]
-    vidx = {i: nv + k for k, i in enumerate(defined)}
+    defined = (
+        [i for i in reach if uses[i] > 1 and g.nodes[i][0] not in ("var", "const") and g.nodes[i][0] not in LOGICAL]
+        if defined_vars
+        else []
+    )
+    # ASL classes of defined variables, numbered in this order: used by the objective and constraints (b),
+    # by several constraints (c), then those used by a single constraint (c1) or the objective only (o1),
+    # each written just before its C / O segment (Gay, "Writing .nl files"; Couenne relies on this)
+    users = {i: 0 for i in reach}  # bit 0: objective, bit k + 1: constraint k
+    users[prob.obj] |= 1
+    for k, c in enumerate(prob.cons):
+        users[c[0]] |= 1 << (k + 1)
+    for i in reversed(reach):
+        for k in g.nodes[i][1]:
+            users[k] |= users[i]
+    comb, comc, single = [], [], {}  # single: segment (k + 1 for constraint k, 0 objective) -> nodes
+    for i in defined:
+        u = users[i]
+        if u & 1 and u >> 1:
+            comb.append(i)
+        elif u == 1:
+            single.setdefault(0, []).append(i)
+        elif u & (u - 1):
+            comc.append(i)
+        else:
+            single.setdefault(u.bit_length() - 1, []).append(i)
+    seq = comb + comc + [i for k in range(1, m + 1) for i in single.get(k, ())] + single.get(0, [])
+    vidx = {i: nv + k for k, i in enumerate(seq)}
+    n_c1 = sum(len(single.get(k, ())) for k in range(1, m + 1))
 
     def expr(root, out, top=True):
         """Prefix form of ``root``; logical nodes in numeric context become ``if(p, 1, 0)``."""
@@ -1281,6 +1569,11 @@ def _nl_text(prob, x0=None):
             if op in LOGICAL and not logical_ctx:  # numeric use of a 0/1 value
                 out.append("o35")
                 stack += [("n0", False, False), ("n1", False, False), (i, True, False)]
+                continue
+            if op == "sum" and len(args) <= 2:  # ASL's sumlist (o54) takes 3+ operands
+                if len(args) == 2:
+                    out.append("o0")
+                stack += [(k, False, False) for k in reversed(args)]
                 continue
             if op in ("sum", "max", "min"):
                 out.append({"sum": "o54", "max": "o12", "min": "o11"}[op])
@@ -1326,14 +1619,20 @@ def _nl_text(prob, x0=None):
         f" 0 0 {nlvbi} {nlvci} {nlvoi}\t# discrete variables: binary, integer, nonlinear (b,c,o)",
         f" {sum(map(len, jac))} {len(grad)}\t# nonzeros in Jacobian, gradients",
         " 0 0\t# max name lengths: constraints, variables",
-        f" {len(defined)} 0 0 0 0\t# common exprs: b,c,o,c1,o1",
+        f" {len(comb)} {len(comc)} 0 {n_c1} {len(single.get(0, ()))}\t# common exprs: b,c,o,c1,o1",
     ]
-    for i in defined:
+    for i in comb + comc:
         L.append(f"V{vidx[i]} 0 0")
         expr(i, L, top=True)
     for k, (node, _, _, _) in enumerate(prob.cons):
+        for i in single.get(k + 1, ()):
+            L.append(f"V{vidx[i]} 0 {k + 1}")
+            expr(i, L, top=True)
         L.append(f"C{k}")
         expr(node, L)
+    for i in single.get(0, ()):
+        L.append(f"V{vidx[i]} 0 {m + 1}")
+        expr(i, L, top=True)
     L.append("O0 0")
     expr(prob.obj, L)
     if x0 is None:

@@ -6,9 +6,24 @@ The ``jnp``-to-Pyomo shim in ``compare.py`` cannot translate any of these, so
 every one had to be reformulated by hand. ``jaxglobal.export`` handles them
 directly and reports how it did it.
 
+Read the report before trusting a solve. ``approximated`` lists what is not
+exact: here the comparisons inside ``jnp.where`` are relaxed at ties
+(``x[0] == 0.3``), which is harmless because both branches agree there (the
+switch is continuous). For a piecewise-constant model it is not, so the script
+re-evaluates ``f`` in JAX at the solver's ``x``, as you should.
+
+Two ``.nl`` files are written. The default one keeps ``where`` / ``max`` /
+``tanh`` as .nl operators (exact, read back by ``jaxglobal.nl.read_nl``), but
+the ``scip`` and ``couenne`` binaries reject those operators; the
+``portable=True`` one uses only operators both read. When the binaries are on
+PATH they are run on it.
+
 Run:  PYTHONPATH=. python examples/export_scip.py [time_limit_seconds]
 """
 
+import re
+import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -73,7 +88,23 @@ def main():
     print(
         f"      read back with jaxglobal.nl.read_nl: f = {float(m.f(x_nl)):.6f}, integer mask {np.asarray(m.integer)}"
     )
-    print("      solve it with e.g.  scip -c 'read " + str(path) + " opt quit'  or  couenne " + str(path))
+
+    portable = path.with_name("export_example_portable.nl")
+    prep = export.to_nl(f, lo, hi, portable, ineq=g, integer=integer, portable=True)
+    print(f"portable .nl file: {portable} ({prep.n_aux} auxiliary variables, {prep.n_binary} binary)")
+    for cmd, pat in (
+        (["scip", "-c", f"set limits time {TIME_LIMIT} read {portable} opt quit"], r"Primal Bound\s*:\s*(\S+)"),
+        (["couenne", str(portable), "-AMPL"], r"Upper bound:\s*(\S+)"),
+    ):
+        if shutil.which(cmd[0]) is None:
+            print(f"      {cmd[0]}: not on PATH (run: {' '.join(cmd)})")
+            continue
+        try:
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=10 * TIME_LIMIT)
+            hit = re.search(pat, out.stdout + out.stderr)
+            print(f"      {cmd[0]} binary: objective {hit.group(1) if hit else 'not found (see its output)'}")
+        except subprocess.TimeoutExpired:
+            print(f"      {cmd[0]} binary: timed out")
 
 
 if __name__ == "__main__":

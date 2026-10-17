@@ -65,7 +65,7 @@ def test_scip_library(name):
     p = PROB[name]
     ineq, eq = getattr(p, "ineq", None), getattr(p, "eq", None)
     m = export.to_scip(p.f, p.lo, p.hi, ineq=ineq, eq=eq)
-    assert m.data.report.approximated == []
+    assert set(m.data.report.approximated) <= {"lt", "le", "gt", "ge"}  # only ties of comparisons
     status, x, obj = _solve(m)
     assert np.all(x >= np.asarray(p.lo) - 1e-6) and np.all(x <= np.asarray(p.hi) + 1e-6)
     _check(p.f, x, obj, ineq, eq)
@@ -390,3 +390,183 @@ def test_report_str():
     r = export.inspect(_nonsmooth, [-1.0, -1.0], [2.0, 2.0])
     s = str(r)
     assert "reformulated: select" in s and "rewritten: max" in s
+
+
+# ---------------------------------------------------------------------------
+# Regressions (PR #22 review)
+# ---------------------------------------------------------------------------
+
+
+def _sum2(x):  # 2-term sums: a 2-element dot product and a 2-term big-M row
+    return jnp.dot(x[:2], x[1:]) + jnp.sin(x[0])
+
+
+def test_nl_two_term_sum_is_not_a_sumlist(tmp_path):
+    path = tmp_path / "sum2.nl"
+    export.to_nl(_sum2, [-1.0] * 3, [1.0] * 3, path)
+    lines = path.read_text().split("\n")
+    # ASL's sumlist o54 needs 3+ operands
+    assert all(int(lines[k + 1]) >= 3 for k, ln in enumerate(lines) if ln == "o54")
+    m = read_nl(str(path))
+    x = jnp.array([0.3, -0.7, 0.2])
+    assert abs(float(m.f(x)) - float(_sum2(x))) < 1e-12
+
+
+@pytest.mark.skipif(shutil.which("scip") is None, reason="no scip binary")
+def test_nl_two_term_sum_scip_binary(tmp_path):
+    path = tmp_path / "sum2.nl"
+    export.to_nl(_sum2, [-1.0] * 3, [1.0] * 3, path)
+    obj = _scip_nl(path)
+    assert obj is not None and abs(obj - _grid_min(_sum2, [-1.0] * 3, [1.0] * 3, n=41)) < 1e-3, obj
+
+
+def _couenne(path):
+    out = subprocess.run(["couenne", str(path), "-AMPL"], capture_output=True, text=True, timeout=120,
+                         cwd=path.parent)  # fmt: skip
+    mobj = re.search(r"Upper bound:\s*([-+0-9.eE]+)", out.stdout)
+    return float(mobj.group(1)) if mobj else None
+
+
+@pytest.mark.skipif(shutil.which("couenne") is None, reason="no couenne binary")
+def test_nl_two_term_sum_couenne(tmp_path):
+    path = tmp_path / "sum2.nl"
+    export.to_nl(_sum2, [-1.0] * 3, [1.0] * 3, path)
+    obj = _couenne(path)
+    assert obj is not None and abs(obj - _grid_min(_sum2, [-1.0] * 3, [1.0] * 3, n=41)) < 1e-3, obj
+
+
+def _portable_f(x):
+    return (jnp.tanh(x[0]) + jnp.maximum(x[1], 0.3) + jnp.where(x[2] > 0, x[2], -0.5 * x[2])
+            + jnp.sum(x[:2] * x[1:]))  # fmt: skip
+
+
+def test_nl_portable_operators(tmp_path):
+    path = tmp_path / "portable.nl"
+    r = export.to_nl(_portable_f, [-1.0] * 3, [1.0] * 3, path, portable=True)
+    lines = path.read_text().split("\n")
+    ops = {ln for ln in lines if ln.startswith("o")}
+    allowed = {f"o{export.NL_OPS[k]}" for k in ("add", "sub", "mul", "div", "pow", "neg", "abs", "sqrt", "log",
+                                                 "exp", "sin", "cos")} | {"o54"}  # fmt: skip
+    assert ops <= allowed, ops - allowed
+    assert not any(ln.startswith("V") for ln in lines)
+    assert "tanh" in r.rewritten and "select" in r.reformulated
+    with pytest.raises(ExportError, match="atan"):
+        export.to_nl(lambda x: jnp.arctan(x[0]), [-1.0], [1.0], tmp_path / "a.nl", portable=True)
+
+
+@pytest.mark.skipif(shutil.which("scip") is None or shutil.which("couenne") is None, reason="no scip/couenne")
+def test_nl_portable_binaries(tmp_path):
+    path = tmp_path / "portable.nl"
+    export.to_nl(_portable_f, [-1.0] * 3, [1.0] * 3, path, portable=True)
+    fmin = _grid_min(_portable_f, [-1.0] * 3, [1.0] * 3, n=41)  # minimum at a vertex
+    assert abs(_scip_nl(path) - fmin) < 1e-4
+    assert abs(_couenne(path) - fmin) < 1e-4
+
+
+def _where_sqrt(x):
+    return jnp.where(x[0] > 0, jnp.sqrt(x[0]) + 1.0, x[0])  # min -1 at x = -1
+
+
+def test_where_branch_domain_refused(tmp_path):
+    for f in (_where_sqrt, lambda x: jnp.where(x[0] > 0, x[0] ** 1.5, x[0])):
+        with pytest.raises(ExportError, match="undefined on part of the box"):
+            export.to_scip(f, [-1.0], [1.0])
+        with pytest.raises(ExportError, match="undefined on part of the box"):
+            export.to_nl(f, [-1.0], [1.0], tmp_path / "w.nl", nonsmooth="reformulate")
+    with pytest.raises(ExportError, match="comparison"):
+        export.to_scip(lambda x: jnp.where(jnp.log(x[0]) > 0, 1.0, x[0]), [-1.0], [1.0])
+    # native 'if' evaluates one branch only: exact
+    assert not export.inspect(_where_sqrt, [-1.0], [1.0], target="nl").refused
+    # inside the domain, or made total, it exports
+    _, x, obj = _solve(export.to_scip(_where_sqrt, [0.5], [1.0]))
+    _check(_where_sqrt, x, obj)
+
+    def guarded(x):
+        return jnp.where(x[0] > 0, jnp.sqrt(jnp.maximum(x[0], 0.0)) + 1.0, x[0])
+
+    _, x, obj = _solve(export.to_scip(guarded, [-1.0], [1.0]))
+    assert abs(obj + 1.0) < 1e-6
+    _check(guarded, x, obj)
+
+
+def test_bigm_limits():
+    def f(x):
+        return jnp.where(jnp.exp(x[0]) > 2.0, -jnp.exp(x[0]) * 1e-20, x[0])
+
+    with pytest.warns(export.ExportBigMWarning):
+        m = export.to_scip(f, [-30.0], [30.0])
+    assert any("big-M" in s for s in m.data.report.notes)
+    for h in (50.0, 60.0):
+        with pytest.raises(ExportError, match="big-M constant"):
+            export.to_scip(f, [-h], [h])
+
+
+def test_division_by_constant_zero(tmp_path):
+    with pytest.raises(ExportError, match="division by the constant 0"):
+        export.to_scip(lambda x: x[0] / 0.0, [-1.0], [1.0])
+    with pytest.raises(ExportError, match="division by the constant 0"):
+        export.to_nl(lambda x: x[0] / 0.0, [-1.0], [1.0], tmp_path / "d.nl")
+
+
+def test_ties_reported_and_strict_eps():
+    def f(x):  # x > 0: -0.5, x == 0: 0.5, x < 0: 0
+        return jnp.where(x[0] > 0, -1.0, 0.0) + jnp.where(x[0] >= 0, 0.5, 0.0)
+
+    m = export.to_scip(f, [-1.0], [1.0])
+    assert {"gt", "ge"} <= set(m.data.report.approximated)
+    _, x, obj = _solve(m)
+    assert obj <= -0.5 + 1e-9  # a relaxation: may be -1 at the tie x = 0, which JAX never gives
+    m = export.to_scip(f, [-1.0], [1.0], strict_eps=1e-4)
+    assert "restricted" in m.data.report.approximated["gt"][1]
+    _, x, obj = _solve(m)
+    _check(f, x, obj)
+    assert abs(obj + 0.5) < 1e-6
+
+
+def test_sign_strict_eps():
+    def f(x):
+        return -(jnp.sign(x[0]) ** 2)  # -1 except f(0) = 0
+
+    m = export.to_scip(f, [-1.0], [1.0], strict_eps=1e-4)
+    assert "sign" in m.data.report.approximated
+    _, x, obj = _solve(m)
+    _check(f, x, obj)
+
+
+def test_cumulative_ops():
+    def f(x):
+        return jnp.cumsum(x)[-1] ** 2 + jnp.cumprod(x)[1] + jax.lax.cummax(x)[-1]
+
+    _, x, obj = _solve(export.to_scip(f, [-1.0] * 3, [1.0] * 3))
+    _check(f, x, obj)
+
+
+def test_precision_casts_reported():
+    def f(x):
+        return jax.lax.reduce_precision(x[0], exponent_bits=5, mantissa_bits=10) + x.astype(jnp.float32)[1]
+
+    r = export.inspect(f, [-1.0] * 2, [1.0] * 2)
+    if jnp.zeros(1).dtype == jnp.float64:  # with x64 the cast is a real f64 -> f32 conversion
+        assert any("float32" in k for k in r.approximated)
+    assert "reduce_precision" in r.approximated
+
+
+def test_zero_times_partial_keeps_domain():
+    r = export.inspect(lambda x: 0.0 * jnp.sqrt(x[0]) + x[1], [-1.0] * 2, [1.0] * 2)
+    assert r.exact["sqrt"] == 1  # not folded to 0 (JAX: 0 * nan = nan)
+    r = export.inspect(lambda x: 0.0 * x[0] + x[1], [-1.0] * 2, [1.0] * 2)
+    assert r.exact["mul"] == 0
+
+
+def test_product_expansion_is_lifted():
+    m = export.to_scip(lambda x: jnp.prod(1.0 + x), [0.0] * 20, [1.0] * 20)
+    assert "product operand" in m.data.report.reformulated
+    _, x, obj = _solve(m)
+    assert abs(obj - 1.0) < 1e-6
+
+
+def test_asinh_large_negative():
+    with pytest.warns(export.ExportBigMWarning):  # sign(x) log(|x| + sqrt(x^2 + 1)), |x| up to 1e8
+        m = export.to_scip(lambda x: jnp.arcsinh(x[0]), [-1e8], [1.0])
+    _, x, obj = _solve(m)
+    assert abs(obj - np.arcsinh(-1e8)) < 1e-6
