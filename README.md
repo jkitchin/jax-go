@@ -1,6 +1,6 @@
 <p align="center"><img src="figures/logo.svg" alt="jaxglobal" width="560"></p>
 
-# jaxglobal — global optimization of plain JAX functions (proof of concept)
+# jaxglobal — global optimization of plain JAX functions
 
 Write an ordinary Python function with `jax.numpy`, give a box, and get a
 **certified** global minimum: an upper bound (a feasible point) and a proven
@@ -19,6 +19,34 @@ r = minimize(f, [-512, -512], [512, 512])
 # Result(status='optimal', fun=-959.64066, lower_bound=-959.64066, gap=2.06e-07,
 #        x=[512. 404.23181], nodes=47, iterations=10, time=4.82s)
 ```
+
+## Status
+
+jaxglobal is past the proof-of-concept stage. It is a research solver: usable,
+tested, and measured on MINLPLib, but not yet competitive with mature global
+solvers on general problems (see [Limitations](#limitations)).
+
+* **Problems:** continuous and mixed-integer, with inequality and equality
+  constraints, on finite or partly unbounded boxes. Models can be plain JAX
+  functions or AMPL `.nl` files (`jaxglobal.nl.read_nl`).
+* **Correct answers so far:** 0 wrong answers on the MINLPLib sets below, all
+  checked against the library's reference bounds. Every returned point is
+  re-checked in float64, and an opt-in `safe=True` mode rounds the bounds
+  outward.
+* **MINLPLib, 60 s limit, cold start (compilation included):**
+
+  | set | jaxglobal | SCIP |
+  |---|---:|---:|
+  | `start50`: 50 continuous instances, ≤ 50 variables, weighted toward hard ones | 31 | 44 |
+  | `int50`: 50 mixed-integer instances, ≤ 50 variables | 29 | 45 |
+
+  jaxglobal solves no `int50` instance that SCIP does not. Details:
+  [`benchmarks/sets/README.md`](benchmarks/sets/README.md) and
+  [`docs/ROADMAP.md`](docs/ROADMAP.md).
+* **What it is for:** problems defined by code, which equation-based solvers
+  cannot read at all or need rewritten by hand: `jnp.where` logic,
+  neural-network and Gaussian-process surrogates, ODE kinetics written as
+  Python loops.
 
 Narrated, executed notebooks in [`examples/`](examples/README.md) walk through
 the relaxations, branch and bound, the test problems, the comparison with
@@ -129,11 +157,17 @@ relaxations.
   bound for *any* multipliers y ≥ 0, and the best value over all IPM iterates is
   kept. A badly converged LP gives a weaker bound, never a wrong one.
   Interval arithmetic prunes boxes that are provably infeasible.
-* **Upper bound**: scipy SLSQP with JAX gradients and Jacobians, started from
-  the LP solutions. A point counts as feasible when the violation is ≤ `feas_tol`.
+  Problems whose functions are all quadratic are bounded instead over a lifted
+  sparse LP with one column per product, McCormick facets and RLT rows
+  (`jaxglobal/quadratic.py`, `quadratic=True` by default).
+* **Upper bound**: a local NLP solve with JAX gradients and Jacobians, started
+  from the LP solutions: pounce (default when installed), optax or scipy
+  SLSQP (`local_solver=`). A point counts as feasible when the violation is
+  ≤ `feas_tol`.
 * **Branching** only on variables that appear nonlinearly, detected from
   sampled Hessians.
-* `status` is `"optimal"`, `"infeasible"` or `"max_iter"`.
+* `status` is `"optimal"`, `"infeasible"`, `"max_iter"`, `"time_limit"`,
+  `"unbounded_domain"` or `"unverified"` (see *Correctness checks*).
 
 | problem | n | f\* | found | proven LB | nodes | time |
 |---|---|---|---|---|---|---|
@@ -146,6 +180,16 @@ relaxations.
 | Reactor network | 6 | −0.388811 | −0.388812 | −0.388814 | 821 | 15.0s |
 
 Equality optima can sit slightly below f\* because of `feas_tol` (1e-6).
+
+## Integer variables
+
+`minimize(f, lo, hi, ineq=g, integer=[0, 3])` (indices or a boolean mask)
+makes those variables integer. Their bounds are rounded inward, FBBT rounds
+their ranges, branching splits them at integer values, and integer dives and
+root probing look for incumbents. The returned `x` is integral, and
+`Result.verified` checks that. The node bounds are the relaxations of the
+continuous problem, with no MILP cutting planes. `.nl` files with integer
+variables are read with their integer mask.
 
 ## Gaussian-process surrogates
 
@@ -239,7 +283,7 @@ nonzero on any wrong or unverified MINLPLib answer.
 
 ```bash
 pip install -e '.[dev]'
-pytest -q                      # soundness, cut validity, global optima (57 tests, ~30 s)
+pytest -q                      # soundness, cut validity, global optima, integers
 cd examples && ./run_nb.sh 03-test-problems && cd ..   # see examples/README.md
 
 # MINLPLib benchmark (phase 0 of docs/ROADMAP.md)
@@ -273,46 +317,58 @@ Any AMPL `.nl` model (text or binary) can be loaded with
   tiny denominator) a one-ulp error in `z`'s relaxation became 4e-8 in the
   bound. `alphabb_rule` widens its input by a few ulps first.
 
-## Limitations (it's a PoC)
+## Limitations
 
-* Not rigorous in floating point: no outward rounding, and αBB minimizers come
-  from 60-step bisection.
-* Constrained bounds use a dense LP per node: fine for ≤ 10 variables, not
-  beyond. Upper bounds come from local solves with pounce (default), optax or
-  scipy (`local_solver=`).
-* `dot_general` between two variable arrays only for 1-D inner products.
-  `lax.cond`/`while`/`scan` with variable-dependent control flow are not
-  supported; Python control flow on static values is fine.
-* Unsupported primitives raise `NotImplementedError` naming the primitive.
-* Variables may be declared unbounded (`±inf`). Finite bounds are derived
-  first (`jaxglobal/domain.py`): FBBT from the declared box, unused variables
-  fixed, then FBBT against `f <= UB` once a local solve finds a feasible
-  point. A variable that nothing bounds gives status `"unbounded_domain"`
-  rather than a guessed box; FBBT cannot prove bounds that need joint
-  reasoning over several constraints (e.g. G24 without its upper bounds).
-* Bounds are first-order McCormick/αBB plus interval arithmetic. Tightened
-  intermediate ranges from FBBT are not yet fed back into the relaxations
-  (Wechsung-style reverse McCormick), and there is no probing.
-* The first solve of a problem is mostly tracing and compiling the bounding
-  kernels on the small test problems. The kernels compile in background
-  threads while the rest of the setup runs, and they are cached at three levels:
-  in memory for repeat solves of the same functions (on any box;
-  `jaxglobal.bnb.clear_cache()` empties it), and on disk under
-  `~/.cache/jaxglobal` (`$JAXGLOBAL_CACHE_DIR`) for later processes: the traced
-  kernels as `jax.export` modules, keyed by a fingerprint of the problem's
-  jaxprs, plus JAX's persistent compilation cache unless one is already
-  configured. On eight of the built-in problems, a fresh
-  process takes about 0.3-1 s per problem with a warm disk cache, against
-  2-7 s on a first run. `JAXGLOBAL_CACHE=0` turns the disk caches off.
+* **Scale.** On 328 mixed-integer MINLPLib instances with up to 100
+  variables (60 s, cold), jaxglobal solved 72 of the 220 with at most 50
+  variables and 1 of the 108 with 51 to 100. At that size the time goes to
+  setup (tracing, compiling, the first dense LP) before the search starts. The
+  node LP is a dense interior point method whose cost grows as rows × n² per
+  iteration. Only quadratic problems get a sparse lifted LP.
+* **Speed.** Shifted geometric mean time at 60 s, cold: 32.6 s against
+  SCIP's 1.9 s on `start50`, and 35.9 s against 1.35 s on `int50`. Much of
+  jaxglobal's cold time goes to tracing and compiling the bounding kernels. The kernels are cached in memory and on disk
+  under `~/.cache/jaxglobal` (`$JAXGLOBAL_CACHE_DIR`; `JAXGLOBAL_CACHE=0`
+  turns the cache off), so a repeat solve of the same model takes about
+  0.3-1 s on the built-in problems instead of 2-7 s.
+* **Relaxations.** The relaxations are reduced-space McCormick and αBB,
+  univariate envelopes, scaled-Gershgorin αBB and interval arithmetic. They
+  are weak on big-M, cardinality and some bilinear structure. There are no
+  MILP cuts, no trilinear envelopes and no probing on continuous variables.
+  FBBT's tightened intermediate ranges are not yet fed back into the
+  relaxations. The general lifted LP (`lifted=True`) is opt-in and slower.
+* **Floating point.** The default mode is not rigorous. `safe=True` rounds
+  lower bounds outward by a few ulps per operation, but it assumes XLA
+  transcendentals are accurate to a few ulps and does not cover every margin
+  (see *Phase 6* in [`docs/ROADMAP.md`](docs/ROADMAP.md)). Feasibility holds
+  to `feas_tol`, not exactly.
+* **Supported JAX.** `dot_general` between two variable-dependent arrays is
+  supported only for 1-D inner products. `lax.cond`, `while_loop` and `scan`
+  with variable-dependent control flow are not supported; Python control flow
+  on static values is fine. An unsupported primitive raises
+  `NotImplementedError` naming the primitive.
+* **Unbounded variables.** Finite bounds are derived first
+  (`jaxglobal/domain.py`): FBBT from the declared box, unused variables fixed,
+  then FBBT against `f <= UB` once a local solve finds a feasible point. A
+  variable that nothing bounds gives status `"unbounded_domain"` rather than a
+  guessed box. FBBT cannot prove bounds that need joint reasoning over several
+  constraints.
+* **Hardware.** Development and benchmarks are on CPU. The bounding step is a
+  pure `jit(vmap)` kernel, but the branch-and-bound loop runs on the host, and
+  GPU throughput has not been measured.
 
-## Natural next steps
+## Next steps
 
-* Harder constrained sets (larger pooling problems, MINLPLib `ex8_*`).
-* Feed FBBT's intermediate ranges into the McCormick rules.
-* Multivariate McCormick / tighter envelopes for common patterns
-  (x·exp(x), x·log(x), bilinear `dot_general`).
-* Outward rounding (e.g. `nextafter`) for rigorous bounds.
-* GPU: the bounding step is already a pure `jit(vmap)` kernel.
+The plan, with measurements for each phase, is in
+[`docs/ROADMAP.md`](docs/ROADMAP.md). Next on it:
+
+* a sparse or first-order LP for the node bound beyond quadratic problems;
+* lower setup and compile cost for models with 50 to 100 variables;
+* tighter relaxations: FBBT ranges fed into McCormick, and more structure
+  detected from the jaxpr;
+* a device-resident B&B loop for GPU;
+* a fully rigorous mode with verified transcendental enclosures and an exact
+  LP-dual check.
 
 ## Related work
 
