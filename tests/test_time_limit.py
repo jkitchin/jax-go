@@ -77,17 +77,49 @@ def _slow_bound(monkeypatch, seconds):
 
 def test_deadline_mid_search_keeps_pre_iteration_bound(monkeypatch):
     """A kernel call past the deadline is not dispatched; the iteration it belongs to is dropped
-    and the result carries the lower bound from before that iteration."""
+    and the result carries the lower bound from before that iteration.
+
+    Every bound call is slowed by 0.2 s, and the deadline is made to pass during the first call
+    of an iteration that has more than one call (the first such iteration after half the limit), so that the check before the second
+    call, not the per-iteration check at the top of the loop, stops the search. (Slowing every
+    call instead left it to timing which check came first: when the limit passed during an
+    iteration's last call, the loop stopped at its top with no refused call.)"""
     lo, hi = -3 * np.ones(4), 3 * np.ones(4)
     opts = dict(abs_tol=0.0, rel_tol=0.0, batch=64, batch_sizes=(16,))
     minimize(_hard, lo, hi, max_iter=3, **opts)  # compile
-    n = _slow_bound(monkeypatch, 0.2)
-    limit = 3.0
+    limit, n = 3.0, {"deadline": 0, "slept": 0}
+    run = {"calls": 0, "pos": 0}  # calls in the current padded batch, and the next call's index
+    pad_orig, call_orig = bnb._Padder.__call__, bnb._Precompiled.__call__
+
+    def pad(self, *arrays):
+        calls = pad_orig(self, *arrays)
+        run.update(calls=len(calls), pos=0)
+        return calls
+
+    def call(self, *args, **kw):
+        try:
+            out = call_orig(self, *args, **kw)
+        except bnb._Deadline:
+            n["deadline"] += 1
+            raise
+        if self.name == "bound":
+            jax.block_until_ready(out)
+            first, run["pos"] = run["pos"] == 0, run["pos"] + 1
+            if first and run["calls"] > 1 and not n["slept"] and time.perf_counter() - t > limit / 2:
+                n["slept"] = 1  # this call runs past the deadline; the next one is refused
+                time.sleep(max(t + limit + 0.2 - time.perf_counter(), 0.0))
+            else:
+                time.sleep(0.2)  # slow enough that the search does not finish first
+        return out
+
+    monkeypatch.setattr(bnb._Padder, "__call__", pad)
+    monkeypatch.setattr(bnb._Precompiled, "__call__", call)
     t = time.perf_counter()
     r = minimize(_hard, lo, hi, time_limit=limit, max_iter=10**6, **opts)
     wall = time.perf_counter() - t
+    assert n["slept"] == 1  # the search reached a multi-call iteration after half the limit
     assert r.status == "time_limit" and np.isfinite(r.lower_bound)
-    assert wall < limit + 1.5  # at most one call (0.2 s here) past the limit, plus the float64 check
+    assert wall < limit + 1.5  # one call (0.2 s here) past the limit, plus the float64 check
     assert n["deadline"] == 1  # stopped by the check before a call, inside an iteration
     assert r.lower_bound == r.history[-1][2]  # the bound before the aborted iteration
     assert r.lower_bound <= r.fun
