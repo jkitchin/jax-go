@@ -34,7 +34,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from .local import make_local
+from .local import make_local, near_zero_options
 from .crown import crown_auto, crown_supported, make_crown
 from .domain import DomainTimeout, bound_domain
 from . import kcache
@@ -607,6 +607,11 @@ _ENUM = 32  # integer variables: at the root, fix-and-solve every assignment whe
 _FLOOR = 0.05  # pseudocosts are floored at this fraction of the mean over observed variables
 _DIVE_BACKOFF = 80  # most iterations between periodic dives that do not improve the incumbent
 _LOCAL_BACKOFF = 16  # most iterations skipped between local searches that do not improve the incumbent
+_POLISH_ROUNDS = 5  # incumbent polish (``polish`` in ``minimize``): rounds while it keeps improving
+_POLISH_CANDS = 512  # integer neighbours (one step, swaps) tried per polish round
+_POLISH_CHUNK = 64  # neighbours per batch of local solves (the time budget is checked between batches)
+_POLISH_MIN, _POLISH_FRAC = 2.0, 0.1  # polish time budget: _POLISH_MIN s plus this fraction of the elapsed time
+_NEAR_ZERO_STARTS = 4  # extra random starts for the scaled local solves of a near-zero objective
 _ETA, _M = 2, 4  # branch_var="reliability": observations to trust a pseudocost, strong-branching candidates
 _BAL = 10.0  # branch_var="strong": candidates are at least 1/_BAL as wide as the widest variable
 _Q, _ETA_MS = 2, 0.5  # branch_var="strong": split on up to _Q variables at once, those scoring >= _ETA_MS * best
@@ -862,8 +867,10 @@ def minimize(
     solve_local = _cached(("local", f, ineq, eq, local_solver, lo.tobytes(), hi.tobytes()),
                           lambda: make_local(f, ineq, eq, lo, hi, local_solver, patterns=K.structure(lo.size)))
 
-    def local(starts):
+    def local(starts, options=None):
         """Local solves from each start; returns (x, f) of the best feasible result.
+
+        ``options``: extra local-solver options for these solves (``near_zero_options``).
 
         With integer variables a start (an LP point, which can violate the nonlinear
         constraints far more than any rounding can repair) is first solved as the
@@ -871,20 +878,33 @@ def minimize(
         each rounding is fix-and-solved: integers fixed, continuous variables free."""
         S = np.clip(np.asarray(starts, dtype=np.float64), lo, hi)
         if imask.any():
-            R = np.clip(np.asarray(solve_local(S)), lo, hi)  # NLP relaxation
+            R = np.clip(np.asarray(solve_local(S, options=options)), lo, hi)  # NLP relaxation
             fl = np.floor(R)
             fixed = np.concatenate([np.clip(fl + (R - fl > t), lo, hi) for t in ROUNDINGS])
             fixed = np.unique(np.where(imask, fixed, np.concatenate([R] * len(ROUNDINGS))), axis=0)
             L, H = np.where(imask, fixed, lo), np.where(imask, fixed, hi)
-            X = np.clip(np.asarray(solve_local(fixed, L, H)), L, H)
+            X = np.clip(np.asarray(solve_local(fixed, L, H, options=options)), L, H)
         else:
-            X = np.clip(np.asarray(solve_local(S)), lo, hi)
-        F = np.asarray(K.fvals(jnp.asarray(X)), dtype=np.float64)
-        if constrained:
-            F = np.where(np.asarray(K.viol(jnp.asarray(X))) <= feas_tol, F, np.inf)
-        F = np.where(np.isnan(F), np.inf, F)
+            X = np.clip(np.asarray(solve_local(S, options=options)), lo, hi)
+        F = screen(X)
         i = int(np.argmin(F))
         return X[i], float(F[i])
+
+    def screen(X):
+        """Objective values of candidate incumbents ``X`` (k, n), ``inf`` for any that is not one.
+
+        A candidate must lie in the box, have its integer variables integral (to ``INT_TOL``)
+        and satisfy every constraint to ``feas_tol`` (``K.viol``, float64), and ``f`` must be
+        a number. Every point a local solve or the polish proposes passes through here before
+        it can become the incumbent, i.e. before it is used as a cutoff to prune."""
+        X = np.asarray(X, dtype=np.float64)
+        F = np.asarray(K.fvals(jnp.asarray(X)), dtype=np.float64)
+        bad = np.isnan(F) | np.any((X < lo) | (X > hi) | np.isnan(X), axis=1)
+        if constrained:
+            bad |= ~(np.asarray(K.viol(jnp.asarray(X))) <= feas_tol)
+        if imask.any():
+            bad |= np.any(np.abs(X[:, imask] - np.round(X[:, imask])) > INT_TOL, axis=1)
+        return np.where(bad, np.inf, F)
 
     deadline = t0 + time_limit if np.isfinite(time_limit) else None
     bound_call = [0.0]  # seconds of the slowest bound-kernel call so far (first-dive cost estimate)
@@ -944,7 +964,9 @@ def minimize(
         if np.any(np.isfinite(fc)):
             i = int(np.nanargmin(fc))
             if fc[i] < ub:
-                ub, xbest = float(fc[i]), xc[i]
+                fs = float(screen(np.asarray(xc[i])[None])[0])  # the kernel checked feasibility; screen re-checks
+                if fs < ub:                                     # it in float64 with the box and integrality
+                    ub, xbest = fs, xc[i]
                 starts.append(xc[i])
         if constrained:
             # relaxation minimizers of the most promising boxes are good starts
@@ -952,19 +974,98 @@ def minimize(
             for i in np.argsort(lb)[:n_try]:
                 if lb[i] < ub - tol():
                     starts.append(xc[i])
-        if local_solve and starts:
+        if local_solve and starts and not _past(deadline):  # (a batch already running is not interrupted)
             # with an incumbent, back off after local searches that did not improve it (skip
             # 1, 3, 7, ... iterations, up to _LOCAL_BACKOFF); an improvement resets the wait
             if np.isfinite(ub) and backoff[1] > 0:
                 backoff[1] -= 1
                 return
             xl, fl = local(starts)
+            nz = near_zero_options(min(ub, fl), abs_tol)
+            if nz is not None and not _past(deadline):
+                # near-zero objective: solve again with the objective scaled up (local.near_zero_options),
+                # also from the incumbent and a few random points of the box
+                extra = [xl if fl < ub else xbest] + list(prng.uniform(lo, hi, size=(_NEAR_ZERO_STARTS, lo.size)))
+                x2, f2 = local(starts + extra, options=nz)
+                if f2 < fl:
+                    xl, fl = x2, f2
             if fl < ub:
                 ub, xbest = fl, xl
                 backoff[:] = [0, 0]
             elif np.isfinite(ub):
                 backoff[0] = min(2 * backoff[0] + 1, _LOCAL_BACKOFF)
                 backoff[1] = backoff[0]
+        polish()
+
+    prng = np.random.default_rng(1)  # random starts of the incumbent heuristics (``rng`` drives the dives)
+    polished = dict(ub=np.inf, time=0.0)  # incumbent value last polished, total polish time
+
+    def polish():
+        """Improve a new incumbent locally, within a time budget (``_POLISH_*``).
+
+        Each round: for a near-zero objective, a local solve of the continuous variables from
+        the incumbent with ``near_zero_options`` (integers fixed); then, with integer variables, the
+        integer neighbours of the incumbent (one variable +-1; one +1 and another -1), each
+        with its continuous variables solved again (or just evaluated when there are none).
+        The best candidate that passes ``screen`` and beats the incumbent replaces it; rounds
+        stop when one does not improve. Only an upper bound can change."""
+        nonlocal ub, xbest
+        if not local_solve or not np.isfinite(ub) or ub >= polished["ub"]:
+            return
+        start = time.perf_counter()
+        stop = min(start + _POLISH_MIN + _POLISH_FRAC * (start - t0) - polished["time"], t0 + time_limit)
+        cont = ~imask
+        try:
+            for _ in range(_POLISH_ROUNDS):
+                if time.perf_counter() >= stop:
+                    break
+                before = ub
+                x = np.where(imask, np.round(xbest), xbest)
+                L, H = np.where(imask, x, lo), np.where(imask, x, hi)
+                nz = near_zero_options(ub, abs_tol)
+                if cont.any() and nz is not None:  # (the incumbent is already a local solution otherwise)
+                    X = np.clip(np.asarray(solve_local(x[None], L[None], H[None], options=nz)), L, H)
+                    F = screen(X)
+                    if F[0] < ub:
+                        ub, xbest = float(F[0]), X[0]
+                if imask.any():
+                    x = np.where(imask, np.round(xbest), xbest)
+                    C = neighbours(x)
+                    for c in range(0, len(C), _POLISH_CHUNK):
+                        if time.perf_counter() >= stop:
+                            break
+                        Y = C[c:c + _POLISH_CHUNK]
+                        if cont.any():
+                            L, H = np.where(imask, Y, lo), np.where(imask, Y, hi)
+                            Y = np.clip(np.asarray(solve_local(Y, L, H)), L, H)
+                        F = screen(Y)
+                        i = int(np.argmin(F))
+                        if F[i] < ub:
+                            ub, xbest = float(F[i]), Y[i]
+                if not ub < before:
+                    break
+        finally:
+            polished["ub"] = ub
+            polished["time"] += time.perf_counter() - start
+
+    def neighbours(x):
+        """Integer neighbours of ``x`` in the box: one integer variable +-1, then swaps (one +1,
+        another -1); at most ``_POLISH_CANDS``, the swaps sampled when there are more."""
+        ii = np.flatnonzero(imask)
+        one = [(j, d) for j in ii for d in (-1.0, 1.0) if lo[j] <= x[j] + d <= hi[j]]
+        up = [j for j in ii if x[j] + 1 <= hi[j]]
+        dn = [j for j in ii if x[j] - 1 >= lo[j]]
+        room = max(_POLISH_CANDS - len(one), 0)
+        pairs = [(a, b) for a in up for b in dn if a != b]
+        if len(pairs) > room:
+            pairs = [pairs[i] for i in prng.choice(len(pairs), room, replace=False)]
+        Y = np.repeat(x[None], len(one) + len(pairs), 0)
+        for r, (j, d) in enumerate(one):
+            Y[r, j] += d
+        for r, (a, b) in enumerate(pairs, len(one)):
+            Y[r, a] += 1.0
+            Y[r, b] -= 1.0
+        return Y[:_POLISH_CANDS]
 
     def tol():
         return max(abs_tol, rel_tol * abs(ub)) if np.isfinite(ub) else abs_tol
@@ -1052,14 +1153,14 @@ def minimize(
         """Local solves of the continuous variables in boxes whose integers are fixed (``L``,
         ``H``) from the points ``S``; improves the incumbent."""
         nonlocal ub, xbest
+        if _past(deadline):
+            return
         X = np.clip(np.asarray(solve_local(np.clip(S, L, H), L, H)), L, H)
-        F = np.asarray(K.fvals(jnp.asarray(X)), dtype=np.float64)
-        if constrained:
-            F = np.where(np.asarray(K.viol(jnp.asarray(X))) <= feas_tol, F, np.inf)
-        F = np.where(np.isnan(F), np.inf, F)
+        F = screen(X)
         i = int(np.argmin(F))
         if F[i] < ub:
             ub, xbest = float(F[i]), X[i]
+        polish()
 
     _mark("root_bound")
     try:
