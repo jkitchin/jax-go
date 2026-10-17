@@ -222,6 +222,18 @@ class _CompileTimeout(Exception):
     """A kernel was still being traced or compiled when ``minimize``'s time limit ran out."""
 
 
+class _Deadline(_CompileTimeout):
+    """``minimize``'s time limit ran out before a kernel call was dispatched.
+
+    A subclass of ``_CompileTimeout`` so that every handler of a late kernel also
+    handles a late call: both leave the caller's state as it was before the call."""
+
+
+def _past(deadline):
+    """Whether ``deadline`` (a ``time.perf_counter()`` value, or None) has passed."""
+    return deadline is not None and time.perf_counter() > deadline
+
+
 class _Precompiled:
     """A jitted batch kernel plus executables compiled ahead of time in the background.
 
@@ -240,6 +252,7 @@ class _Precompiled:
 
     def __init__(self, jitted, name):
         self.jitted, self.name, self.ready = jitted, name, {}
+        self.dispatched = 0.0  # perf_counter() of the last dispatch, after any wait for the executable
 
     @staticmethod
     def _key(args):
@@ -274,7 +287,9 @@ class _Precompiled:
 
     def __call__(self, *args, deadline=None):
         """Run on ``args``; with a started shape, wait for its executable until ``deadline``
-        (a ``time.perf_counter()`` value), else raise ``_CompileTimeout``."""
+        (a ``time.perf_counter()`` value), else raise ``_CompileTimeout``. Past the deadline
+        nothing is dispatched: ``_Deadline`` if the executable is ready, else ``_CompileTimeout``
+        (also instead of the synchronous ``jax.jit`` fallback, which has no deadline)."""
         key = self._key(args)
         fut = self.ready.get(key)
         if fut is not None:
@@ -287,7 +302,13 @@ class _Precompiled:
             except Exception:  # let jit raise (or succeed) with its usual traceback
                 del self.ready[key]
             else:
+                if _past(deadline):  # ready, but out of time: no new call
+                    raise _Deadline(self.name)
+                self.dispatched = time.perf_counter()
                 return compiled(*args)
+        if _past(deadline):  # jit would trace and compile synchronously, with no deadline
+            raise _CompileTimeout(self.name)
+        self.dispatched = time.perf_counter()
         return self.jitted(*args)
 
 
@@ -865,12 +886,29 @@ def minimize(
         i = int(np.argmin(F))
         return X[i], float(F[i])
 
+    deadline = t0 + time_limit if np.isfinite(time_limit) else None
+    bound_call = [0.0]  # seconds of the slowest bound-kernel call so far (first-dive cost estimate)
+
     def run(kernel, calls, cutoff, k):
-        """Apply ``kernel`` to each padded call (dispatched before any result is read); first ``k`` rows."""
-        if padded.mesh is not None:  # sharded calls compile through jit (synchronously, no deadline)
-            outs = [kernel.jitted(*c, cutoff) for c in calls]
-        else:
-            outs = [kernel(*c, cutoff, deadline=t0 + time_limit) for c in calls]
+        """Apply ``kernel`` to each padded call; first ``k`` rows.
+
+        Once the time limit has passed no further call is dispatched: ``_Deadline`` (or
+        ``_CompileTimeout`` while the kernel compiles, see ``_Precompiled.__call__``) is
+        raised instead (a call already running cannot be interrupted, so a solve overruns
+        its limit by at most one call). Each call is waited for before the next is
+        dispatched; on CPU the calls run one after another anyway, so this costs nothing
+        and makes the check before each call meaningful."""
+        outs = []
+        for c in calls:
+            if padded.mesh is not None:  # sharded calls compile through jit (synchronously)
+                if _past(deadline):
+                    raise _Deadline(kernel.name)
+                outs.append(jax.block_until_ready(kernel.jitted(*c, cutoff)))
+                continue  # (a call that compiled is no estimate of a call's cost)
+            o = kernel(*c, cutoff, deadline=deadline)
+            outs.append(jax.block_until_ready(o))
+            if kernel is K.bound:  # not counting the wait for the executable
+                bound_call[0] = max(bound_call[0], time.perf_counter() - kernel.dispatched)
         return [np.concatenate([np.asarray(o[i]) for o in outs])[:k] for i in range(len(outs[0]))]
 
     def evaluate(blo, bhi, with_obbt=False):
@@ -932,11 +970,28 @@ def minimize(
         return max(abs_tol, rel_tol * abs(ub)) if np.isfinite(ub) else abs_tol
 
     rng = np.random.default_rng(0)
+    dive_cost = [None]  # wall seconds of the last dive (kernel run and fixed solves)
+
+    def time_for(estimate):
+        """Whether ``1.5 * estimate`` seconds of incumbent-only work (dives, root enumeration)
+        still fit before the time limit. With no estimate yet (``None``): whether a quarter of
+        the time limit is left. Skipping such work never changes a bound (see ``dive``)."""
+        if deadline is None:
+            return True
+        left = deadline - time.perf_counter()
+        return left >= (0.25 * time_limit if estimate is None else 1.5 * estimate)
 
     def dive(blo, bhi, points):
         """Propagation dives (``_Kernels.dive``) from up to ``_DIVES`` points in their boxes,
         then a local solve of the continuous variables in each box that ends with every
-        integer fixed; improves the incumbent."""
+        integer fixed; improves the incumbent.
+
+        Dives only produce incumbents, so skipping or cutting one short is sound. Under a time
+        limit a dive is skipped when 1.5 times its estimated cost no longer fits (``time_for``):
+        the last dive's wall time, or before the first one, the number of integer variables
+        times the slowest bound-kernel call (the dive kernel runs FBBT on both roundings of
+        every integer, and the bound kernel runs FBBT once plus the LP, for as many boxes; on
+        smallinvDAX the ratio was 20-25 for 30 integers)."""
         nonlocal ub, xbest
         if K.dive is None or not len(points):
             return
@@ -945,15 +1000,22 @@ def minimize(
         run = K.dive
         if dive_exe is not None:  # compiled in the background; skipped if not ready by the deadline
             try:
-                wait = max(t0 + time_limit - time.perf_counter(), 0.0) if np.isfinite(time_limit) else None
-                run = dive_exe.result(timeout=wait).result(timeout=wait)
+                left = lambda: None if deadline is None else max(deadline - time.perf_counter(), 0.0)  # noqa: E731
+                run = dive_exe.result(timeout=left()).result(timeout=left())
             except TimeoutError:
                 return
+        est = dive_cost[0]
+        if est is None and bound_call[0] > 0:
+            est = int(imask.sum()) * bound_call[0]
+        if not time_for(est):
+            return
+        t = time.perf_counter()
         DL, DH, F = (np.asarray(a) for a in run(jnp.asarray(pad(blo)), jnp.asarray(pad(bhi)),
                                                 jnp.asarray(pad(points)), jnp.asarray(ub, jnp.float64)))  # fmt: skip
         ok = ~F[:k] & np.all(DL[:k, imask] == DH[:k, imask], axis=1)
-        if ok.any():
+        if ok.any() and not _past(deadline):
             fixed_solve(DL[:k][ok], DH[:k][ok], pad(points)[:k][ok])
+        dive_cost[0] = time.perf_counter() - t
 
     def probe(rlo, rhi, lb):
         """Root probing on the binary variables: bound the box with each one at 0 and at 1 (one
@@ -1003,11 +1065,12 @@ def minimize(
     try:
         lb, xc, fc, rlo, rhi, rxr = evaluate(lo[None], hi[None])
     except _CompileTimeout as e:  # no bound at all yet: report what is known
+        why = "before the root bound" if isinstance(e, _Deadline) else f"while compiling the '{e}' kernel"
         xbest = np.asarray(xbest)
         maxv, verified, _ = _verify(f, ineq, eq, xbest, ub, lo_user, hi_user, feas_tol, integer=imask)
         return Result(x=xbest, fun=ub, lower_bound=-np.inf, converged=False, iterations=0, nodes=0,
                       evaluations=evaluations, time=time.perf_counter() - t0, status="time_limit",
-                      message=f"time_limit reached while compiling the '{e}' kernel; no bound computed",
+                      message=f"time_limit reached {why}; no bound computed",
                       max_violation=maxv, verified=verified)  # fmt: skip
     _mark("root_incumbent")
     update_incumbent(xc, fc, lb)
@@ -1020,7 +1083,7 @@ def minimize(
         ii = np.flatnonzero(imask)
         sizes = rhi[0, ii] - rlo[0, ii] + 1
         _mark("root_enum")
-        if np.prod(sizes) <= _ENUM:
+        if np.prod(sizes) <= _ENUM and time_for(None):  # incumbent-only, like the dives
             A = np.array(list(itertools.product(*[np.arange(rlo[0, j], rhi[0, j] + 1) for j in ii])))
             A = np.repeat(A, 4, 0)  # each from the relaxation point and 3 random points of the box
             L, H = np.repeat(rlo, len(A), 0), np.repeat(rhi, len(A), 0)
