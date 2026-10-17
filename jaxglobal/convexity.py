@@ -73,6 +73,10 @@ import jax.numpy as jnp
 import numpy as np
 
 ENABLED = True  # module switch for ablations (``profile_root.py --set convexity.ENABLED=False``)
+# Safe mode bounds f(x)'s rounding with an outward-rounded interval evaluation of the whole tape
+# at the point; XLA's compile time for that grows badly with the tape (a 1644-node quadratic
+# does not compile in 5 minutes), so above this size safe mode keeps the base relaxation.
+SAFE_MAX_NODES = 600
 MAX_QUAD_TERMS = 20_000  # stop tracking a slot's quadratic form beyond this many terms
 MAX_QUAD_VARS = 400  # eigen test only up to this many variables
 QUAD_TOL = 1e-9  # relative eigenvalue margin of the quadratic rule
@@ -644,7 +648,10 @@ def certificate_of(fn, x):
         prog = scalarize(tape, x.shape[0])
         if prog is None:
             return None
-        return classify(prog)
+        cert = classify(prog)
+        if cert is not None:
+            cert.size = len(tape.nodes)
+        return cert
 
 
 def conditions(cert, lo, hi):
@@ -735,7 +742,10 @@ def wrap(fn, base, safe=False):
     get = tape_cache(lambda x: (_Holder(certificate_of(flat, x)),))
 
     def cert_of(x):
-        return get(x)[0].cert
+        cert = get(x)[0].cert
+        if safe and cert is not None and cert.size > SAFE_MAX_NODES:
+            return None
+        return cert
 
     def prep(lo, hi):
         cert = cert_of(lo)

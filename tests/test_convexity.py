@@ -8,6 +8,7 @@ and where the condition fails the certificate must be refused. Non-convex
 compositions must get no verdict at all.
 """
 
+import os
 from pathlib import Path
 
 import jax
@@ -249,6 +250,22 @@ def test_combined_relaxers(name, safe):
         _check_relaxation(fn, lo, hi, rng, n_pts=100, safe=safe, univariate=True, alphabb=True)
 
 
+def test_safe_size_guard(monkeypatch):
+    """Safe mode keeps the base relaxation on tapes above SAFE_MAX_NODES; plain mode is unaffected."""
+    fn = RULES["nsig"][0]
+    lo, hi = jnp.ones(N), 10 * jnp.ones(N)
+    x = jnp.array([2.0, 3.0, 4.0])
+    monkeypatch.setattr(convexity, "SAFE_MAX_NODES", 0)
+    kw = dict(univariate=False, alphabb=False)
+    on = make_relaxer(lambda z: jnp.atleast_1d(fn(z)), safe=True, **kw)
+    off = make_relaxer(lambda z: jnp.atleast_1d(fn(z)), safe=True, convex=False, **kw)
+    plain = make_relaxer(lambda z: jnp.atleast_1d(fn(z)), **kw)
+    v_on = float(on(x, lo, hi, on.prepare(lo, hi)).cv[0])
+    v_off = float(off(x, lo, hi, off.prepare(lo, hi)).cv[0])
+    assert v_on == v_off
+    assert float(plain(x, lo, hi, plain.prepare(lo, hi)).cv[0]) == pytest.approx(float(fn(x)), rel=1e-12)
+
+
 def test_under_jit_and_vmap():
     fn = RULES["nsig"][0]
     r = make_relaxer(lambda z: jnp.atleast_1d(fn(z)), univariate=False, alphabb=False)
@@ -272,16 +289,18 @@ INSTANCES = ["cvxnonsep_nsig30", "cvxnonsep_normcon30", "cvxnonsep_pcon40", "cvx
              "smallinvDAXr3b010-011", "portfol_buyin", "batch"]  # fmt: skip
 
 
-@pytest.mark.parametrize("name", INSTANCES)
-@pytest.mark.parametrize("safe", [False, True])
+# The default run checks three instances in plain mode (a few seconds each). JAXGLOBAL_CONVEXITY_FULL=1
+# checks every instance above, plain and safe (minutes each under load).
+FULL = os.environ.get("JAXGLOBAL_CONVEXITY_FULL") == "1"
+CASES = ([(s, n) for s in (False, True) for n in INSTANCES] if FULL
+         else [(False, n) for n in ("cvxnonsep_nsig30", "cvxnonsep_normcon30", "smallinvDAXr3b010-011")])  # fmt: skip
+
+
+@pytest.mark.parametrize("safe,name", CASES)
 def test_minlplib_root_cuts_valid(name, safe):
     from jaxglobal.lp import _cuts, _parts_fn
     from jaxglobal.nl import read_nl
 
-    if safe and name.startswith("smallinv"):
-        # the safe base relaxation's cuts on this instance take > 10 min to compile under load
-        # (also with convexity off); its convex row is covered by the plain case and the unit tests
-        pytest.skip("safe cuts compile too slowly on smallinv (pre-existing)")
     path = NL / f"{name}.nl"
     if not path.exists():
         pytest.skip("MINLPLib .nl files not present")
@@ -291,7 +310,10 @@ def test_minlplib_root_cuts_valid(name, safe):
     lo = jnp.where(jnp.isfinite(lo), lo, jnp.where(jnp.isfinite(hi), hi - 100.0, -100.0))
     hi = jnp.where(jnp.isfinite(hi), hi, lo + 100.0)
     n = lo.size
-    prepare, parts, rs = _parts_fn(M.f, M.ineq, M.eq, True, True, safe=safe)
+    # univariate base without alphaBB: the convexity wrapper is what is under test (its combination
+    # with alphaBB is test_combined_relaxers), and compiling the safe alphaBB prepare on these
+    # instances takes many minutes (pre-existing, also with convexity off)
+    prepare, parts, rs = _parts_fn(M.f, M.ineq, M.eq, True, False, safe=safe)
     data = jax.jit(prepare)(lo, hi)
     w = hi - lo
     c = 0.5 * (lo + hi)
