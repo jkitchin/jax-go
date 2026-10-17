@@ -421,13 +421,20 @@ class Relaxer(NamedTuple):
         return self.call(x, lo, hi, data)
 
 
-def make_relaxer(fn, univariate=True, alphabb=False, K=65, multivariate=False, safe=False, interpret="auto"):
+def make_relaxer(fn, univariate=True, alphabb=False, K=65, multivariate=False, safe=False, interpret="auto",
+                 convex=True):
     """Relaxation of ``fn``: McCormick, optionally tightened by univariate hull
     envelopes (``univariate``) and whole-function scaled-Gershgorin alphaBB
     (``alphabb``, smooth ``fn`` only; ``alphabb="eigen"`` adds the eigenvalue
-    relaxation of exact quadratics). ``safe`` rounds every bound outward."""
+    relaxation of exact quadratics), and (``convex``) by ``fn`` itself on the
+    outputs that ``convexity.classify`` certifies convex (concave) on the box.
+    ``safe`` rounds every bound outward."""
     from .alphabb import make_alphabb
+    from .convexity import wrap
     from .relax import relax
+
+    if convex:
+        return wrap(fn, make_relaxer(fn, univariate, alphabb, K, multivariate, safe, interpret, convex=False), safe)
 
     if univariate:
         uprep, ucall = make_univariate(fn, K, multivariate, safe, interpret)
