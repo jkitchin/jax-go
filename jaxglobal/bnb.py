@@ -974,7 +974,7 @@ def minimize(
             for i in np.argsort(lb)[:n_try]:
                 if lb[i] < ub - tol():
                     starts.append(xc[i])
-        if local_solve and starts:
+        if local_solve and starts and not _past(deadline):  # (a batch already running is not interrupted)
             # with an incumbent, back off after local searches that did not improve it (skip
             # 1, 3, 7, ... iterations, up to _LOCAL_BACKOFF); an improvement resets the wait
             if np.isfinite(ub) and backoff[1] > 0:
@@ -982,7 +982,7 @@ def minimize(
                 return
             xl, fl = local(starts)
             nz = near_zero_options(min(ub, fl), abs_tol)
-            if nz is not None:
+            if nz is not None and not _past(deadline):
                 # near-zero objective: solve again with the objective scaled up (local.near_zero_options),
                 # also from the incumbent and a few random points of the box
                 extra = [xl if fl < ub else xbest] + list(prng.uniform(lo, hi, size=(_NEAR_ZERO_STARTS, lo.size)))
@@ -1153,6 +1153,8 @@ def minimize(
         """Local solves of the continuous variables in boxes whose integers are fixed (``L``,
         ``H``) from the points ``S``; improves the incumbent."""
         nonlocal ub, xbest
+        if _past(deadline):
+            return
         X = np.clip(np.asarray(solve_local(np.clip(S, L, H), L, H)), L, H)
         F = screen(X)
         i = int(np.argmin(F))
