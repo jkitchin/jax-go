@@ -530,6 +530,232 @@ conservative fallback instead of the error. The alternative without it is to
 extend `univariate._dep_masks`, which already follows vectorized tapes and
 falls back conservatively, to produce the two patterns.
 
+### SCIP gap: root profile
+
+Workstream 0 of `docs/PLAN-scip-gap.md`: where the wall time goes on 7
+instances that are stuck or slow against SCIP. The script is
+`benchmarks/profile_root.py` and the data is in
+`benchmarks/results/scipgap_profile.csv`, one row per measured item.
+
+How it was measured:
+
+- Each instance ran in its own process, one at a time, with a 120 s limit and
+  `uptime` load recorded per run.
+- Each instance ran in three modes:
+  - cold: `JAXGLOBAL_CACHE=0`;
+  - prime: an empty kernel cache;
+  - warm: the same cache again.
+- `minimize` marks each setup and root stage through an opt-in hook,
+  `bnb._PROFILE`, which is `None` by default and changes nothing. These marks
+  split the wall time.
+- Wrappers time the work inside each stage:
+  - `bound_domain`, `make_local` and every local solve;
+  - the kernel trace and lowering (tracer thread) and the XLA compile
+    (compiler pool);
+  - each kernel wait and each kernel run.
+- Time spent waiting for a kernel is split, in 10 ms samples, by what the
+  background threads were doing: trace and lowering, or XLA compile.
+- The buckets sum to the wall time within 0.1 s for every run (exit criterion:
+  10 %).
+
+**Caveat:** every run here, including the follow-ups and the 4-job run (all finished by 11:18), ran while two unrelated processes pinned 2 CPU cores (until about 11:20). Absolute timings are inflated by an unknown amount; the ratios (compile against first LP, alphaBB on or off) and the bugs found do not depend on it.
+
+**Cold runs** (no cache), 120 s limit, one instance at a time:
+
+| instance | n / int | rows | relaxation; alphaBB interval Hessian | load (1 min) | wall, status, nodes | first bound at | wait: trace+lower / XLA compile | first LP run | largest other bucket |
+|---|---|---|---|---|---|---|---|---|---|
+| ex6_2_6 | 3 / 0 | 184 | straight-line; jacfwd² (1063 eqns) | 8 | 120 s, limit, 109k | 6.4 s | 2.1 / 5.4 s | 0.1 s | search 111 s |
+| ramsey | 33 / 0 | 176 | straight-line; jacfwd² (753) | 10 | 8.9 s, **optimal**, 1 | 6.2 s | 2.0 / 4.5 s | 0.3 s | make_local 0.7 s |
+| portfol_buyin | 17 / 8 | 943 | interpreter; taylor2 over budget (0.5M), jacfwd² (3193) | 13 | 14.9 s, **optimal**, 91 | 9.2 s | 2.7 / 3.6 s | 0.2 s | search 2.6 s, bound_domain 2.3 s |
+| smallinvDAXr3b010-011 | 31 / 30 | 1583 | interpreter; taylor2 over budget (5.0M), jacfwd² (10600) | 12 | 135 s, limit, 291 | 16.7 s | 4.4 / 5.9 s | 1.8 s | root dives 36 s; search 77 s |
+| batch | 46 / 24 | 388 | straight-line; jacfwd² (855) | **124** | 24.5 s, **optimal**, 19 | 13.8 s | 6.7 / 5.4 s | 0.5 s | root local solves 5.0 s |
+| hadamard_5 | 26 / 25 | 505 | straight-line; jacfwd² (8344) | **110** | 131 s, limit, 0 | never | 20.6 / ≥ 106 s (compile unfinished) | none | bound_domain 3.6 s |
+| cvxnonsep_nsig30 | 30 / 15 | 122 | straight-line; jacfwd² (1242) | 14 | 140 s, limit, 1023 | 38.5 s | 2.3 / 41.5 s | 2.1 s | search 86 s |
+
+Notes on the cold table:
+
+- **rows** is the number of scalarized tape rows.
+- **relaxation** is `relax_interp.use_relax_interpreter`: it uses the tape
+  interpreter for a function with at least 600 rows. FBBT is interpreted on all
+  seven.
+- **jacfwd²** means alphaBB builds its interval Hessian by tracing
+  `jacfwd(jacfwd(f))` (the eqns count is that jaxpr's size). It does this in
+  two cases:
+  - always on the straight-line path;
+  - on the interpreted path when the `make_taylor2` size is over
+    `TAYLOR_BUDGET = 30000`.
+- No instance takes the quadratic or lifted path.
+
+**Warm runs** (kernel cache primed, same instance order):
+
+| instance | wall, status | first bound at | XLA compile wait |
+|---|---|---|---|
+| ex6_2_6 | 120 s, limit (119k nodes) | 0.7 s | 0.1 s |
+| ramsey | 2.2 s, optimal | 1.3 s | 0 s |
+| portfol_buyin | 7.6 s, optimal | 2.6 s | 0.3 s |
+| smallinvDAXr3b010-011 | 263 s, limit (291 nodes) | 8.1 s | 0.3 s |
+| batch | 9.2 s, optimal | 2.4 s | 0 s |
+| hadamard_5 | 121 s, limit (0 nodes) | never | 118 s |
+| cvxnonsep_nsig30 | 134 s, limit (1535 nodes) | 7.6 s | 5.6 s |
+
+The prime runs match cold within the noise, except that the kernel cache's
+`jax.export` re-traces in the background. That re-trace took 9 s on
+smallinvDAX and 22 s on hadamard_5, overlapping the wait for the bound kernel.
+
+Load:
+
+- Other jobs started during the batch runs, which then ran at load 110-124.
+- hadamard_5 cold also ran at 110, prime at 29 and warm at 18. All other runs
+  were at 8-19 on this 14-core machine (10 performance, 4 efficiency).
+- hadamard_5 does not depend on the load: its result is the same at every
+  load, and the follow-up runs below were done at load 8-12.
+
+**Follow-up runs** (cold, in the same CSV with mode `cold_tl900`, `cold+noalphabb`
+and `cold+interp`):
+
+- hadamard_5 with a 900 s limit (load 12):
+  - The bound kernel's XLA compile takes 273 s and the OBBT kernel's 301 s.
+  - The first bound arrives at 286 s.
+  - The search then runs 88k nodes in 577 s without closing: bound -7.68
+    against -5 (a maximization).
+- Is it the relaxation or the alphaBB Hessian? Measured by toggling each:
+
+| instance | default: compile, first bound, nodes | `alphabb=False` | relaxation interpreter on (`MIN_ROWS=0`) |
+|---|---|---|---|
+| hadamard_5 | 273 s, 286 s, 0 in 120 s | 38.5 s, 48 s, 9215 nodes (bound -14.4) | > 118 s, never: taylor2 is 0.7M, over budget, so still jacfwd² |
+| cvxnonsep_nsig30 | 31.6 s, 38.5 s, 1023 nodes (bound 30.5) | 16.9 s, 21.8 s, 2047 nodes (bound 35.1) | 12.0 s, 15.2 s, 7167 nodes (bound 44.8) |
+| ex6_2_6 | 3.4 s, 6.4 s, 109k nodes | 2.1 s, 4.5 s, 121k nodes | 1.6 s, 4.2 s, 56k nodes (node rate halved) |
+
+- 4 jobs, 60 s, cold (`benchmarks/results/scipgap_w0_jobs4_cold.csv`, load
+  8-17), to compare with the `issue14_*_cold` baseline:
+  - ramsey solves in 11.8 s, batch in 15.1 s and portfol_buyin in 20.7 s.
+  - In the baseline all three hit the limit after 1 node, and ex6_2_6 stopped
+    after 1 node with dual -1098. Here ex6_2_6 reaches dual -8.8e-4.
+  - So the baseline was taken on a much more loaded machine. Its setup times
+    are inflated, and three of Workstream A's six target instances already
+    solve cold on a quiet machine.
+
+Conclusions:
+
+1. **The decision rule: Workstream A stays ahead of D.**
+   - The rule was: if compile is under 30 % of wall time everywhere and the
+     first LP dominates, D moves ahead of A. Neither condition holds.
+   - Kernel compile (trace, lowering and XLA wait) is 30 % or more of the cold
+     wall time on 5 of 7 instances:
+
+     | instance | compile share |
+     |---|---|
+     | ramsey | 73 % |
+     | batch | 50 % |
+     | portfol_buyin | 42 % |
+     | cvxnonsep_nsig30 | 31 % |
+     | hadamard_5 | 97 % (100 % of the 286 s before its first bound) |
+     | smallinvDAX | 8 % |
+     | ex6_2_6 | 6 % |
+
+   - The first bound kernel call (the dense LP) takes 0.1-2.1 s, at most
+     1.6 % of the wall time. It never dominates.
+2. **The largest bucket is XLA compile of the bound and OBBT kernels.**
+   - It totals 172 s of kernel wait over the 7 cold runs, against 41 s for
+     trace and lowering.
+   - The cost is heavy-tailed. It does not depend on the row count:
+     - hadamard_5: 273 s for 505 rows;
+     - cvxnonsep_nsig30: 32 s for 122 rows;
+     - smallinvDAX: 6 s for 1583 rows (interpreted).
+   - The driver is alphaBB's `jacfwd(jacfwd(f))` interval Hessian, compiled
+     straight-line. With alphaBB off, hadamard_5's compile drops 7×
+     (273 → 38.5 s) and nsig30's 2× (31.6 → 16.9 s).
+   - The OBBT kernel (batch 1) compiles as slowly as the bound kernel
+     (batch 16): 301 s against 273 s. A smaller batch does not make a kernel
+     cheap to compile.
+   - The XLA persistent cache writes an executable only when its compile
+     finishes. hadamard_5 never finishes within the limit, so its warm runs pay
+     the full compile again.
+3. **The second largest is root dives on smallinvDAX: 36 s cold, 50 s warm.**
+   - This is one call of the dive kernel: 16 boxes, 30 integers fixed one at
+     a time, two roundings each, and interpreted FBBT over 1583 rows each time.
+   - In the search, a periodic dive costs the same again.
+   - Next in size, all much smaller, summed over the 7 cold runs:
+
+     | bucket | total |
+     |---|---|
+     | root local solves (mostly pounce jit on first use) | 14 s |
+     | `bound_domain` | 10 s |
+     | `make_local` | 5 s |
+     | first LP | 5 s |
+     | structure / nonlinear / fingerprint | under 1 s per instance |
+
+4. **The time limit is not enforced inside an iteration or a dive.**
+   - `minimize` checks the deadline once per iteration.
+   - One iteration evaluates up to `batch = 256` boxes, which is 16 calls of
+     the 16-box kernel: about 21 s on nsig30 (1.3 s per call) and 28 s on
+     smallinvDAX (1.75 s per call).
+   - The dive kernel run has no deadline.
+   - Measured overruns: 14-20 s on nsig30, 15 s on smallinvDAX cold, and 143 s
+     on smallinvDAX warm, where a periodic dive started at 119 s and ended at
+     263 s.
+   - This is a bug, and it inflates the SGM time on limit-hit instances.
+5. **Two of the seven are not setup problems.**
+   - ex6_2_6 has its first bound at 6.4 s and runs 109-121k nodes in 120 s,
+     but stops at a gap of 1.1e-5 against an absolute tolerance of 1e-6. Its
+     objective is about 0, so this is bound convergence near a zero optimum.
+   - cvxnonsep_nsig30's bound kernel is slow per call (1.3 s per 16 boxes for
+     122 rows) and its bound weak (30.5 against 130.65). Workstream B (convex
+     OA cuts) and the relaxation interpreter matter more there than compile
+     time.
+
+What this means for Workstream A's design items:
+
+1. **Cheap root bound first: keep, but drop alphaBB rather than shrink the
+   batch.**
+   - A batch-1 kernel is not cheaper to compile, as the OBBT kernel shows.
+   - First compile a kernel without the alphaBB term and with the relaxation
+     interpreter, then swap in the full kernel when it is ready.
+   - Measured on first bound: hadamard_5 286 → 48 s, nsig30 38.5 → 15-22 s.
+2. **Relaxation-interpreter threshold: keep, but choose on graph size, not
+   rows.**
+   - On nsig30 the interpreter cuts compile 31.6 → 12.0 s and raises the node
+     rate 7×.
+   - On ex6_2_6 it halves the node rate, so a lower row threshold alone is
+     wrong.
+   - It does nothing while alphaBB still traces jacfwd² (hadamard_5).
+3. **Kelley as `lax.scan` in the lifted path: drop from A.** None of the seven
+   uses the lifted or quadratic path.
+4. **Dense Hessian and Hessian fingerprint in setup: drop.**
+   - Structure, nonlinear, quadratic and fingerprint take under 1 s on every
+     instance; `K.fingerprint` is 0.35 s on hadamard_5.
+   - The background `jax.export` re-trace for the kernel cache (9-22 s) is
+     worth moving off the tracer thread, but it overlaps a wait rather than
+     adding to it.
+5. **Local-solver build: lower priority.** `make_local` is at most 2.2 s and the
+   root local solves at most 5 s (batch, at load 124).
+6. **Cache hit rate: keep as a check.**
+   - The warm runs show the cache works: first bound in 0.7-2.6 s instead of
+     6-14 s.
+   - Two gaps remain:
+     - A compile that never finishes is never cached (hadamard_5).
+     - nsig30 still waits 5.6 s on compile when warm.
+7. **New, highest payoff: the alphaBB interval Hessian.** Stop tracing
+   `jacfwd(jacfwd(f))` straight-line for large functions. Options:
+   - skip alphaBB above a jaxpr-size × n² budget;
+   - an interval Hessian restricted to `structure.py`'s Hessian pattern, so
+     taylor2 fits its budget;
+   - per-row alphaBB on small rows only;
+   - alphaBB in a second kernel added after the first bound.
+8. **New: enforce the deadline between kernel calls and around dives.**
+   - Check the deadline in `run` between 16-box calls.
+   - Skip a dive whose expected time (the last dive's time) exceeds the time
+     left.
+9. **New: a time budget for dives.**
+   - On large integer problems (smallinvDAX), one dive call costs as much as
+     20 bound calls.
+   - Options: fewer boxes per dive, a cap on integers fixed per call, or
+     scheduling by measured cost.
+
+Re-baseline first: the `issue14` cold CSVs were taken under heavy load. Run
+start50 and int50 cold again, with load recorded, before using them to measure
+A.
+
 ### Phase 3 — search (4 weeks)
 
 - **Branching.** Choose the variable by violation-weighted or pseudocost
