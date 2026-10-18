@@ -49,7 +49,11 @@ operand) that is undefined on part of the box, such as ``sqrt(x)`` with
 everywhere and would cut that part of the box off (write
 ``jnp.sqrt(jnp.maximum(x, 0))``); big-M constants of 1e20 or more (SCIP's
 infinity; above 1e8 they are reported and warned about, ``ExportBigMWarning``);
-division by the constant 0.
+division by the constant 0; an exported intermediate whose interval bound
+reaches 1e20 over the box while its operands are bounded (SCIP would treat
+those points as invalid evaluations and cut them off). The ``tanh``,
+``sigmoid``, ``asinh`` and ``acosh`` rewrites choose overflow-free forms from
+the argument's interval so they do not hit this.
 """
 
 from __future__ import annotations
@@ -82,6 +86,7 @@ class ExportBigMWarning(UserWarning):
 
 BIGM_WARN = 1e8  # big-M constants above this are reported and warned about
 BIGM_REFUSE = 1e20  # ... and refused from here on (SCIP treats 1e20 as infinity)
+EXP_SAFE = 30.0  # rewrites keep exp arguments below this where they can (exp(30) ~ 1e13)
 MAX_TERMS = 1000  # SCIP: lift a product operand to a variable before pyscipopt expands it past this
 
 
@@ -375,14 +380,18 @@ def _idiv(al, ah, bl, bh):
     return _imul(al, ah, 1.0 / bh, 1.0 / bl)
 
 
-def _intervals(g, order, lo, hi):
-    """``{node: (lo, hi)}`` over the box ``[lo, hi]`` (plain float arithmetic: pad before use)."""
+def _intervals(g, order, lo, hi, fixed=None):
+    """``{node: (lo, hi)}`` over the box ``[lo, hi]`` (plain float arithmetic: pad before use). ``fixed`` gives
+    known enclosures for some nodes."""
     iv = {}
+    fixed = fixed or {}
     with np.errstate(all="ignore"):
         for i in order:
             op, args, p = g.nodes[i]
             a = [iv[k] for k in args]
-            if op == "var":
+            if i in fixed:
+                r = fixed[i]
+            elif op == "var":
                 r = (lo[p], hi[p])
             elif op == "const":
                 r = (p, p)
@@ -808,7 +817,10 @@ class ExportReport:
 
     def _count(self, kind, op, how):
         d = getattr(self, kind)
-        d.setdefault(op, [0, how])[0] += 1
+        e = d.setdefault(op, [0, how])
+        e[0] += 1
+        if how not in e[1].split("; "):  # the same op written in more than one form
+            e[1] += "; " + how
 
     def __str__(self):
         lines = [f"export to {self.target}: {self.n_vars} variables (+{self.n_aux} auxiliary, {self.n_binary} binary), "
@@ -852,6 +864,7 @@ class _Lowering:
         self.cons = []
         self.binary = 0
         self.bigm_max = 0.0
+        self.unit = set()  # lowered nodes known to lie in [0, 1]
         self.report = ExportReport(target=self.TARGETS[mode])
         roots = [prob.obj] + [c[0] for c in prob.cons]
         self.order = _reachable(prob.g, roots)
@@ -866,6 +879,8 @@ class _Lowering:
         self.map = {}
         for i in self.order:
             self.map[i] = self.lower(i)
+        if not self.report.refused:
+            self.overflow_check()
         r = self.report
         r.n_vars, r.n_cons = prob.n, len(prob.cons)
         r.assumptions = sorted(prob.g.assumptions)
@@ -916,6 +931,29 @@ class _Lowering:
             if lo < 0 or (k < 0 and lo <= 0):
                 return why(f" (x ** {k:g} needs x {'>' if k < 0 else '>='} 0)")
         return None
+
+    def overflow_check(self):
+        """Refuse when an exported intermediate reaches SCIP's infinity (1e20) over the box although its operands
+        are bounded: the solver treats such points as invalid evaluations and cuts them off."""
+        g = self.g
+        roots = [self.map[self.p.obj]] + [self.map[c[0]] for c in self.p.cons] + [c[0] for c in self.cons]
+        order = _reachable(g, roots)
+        iv = _intervals(g, order, self.lo, self.hi, fixed={k: (0.0, 1.0) for k in self.unit})
+        for i in order:
+            op, args, _ = g.nodes[i]
+            if not args or op in ("div", "tan") or op in LOGICAL:
+                continue  # an infinite div/tan bound is a pole, not an overflow (domains are checked elsewhere)
+            if op == "pow" and (not g.is_const(args[1]) or g.value(args[1]) < 0):
+                continue
+            if not all(np.isfinite(iv[k][0]) and np.isfinite(iv[k][1]) for k in args):
+                continue
+            m = max(abs(iv[i][0]), abs(iv[i][1]))
+            if not m < BIGM_REFUSE:
+                self.report.refused.append(
+                    f"an exported '{op}' reaches {m:.3g} (>= {BIGM_REFUSE:g}, SCIP's infinity) on the box although "
+                    "its operands are bounded: the solver would cut those points off; tighten the variable bounds"
+                )
+                return
 
     def defined(self, k, what):
         """Refuse when node ``k`` (a branch or operand the reformulation evaluates everywhere) is undefined somewhere."""
@@ -1008,7 +1046,6 @@ class _Lowering:
                 return g.op("exp", g.op("mul", a[1], g.op("log", a[0])))
             raise ExportError("pow(x, y) with a variable exponent needs x > 0 over the box (SCIP has no x**y)")
         if op in REWRITES and op not in ("max", "min", "sign"):
-            r._count("rewritten", op, REWRITES[op])
             return self.rewrite(i, op, a[0])
         if op in ("atan", "asin", "acos", "atan2"):
             if self.mode == "nl-portable":
@@ -1058,17 +1095,63 @@ class _Lowering:
         raise ExportError(f"operation '{op}' is not supported for {r.target}")
 
     def rewrite(self, i, op, x):
+        """Exact rewrite of ``op`` applied to ``x``. Forms are chosen from ``x``'s interval so that no ``exp``
+        overflows SCIP's infinity (1e20) where the original value is finite."""
         g = self.g
+        xl, xh = self.iv[self.p.g.nodes[i][1][0]]
 
         def c(v):
             return g.const(v)
 
+        def done(how):
+            self.report._count("rewritten", op, how)
+
+        def split(t):  # exp(min(t, 0)), exp(min(-t, 0)): both in (0, 1]
+            m = g.op("abs", t)
+            a, b = g.op("exp", g.op("sub", t, m)), g.op("exp", g.op("sub", g.op("neg", t), m))
+            self.unit |= {a, b}  # in (0, 1]; interval arithmetic cannot see it (x - |x| loses the dependency)
+            return a, b
+
         if op == "tan":
+            done(REWRITES[op])
             return g.op("div", g.op("sin", x), g.op("cos", x))
         if op == "tanh":
-            return g.op("sub", c(1.0), g.op("div", c(2.0), g.op("add", g.op("exp", g.op("mul", c(2.0), x)), c(1.0))))
+            if xl >= 0:  # e = exp(-2x) <= 1
+                done("(1 - exp(-2x)) / (1 + exp(-2x)) (x >= 0 on the box)")
+                e = g.op("exp", g.op("mul", c(-2.0), x))
+                return g.op("div", g.op("sub", c(1.0), e), g.op("add", c(1.0), e))
+            if xh <= EXP_SAFE / 2:
+                done(REWRITES[op])
+                return g.op(
+                    "sub", c(1.0), g.op("div", c(2.0), g.op("add", g.op("exp", g.op("mul", c(2.0), x)), c(1.0)))
+                )
+            done("(a - b) / (a + b), a = exp(x - |x|), b = exp(-x - |x|) (no exp overflow)")
+            a, b = split(x)
+            return g.op("div", g.op("sub", a, b), g.op("add", a, b))
         if op == "logistic":
-            return g.op("div", c(1.0), g.op("add", c(1.0), g.op("exp", g.op("neg", x))))
+            if xl >= -EXP_SAFE:
+                done(REWRITES[op])
+                return g.op("div", c(1.0), g.op("add", c(1.0), g.op("exp", g.op("neg", x))))
+            if xh <= 0:  # e = exp(x) <= 1
+                done("exp(x) / (1 + exp(x)) (x <= 0 on the box)")
+                e = g.op("exp", x)
+                return g.op("div", e, g.op("add", c(1.0), e))
+            done("a / (a + b), a = exp((x - |x|)/2), b = exp((-x - |x|)/2) (no exp overflow)")
+            a, b = split(g.op("mul", c(0.5), x))
+            return g.op("div", a, g.op("add", a, b))
+        if op not in ("asinh", "acosh"):
+            done(REWRITES[op])
+
+        def big(t):  # log(t) + log(1 + sqrt(1 + s t^-2)) for t >= 1: no t^2 (it overflows for t > 1e10)
+            return g.op(
+                "add",
+                g.op("log", t),
+                g.op(
+                    "log",
+                    g.op("add", c(1.0), g.op("sqrt", g.op("add", c(1.0), g.op("mul", c(s), g.op("pow", t, c(-2)))))),
+                ),
+            )
+
         if op == "log1p":
             return g.op("log", g.op("add", c(1.0), x))
         if op == "expm1":
@@ -1077,18 +1160,33 @@ class _Lowering:
             e, em = g.op("exp", x), g.op("exp", g.op("neg", x))
             return g.op("mul", c(0.5), g.op("sub" if op == "sinh" else "add", e, em))
         if op == "asinh":  # odd: x + sqrt(x^2 + 1) cancels for x << 0
-            xl, xh = self.iv[self.p.g.nodes[i][1][0]]
+            s = 1.0
+            if xl >= 1 and xh > 1e9:
+                done("log(x) + log(1 + sqrt(1 + x^-2)) (x >= 1 on the box)")
+                return big(x)
+            if xh <= -1 and xl < -1e4:
+                done("-(log(-x) + log(1 + sqrt(1 + x^-2))) (x <= -1 on the box)")
+                return g.op("neg", big(g.op("neg", x)))
             if xl >= -1e4:
+                done(REWRITES[op])
                 return g.op("log", g.op("add", x, g.op("sqrt", g.op("add", g.op("pow", x, c(2)), c(1.0)))))
             mag = g.op("log", g.op("add", g.op("abs", x), g.op("sqrt", g.op("add", g.op("pow", x, c(2)), c(1.0)))))
             if xh <= 0:
+                done("-log(|x| + sqrt(x^2 + 1)) (x <= 0 on the box)")
                 return g.op("neg", mag)
             if not np.isfinite(xl) or not np.isfinite(xh):
+                done(REWRITES[op])
                 how = "log(x + sqrt(x^2 + 1)) loses accuracy for x < -1e4 (no finite bound for sign(x))"
                 self.report._count("approximated", "asinh", how)
                 return g.op("log", g.op("add", x, g.op("sqrt", g.op("add", g.op("pow", x, c(2)), c(1.0)))))
+            done("sign(x) log(|x| + sqrt(x^2 + 1)) (sign with two binaries)")
             return g.op("mul", self.sign(i, x, "asinh (sign(x) log(|x| + sqrt(x^2 + 1)))", ties=False), mag)
         if op == "acosh":
+            if xh > 1e9:
+                s = -1.0
+                done("log(x) + log(1 + sqrt(1 - x^-2))")
+                return big(x)
+            done(REWRITES[op])
             return g.op("log", g.op("add", x, g.op("sqrt", g.op("sub", g.op("pow", x, c(2)), c(1.0)))))
         if op == "atanh":
             return g.op("mul", c(0.5), g.op("log", g.op("div", g.op("add", c(1.0), x), g.op("sub", c(1.0), x))))
@@ -1220,6 +1318,8 @@ def _lower(f, lo, hi, ineq, eq, integer, mode, minmax, max_size, strict=True, st
 def inspect(f, lo, hi, *, ineq=None, eq=None, integer=None, target="scip", minmax="abs", nonsmooth="native",
             portable=False, strict_eps=0.0):  # fmt: skip
     """The ``ExportReport`` of exporting to ``target`` (``"scip"`` or ``"nl"``), without raising on refusals."""
+    if target not in ("scip", "nl"):
+        raise ValueError(f"target must be 'scip' or 'nl', not {target!r}")
     mode = "scip" if target == "scip" else _nl_mode(nonsmooth, portable)
     _, report = _lower(f, lo, hi, ineq, eq, integer, mode, minmax, None, strict=False, strict_eps=strict_eps)
     return report
@@ -1440,8 +1540,8 @@ def to_nl(f, lo, hi, path, *, ineq=None, eq=None, integer=None, nonsmooth="nativ
     ``var_order[k]`` is the model variable of .nl variable ``k`` (the first
     ``n_vars`` model variables are ``x``, the rest auxiliary). Shared
     subexpressions become defined variables (``V`` segments); with
-    ``portable=True`` there are none (Couenne 0.5 misreads some files that
-    have them), and a shared subexpression with at least ``share_min``
+    ``portable=True`` there are none (Couenne 0.5.8 misreads ``V`` segments,
+    even in files AMPL writes; use ``portable=True`` with Couenne), and a shared subexpression with at least ``share_min``
     operations becomes an auxiliary variable with ``w == expr`` instead.
     Returns the ``ExportReport``.
     """

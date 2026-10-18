@@ -570,3 +570,69 @@ def test_asinh_large_negative():
         m = export.to_scip(lambda x: jnp.arcsinh(x[0]), [-1e8], [1.0])
     _, x, obj = _solve(m)
     assert abs(obj - np.arcsinh(-1e8)) < 1e-6
+
+
+# exp overflow: SCIP treats values >= 1e20 as invalid evaluations and cuts those points off
+
+
+@pytest.mark.parametrize(
+    "f, lo, hi, fstar",
+    [
+        (lambda x: jnp.tanh(x[0]) * x[1], [25.0, 1.0], [30.0, 2.0], 1.0),
+        (lambda x: jax.nn.sigmoid(x[0]) - 0.001 * x[0], [-60.0], [-50.0], 0.05),
+        (lambda x: jax.nn.sigmoid(-x[0] * x[1]) + 0.001 * x[0], [20.0, 20.0], [30.0, 30.0], 0.02),
+        (lambda x: jnp.sin(jnp.tanh(x[0] ** 2)) + 0.001 * x[0], [20.0], [30.0], np.sin(1.0) + 0.02),
+    ],
+)
+def test_tanh_sigmoid_no_exp_overflow(f, lo, hi, fstar):
+    _, x, obj = _solve(export.to_scip(f, lo, hi))
+    _check(f, x, obj)
+    assert abs(obj - fstar) < 1e-6, obj
+
+
+def test_tanh_sigmoid_straddling_forms(tmp_path):
+    """Over a box that straddles 0 with large |x| the overflow-free forms are used; they equal JAX everywhere."""
+
+    def f(x):
+        return jnp.tanh(x[0]) + jax.nn.sigmoid(x[1]) + jnp.tanh(-2.0 * x[1])
+
+    lo, hi = [-400.0, -400.0], [400.0, 400.0]
+    path = tmp_path / "s.nl"
+    r = export.to_nl(f, lo, hi, path, portable=True)
+    assert "overflow" in r.rewritten["tanh"][1] and "overflow" in r.rewritten["logistic"][1]
+    m = read_nl(str(path))
+    for x in ([-400.0, 400.0], [-30.0, 25.0], [-1e-3, 2e-3], [0.0, 0.0], [0.7, -0.4], [60.0, -60.0], [400.0, -50.0]):
+        x = jnp.array(x)
+        assert abs(float(m.f(x)) - float(f(x))) < 1e-14, x
+
+
+def test_exp_overflow_refused():
+    with pytest.raises(ExportError, match="SCIP's infinity"):
+        export.to_scip(lambda x: jnp.exp(x[0]), [0.0], [60.0])
+    with pytest.raises(ExportError, match="SCIP's infinity"):
+        export.to_scip(lambda x: jnp.expm1(x[0]) * x[1], [0.0, 0.0], [50.0, 1.0])
+    _, x, obj = _solve(export.to_scip(lambda x: jnp.exp(x[0]), [0.0], [40.0]))
+    assert abs(obj - 1.0) < 1e-6
+
+
+def test_asinh_acosh_large_arguments(tmp_path):
+    _, x, obj = _solve(export.to_scip(lambda x: jnp.arcsinh(x[0]), [1e11], [1e12]))  # x^2 would reach 1e24
+    assert abs(obj - np.arcsinh(1e11)) < 1e-6
+    r = export.inspect(lambda x: jnp.arcsinh(x[0]) + jnp.arccosh(x[1]), [-1e12, 1.0], [-1.0, 1e12])
+    assert not r.refused
+    assert "-(log(-x)" in r.rewritten["asinh"][1] and "x^-2" in r.rewritten["acosh"][1]
+    path = tmp_path / "a.nl"
+    export.to_nl(lambda x: jnp.arcsinh(x[0]) + jnp.arccosh(x[1]), [-1e12, 1.0], [-1.0, 1e12], path, portable=True)
+    m = read_nl(str(path))
+    for x in ([-1e12, 1e12], [-3.0, 1.5], [-1.0, 1.0]):
+        x = jnp.array(x)
+        assert abs(float(m.f(x)) - float(jnp.arcsinh(x[0]) + jnp.arccosh(x[1]))) < 1e-12
+
+
+def test_asinh_label_and_inspect_target():
+    r = export.inspect(lambda x: jnp.arcsinh(x[0]), [-1e5], [1.0])
+    assert r.rewritten["asinh"][1].startswith("sign(x)")
+    r = export.inspect(lambda x: jnp.arcsinh(x[0]), [-1e5], [-10.0])
+    assert "-(log(-x)" in r.rewritten["asinh"][1]
+    with pytest.raises(ValueError, match="target"):
+        export.inspect(lambda x: x[0], [0.0], [1.0], target="baron")
