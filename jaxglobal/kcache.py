@@ -12,6 +12,12 @@ The directory is ``$JAXGLOBAL_CACHE_DIR`` (default ``~/.cache/jaxglobal``);
 ``JAXGLOBAL_CACHE=0`` disables both. An already configured JAX compilation
 cache is left alone.
 
+Both are pruned once per process, least recently used first: ``xla/`` beyond
+``_MAX_XLA_BYTES``, ``kernels/`` beyond ``_MAX_KERNELS`` files, and kernels of
+other jaxglobal sources (which can never load again) once unused for
+``_STALE_SECS``. ``clear_cache()`` (``python -c "import jaxglobal.kcache as k; k.clear_cache()"``)
+removes both.
+
 A problem's fingerprint hashes the jaxprs of ``f``, ``ineq`` and ``eq`` and of
 their Hessians (which bring in custom derivative rules), with every constant
 and literal, together with the kernel options and shapes, the jaxglobal
@@ -23,14 +29,23 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import tempfile
+import time
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
 _MAX_KERNELS = 512  # serialized kernels kept on disk (oldest removed first)
+# size cap of ``xla/`` (bytes): every compile is cached, hundreds per solve. Pruned once per process,
+# down to _XLA_PRUNE_TO of the cap, least recently used first. (JAX's own cap,
+# ``jax_compilation_cache_max_size``, rescans the directory on every write: 0.3 s at 9000 files.)
+_MAX_XLA_BYTES = 2 * 1024**3
+_XLA_PRUNE_TO = 0.75
+_STALE_SECS = 86400.0  # kernels of another jaxglobal source are removed once unused this long
 _SOURCE = []
+_PRUNED = []  # kernels/ was pruned in this process
 
 
 def cache_root():
@@ -52,6 +67,34 @@ def enable_compilation_cache():
         return
     jax.config.update("jax_compilation_cache_dir", path)
     jax.config.update("jax_persistent_cache_min_compile_time_secs", 0.0)
+    if jax.config.jax_compilation_cache_max_size == -1:  # not capped by the user
+        prune_xla(path)
+
+
+def prune_xla(path, max_bytes=None):
+    """Remove the least recently used files of the XLA cache directory ``path`` when it holds more
+    than ``max_bytes`` (default ``_MAX_XLA_BYTES``), down to ``_XLA_PRUNE_TO`` of that."""
+    max_bytes = _MAX_XLA_BYTES if max_bytes is None else max_bytes
+    try:
+        files = []
+        with os.scandir(path) as it:
+            for e in it:
+                if e.is_file(follow_symlinks=False):
+                    st = e.stat(follow_symlinks=False)
+                    files.append((max(st.st_atime, st.st_mtime), st.st_size, e.path))
+    except OSError:
+        return
+    total = sum(f[1] for f in files)
+    if total <= max_bytes:
+        return
+    for _, size, f in sorted(files):
+        if total <= _XLA_PRUNE_TO * max_bytes:
+            break
+        try:
+            os.remove(f)
+            total -= size
+        except OSError:
+            pass
 
 
 def _source_hash():
@@ -117,8 +160,64 @@ def fingerprint(fns, n, extra):
 
 
 def _path(key):
+    """The file (without extension) of kernel ``key``: named after the jaxglobal source, so that
+    kernels of other sources can be told apart (and removed: ``_prune_kernels``)."""
     root = cache_root()
-    return None if root is None or key is None else os.path.join(root, "kernels", key)
+    if root is None or key is None:
+        return None
+    _prune_kernels(os.path.join(root, "kernels"))
+    return os.path.join(root, "kernels", f"{_source_hash()[:12]}-{key}")
+
+
+def _prune_kernels(d, force=False):
+    """Once per process (unless ``force``): remove from the kernel directory ``d`` the files of
+    other jaxglobal sources unused for ``_STALE_SECS`` (several checkouts may share one cache), then
+    the least recently used beyond ``_MAX_KERNELS``."""
+    if _PRUNED and not force:
+        return
+    _PRUNED.append(True)
+    mine, now = _source_hash()[:12] + "-", time.time()
+    try:
+        files = []
+        with os.scandir(d) as it:
+            for e in it:
+                if e.is_file(follow_symlinks=False):
+                    files.append((e.stat(follow_symlinks=False).st_mtime, e.path, e.name))
+    except OSError:
+        return
+    keep = []
+    for mtime, path, name in files:
+        stale = not name.startswith(mine) and now - mtime > _STALE_SECS
+        if not stale:
+            keep.append((mtime, path))
+            continue
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    for _, path in sorted(keep)[:-_MAX_KERNELS]:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def clear_cache():
+    """Remove jaxglobal's disk caches (``xla/`` and ``kernels/`` under ``cache_root()``); returns
+    the bytes freed. (A JAX compilation cache configured elsewhere is not touched.)"""
+    root, freed = cache_root(), 0
+    if root is None:
+        return 0
+    for sub in ("xla", "kernels"):
+        d = os.path.join(root, sub)
+        for top, _, names in os.walk(d):
+            for name in names:
+                try:
+                    freed += os.lstat(os.path.join(top, name)).st_size
+                except OSError:
+                    pass
+        shutil.rmtree(d, ignore_errors=True)
+    return freed
 
 
 def load(key):
@@ -130,9 +229,14 @@ def load(key):
         return False
     try:
         with open(path + ".bin", "rb") as fh:
-            return jax.export.deserialize(bytearray(fh.read()))
+            exported = jax.export.deserialize(bytearray(fh.read()))
     except Exception:
         return None
+    try:
+        os.utime(path + ".bin")  # recently used: kept by the pruning
+    except OSError:
+        pass
+    return exported
 
 
 def save(key, exported):
@@ -153,3 +257,4 @@ def save(key, exported):
             os.remove(old)
     except OSError:
         pass
+

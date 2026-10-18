@@ -3,6 +3,7 @@
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import jax.numpy as jnp
@@ -80,3 +81,50 @@ def test_second_process_runs_cached_lapack_kernels(tmp_path):
     first, second = (r.stdout.strip().splitlines()[-1] for r in runs)
     assert first.startswith("optimal") and first == second
     assert "lapack_" in first  # the cached kernels really do call LAPACK
+
+
+def _file(path, size, age):
+    """A file of ``size`` bytes last used ``age`` seconds ago."""
+    path.write_bytes(b"x" * size)
+    t = time.time() - age
+    os.utime(path, (t, t))
+    return path
+
+
+def test_prune_xla_removes_least_recently_used(tmp_path):
+    files = [_file(tmp_path / f"k{i}-cache", 100, age=1000 - i) for i in range(10)]  # k0 oldest
+    kcache.prune_xla(str(tmp_path), max_bytes=2000)  # under the cap: nothing removed
+    assert all(f.exists() for f in files)
+    kcache.prune_xla(str(tmp_path), max_bytes=800)  # down to 0.75 * 800 = 600 bytes
+    assert [f.exists() for f in files] == [False] * 4 + [True] * 6
+
+
+def test_prune_kernels_drops_stale_sources_and_old_files(tmp_path, monkeypatch):
+    monkeypatch.setenv("JAXGLOBAL_CACHE_DIR", str(tmp_path))
+    monkeypatch.delenv("JAXGLOBAL_CACHE", raising=False)
+    monkeypatch.setattr(kcache, "_MAX_KERNELS", 3)
+    d = tmp_path / "kernels"
+    d.mkdir()
+    mine = kcache._source_hash()[:12]
+    old_mine = [_file(d / f"{mine}-{i:064x}-bound-16.bin", 10, age=3 * 86400 + i) for i in range(4)]
+    stale = _file(d / f"{'0' * 12}-{1:064x}-bound-16.bin", 10, age=2 * 86400)  # another source, unused
+    shared = _file(d / f"{'1' * 12}-{2:064x}-bound-16.bin", 10, age=60)  # another checkout, in use
+    legacy = _file(d / f"{3:064x}-bound-16.bin", 10, age=2 * 86400)  # unprefixed (older layout)
+    kcache._prune_kernels(str(d), force=True)
+    assert not stale.exists() and not legacy.exists() and shared.exists()
+    # the 3 most recently used remain: the shared one and the 2 newest of this source
+    assert [f.exists() for f in old_mine] == [True, True, False, False]
+    assert kcache._path("ab").startswith(str(d / f"{mine}-ab"))
+
+
+def test_clear_cache_removes_only_jaxglobal_dirs(tmp_path, monkeypatch):
+    monkeypatch.setenv("JAXGLOBAL_CACHE_DIR", str(tmp_path))
+    monkeypatch.delenv("JAXGLOBAL_CACHE", raising=False)
+    for sub in ("xla", "kernels", "other"):
+        (tmp_path / sub).mkdir()
+        _file(tmp_path / sub / "f", 100, age=0)
+    assert kcache.clear_cache() == 200
+    assert not (tmp_path / "xla").exists() and not (tmp_path / "kernels").exists()
+    assert (tmp_path / "other" / "f").exists()
+    monkeypatch.setenv("JAXGLOBAL_CACHE", "0")
+    assert kcache.clear_cache() == 0
