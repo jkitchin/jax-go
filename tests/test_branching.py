@@ -77,3 +77,19 @@ def test_orthant_multisection_reaches_optimum(p, q, monkeypatch):
     assert r.status == "optimal"
     assert abs(r.fun - p.fstar) < 1e-4 * (1 + abs(p.fstar))
     assert r.lower_bound <= p.fstar + 1e-6 * (1 + abs(p.fstar))
+
+
+def test_branch_widths_root_box_with_floor():
+    """A variable root tightening narrowed at least ``_SHRINK[0]``-fold is measured against its
+    root width, floored at ``width0 / _SHRINK[1]``; modestly narrowed, never-split (inf) and
+    root-fixed variables keep the original width."""
+    import numpy as np
+
+    from jaxglobal.bnb import _SHRINK, _branch_widths
+
+    w0 = np.array([4.0, 10.0, 1.0, np.inf, 2.0, 2.0])
+    rlo = np.array([[-0.7, 0.0, 0.0, 0.0, 1.0, 0.0], [-0.6, 0.0, 0.2, 0.0, 1.0, 0.0]])
+    rhi = np.array([[-0.4, 1e-6, 1.0, 5.0, 1.0, 0.5], [-0.5, 1e-6, 0.5, 5.0, 1.0, 0.5]])
+    w = _branch_widths(w0, rlo, rhi)
+    assert np.allclose(w[:3], [0.3, 10.0 / _SHRINK[1], 1.0])  # widest root box; floor; unchanged
+    assert w[3] == np.inf and w[4] == 2.0 and w[5] == 2.0  # never split; root-fixed; only 4x
