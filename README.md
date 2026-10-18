@@ -191,6 +191,26 @@ root probing look for incumbents. The returned `x` is integral, and
 continuous problem, with no MILP cutting planes. `.nl` files with integer
 variables are read with their integer mask.
 
+### Choosing `branch_var`
+
+The default, `branch_var="auto"`, branches on pseudocosts (the bound gains
+measured on earlier splits of each variable) when there are no integer
+variables, and on `width` (relative width times the relaxation gap, fractional
+integers first) when there are. Those were the best measured choices: on the
+MINLPLib start50 set pseudocost solves 36 instances in 60 s against 34 for width,
+and on the 25 built-in and synthetic problems it takes the least total time. On
+int50 pseudocost and `strong` each solve one more instance than width, but each
+loses one that width solves (flay04m and nous1). Override it when:
+
+* a continuous problem takes more nodes with pseudocost than with width
+  (holder_table 279 vs 191, tanh_net_2d 241 vs 189): try `width`;
+* bounding a box is cheap and the tree is small to medium: `strong` bounds
+  trial children for the candidates and often needs far fewer nodes (hartmann6
+  634 vs 1081, univariate_sum_20 205 vs 665), but on deep trees it can cost
+  more than it saves (nn_tanh_5x8x2: 575k nodes vs 244k);
+* an integer problem stalls with a large gap: try `pseudocost` or `strong`
+  (tln4 and tspn05 are solved by both and not by width).
+
 ## Gaussian-process surrogates
 
 A GP prediction written in `jax.numpy` is already a reduced-space model

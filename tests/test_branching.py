@@ -39,8 +39,11 @@ def test_small_batch_keeps_boxes_in_sync(opts):
 
 
 def test_default_evaluations_match_nodes():
-    r = solve(CAMEL)
-    assert r.evaluations in (r.nodes, r.nodes + 1)  # +1: the root is re-bounded after root OBBT
+    """Neither rule the default picks (pseudocost, or width with integers) bounds trial boxes."""
+    for kw in ({}, {"integer": [0]}):
+        r = solve(CAMEL, **kw)
+        assert r.status == "optimal"
+        assert r.evaluations in (r.nodes, r.nodes + 1)  # +1: the root is re-bounded after root OBBT
 
 
 def test_auto_branching_rule():
