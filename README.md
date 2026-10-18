@@ -455,7 +455,10 @@ Any AMPL `.nl` model (text or binary) can be loaded with
   jaxglobal's cold time goes to tracing and compiling the bounding kernels. The kernels are cached in memory and on disk
   under `~/.cache/jaxglobal` (`$JAXGLOBAL_CACHE_DIR`; `JAXGLOBAL_CACHE=0`
   turns the cache off), so a repeat solve of the same model takes about
-  0.3-1 s on the built-in problems instead of 2-7 s.
+  0.3-1 s on the built-in problems instead of 2-7 s. The cache prunes its own
+  entries, oldest first, past about 2 GB of XLA executables and 512 kernels
+  (kernels of other jaxglobal versions after a day unused). Clear it
+  with `python -c "import jaxglobal.kcache as k; k.clear_cache()"`.
 * **Relaxations.** The relaxations are reduced-space McCormick and αBB,
   univariate envelopes, scaled-Gershgorin αBB and interval arithmetic. They
   are weak on big-M, cardinality and some bilinear structure. There are no

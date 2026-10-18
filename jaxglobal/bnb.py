@@ -265,9 +265,7 @@ class _Precompiled:
         the disk cache (None: do not cache). ``extra``: shapes of further
         (unbatched) float64 arguments after the cutoff. ``args``: all the argument
         shapes instead, when they are not ``(lo, hi, cutoff, *extra)``."""
-        if args is None:
-            args = (jax.ShapeDtypeStruct((b, n), jnp.float64),) * 2 + (jax.ShapeDtypeStruct((), jnp.float64),) + \
-                tuple(jax.ShapeDtypeStruct(tuple(sh), jnp.float64) for sh in extra)  # fmt: skip
+        args = self._args(b, n, extra) if args is None else args
         key = self._key(args)
         if key not in self.ready:
             tracer, compiler = _pools()
@@ -288,10 +286,16 @@ class _Precompiled:
         except Exception:
             pass
 
-    def pending(self, b, n):
-        """Whether the background build for ``b`` boxes of dimension ``n`` (``start``'s default
-        arguments) was started and has not finished."""
-        args = (jax.ShapeDtypeStruct((b, n), jnp.float64),) * 2 + (jax.ShapeDtypeStruct((), jnp.float64),)
+    @staticmethod
+    def _args(b, n, extra=()):
+        """``start``'s default argument shapes: ``(lo, hi, cutoff, *extra)``."""
+        return (jax.ShapeDtypeStruct((b, n), jnp.float64),) * 2 + (jax.ShapeDtypeStruct((), jnp.float64),) + \
+            tuple(jax.ShapeDtypeStruct(tuple(sh), jnp.float64) for sh in extra)  # fmt: skip
+
+    def pending(self, b, n, extra=(), args=None):
+        """Whether the background build that ``start(b, n, extra=extra, args=args)`` queues was
+        started and has not finished."""
+        args = self._args(b, n, extra) if args is None else args
         fut = self.ready.get(self._key(args))
         if fut is None:
             return False
@@ -1003,10 +1007,10 @@ def minimize(
                 pool["args"] = None
 
     _mark("start_compile")
+    extra = () if pool is None else (pool["rows"].shape, pool["root"].shape)  # the bound kernel's pool arguments
     padded = _Padder(batch, batch_sizes, jax.devices() if devices is None else list(devices))
     if padded.mesh is None:  # compile the kernels in the background while the setup below runs
         fp = functools.partial(K.fingerprint, lo.size) if kcache.cache_root() else None
-        extra = () if pool is None else (pool["rows"].shape, pool["root"].shape)
         for b in padded.sizes:
             bound_kernel.start(b, lo.size, fp, extra)
         if obbt == "tree":  # obbt="root": started once the root shows OBBT will run (``need_obbt``)
@@ -1455,7 +1459,7 @@ def minimize(
             K.obbt.start(1, lo.size, functools.partial(K.fingerprint, lo.size) if kcache.cache_root() else None)
 
     _mark("root_bound")
-    if obbt == "root" and (constrained or np.isfinite(ub)) and any(K.bound.pending(b, lo.size) for b in padded.sizes):
+    if obbt == "root" and (constrained or np.isfinite(ub)) and any(bound_kernel.pending(b, lo.size, extra) for b in padded.sizes):
         # the main thread is about to wait for the bound kernel's build: trace the OBBT kernel in that
         # idle time (queued behind the bound and dive kernels) rather than after the root bound,
         # when ``need_obbt`` can first tell. A warm cache has the bound kernel ready: no guess then.
