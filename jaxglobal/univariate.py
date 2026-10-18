@@ -35,7 +35,8 @@ import jax.numpy as jnp
 import numpy as np
 
 from .fbbt import Const, _has_tracer, make_tape, tape_cache
-from .relax import AUTO_UNIVARIATE, MC, RULES, SAFE_K, STRUCTURAL, Ctx, Unknown, apply_rule, eval_jaxpr_mc, is_mc, tighten
+from .relax import (AUTO_UNIVARIATE, MC, RULES, SAFE_K, STRUCTURAL, Ctx, Unknown, apply_rule, apply_xlogx, eval_jaxpr_mc,
+                    is_mc, tighten, xlogx_pair)
 
 INTERVAL_CTX = Ctx(interval_only=True)
 SAFE_INTERVAL_CTX = Ctx(interval_only=True, safe=True)
@@ -365,11 +366,18 @@ def make_univariate(f, K=65, multivariate=False, safe=False, interpret="auto"):
             k += m
 
         vals = {0: MC(lo, hi, x, x)}
+        logs = {}  # slot of each log -> its operand slot (``x * log(x)``: ``relax.mc_xlogx``)
         for node in tape.nodes:
             eqn = node.eqn
             invals = [a.val if isinstance(a, Const) else vals[a] for a in node.ins]
+            name = eqn.primitive.name
+            if name == "log" and not isinstance(node.ins[0], Const):
+                logs[node.outs[0]] = node.ins[0]
+            xl = xlogx_pair(name, node.ins, logs) if name == "mul" else None
             if not any(isinstance(v, (MC, Unknown)) for v in invals):
                 outs = eqn.primitive.bind(*invals, **eqn.params)
+            elif xl is not None and is_mc(invals[xl]):
+                outs = apply_xlogx(ctx, eqn, invals[xl])
             else:
                 outs = apply_rule(ctx, eqn, invals)
             outs = outs if eqn.primitive.multiple_results else [outs]

@@ -349,10 +349,119 @@ def mc_exp(x: MC) -> MC:
     return convex_rule(jnp.exp, x, x.lo)
 
 
+LOG_DELTA = 1e-6  # relative to hi: on a box touching 0, log's overestimator is its tangent below this
+
+
 def mc_log(x: MC) -> MC:
+    """``log`` (concave increasing). On a box that reaches 0 or below (``lo <= 0 < hi``) only the
+    part ``x > 0`` is in log's domain, so no point of the problem has ``x <= 0`` there: the interval
+    is ``[-inf, log(hi)]`` and cc is the concave function that is ``log`` on ``z >= d`` and its
+    tangent at ``d = LOG_DELTA * hi`` below (finite with a finite slope, above ``log`` everywhere);
+    cv is -inf. Before, the whole result was unbounded, so ``-log(x - y)`` on such a box had cv = -inf."""
     ok = x.lo > 0
     xs = safe_mc(x, ok, 1.0, 2.0)
-    return select_mc(ok, concave_rule(jnp.log, xs, xs.hi), unbounded_like(x))
+    part = (x.lo <= 0) & (x.hi > 0) & jnp.isfinite(x.hi)
+    xp = safe_mc(x, part, 1.0, 2.0)
+    U = xp.hi
+    if _interval_only():
+        rp = MC(jnp.full_like(U, -INF), jnp.log(U), jnp.full_like(U, -INF), jnp.log(U))
+    else:
+        d = LOG_DELTA * U
+        z = _mid(U, xp.cv, xp.cc)
+        cc = jnp.where(z >= d, jnp.log(jnp.maximum(z, d)), jnp.log(d) + (z - d) / d)
+        rp = MC(jnp.full_like(U, -INF), jnp.log(U), jnp.full_like(U, -INF), jnp.minimum(cc, jnp.log(U)))
+    return select_mc(ok, concave_rule(jnp.log, xs, xs.hi), select_mc(part, rp, unbounded_like(x)))
+
+
+XLOGX_DELTA = 1e-12  # relative to min(hi, 1): below it x*log(x)'s underestimator is its tangent there
+
+
+def _xlogx0(z):
+    """``z * log(z)`` for ``z >= 0``, continuously extended by 0 at ``z = 0`` (NaN-free gradients)."""
+    pos = z > 0
+    zs = jnp.where(pos, z, 1.0)
+    return jnp.where(pos, zs * jnp.log(zs), 0.0)
+
+
+def mc_xlogx(x: MC) -> MC:
+    """Relaxation of ``x * log(x)`` (convex on ``x >= 0``, 0 at 0, minimum ``-1/e`` at ``1/e``).
+
+    The product rule sees ``x`` times ``log(x)``, whose interval is unbounded below when the box
+    touches 0, and gives -inf. Here ``x * log(x)`` is relaxed as one convex function of ``x``.
+    It is defined only for ``x > 0`` (``log``'s domain), so the box is cut to ``[max(lo, 0), hi]``:
+    a lower end slightly below 0 (FBBT's outward padding) does not make the bound -inf.
+
+    * interval: ``[g(clip(1/e, L0, U)), max(g(L0), g(U))]`` with ``L0 = max(lo, 0)``;
+    * cv: McCormick composition with ``g_d``, which is ``g`` on ``z >= d`` and its tangent at
+      ``d`` below (``d = max(L0, XLOGX_DELTA * min(U, 1))``). ``g_d`` is convex and finite on the
+      whole line, with finite slopes, so cuts at points with ``x`` at (or below) 0 stay finite; it
+      underestimates ``g`` on ``z >= 0`` (a tangent of a convex function), by at most ``d`` and
+      only on ``[0, d)``;
+    * cc: the secant of ``g`` over ``[L0, U]`` (its concave envelope there).
+    """
+    ok = x.hi > 0
+    xs = safe_mc(x, ok, 1.0, 2.0)
+    L0, U = jnp.maximum(xs.lo, 0.0), xs.hi
+    xmin = jnp.clip(jnp.exp(-1.0), L0, U)
+    gL, gU = _xlogx0(L0), _xlogx0(U)
+    lo, hi = _xlogx0(xmin), jnp.maximum(gL, gU)
+    if _interval_only():
+        r = MC(lo, hi, lo, hi)
+    else:
+        d = jnp.maximum(L0, XLOGX_DELTA * jnp.minimum(U, 1.0))
+        ld = jnp.log(d)
+
+        def g_d(z):
+            return jnp.where(z >= d, _xlogx0(jnp.maximum(z, d)), d * ld + (1.0 + ld) * (z - d))
+
+        cv = g_d(_mid(xmin, xs.cv, xs.cc))
+        fin = jnp.isfinite(U)
+        Uf = jnp.where(fin, U, L0 + 1.0)
+        xmax = jnp.where(gU >= gL, Uf, L0)
+        cc = jnp.where(fin, _secant(_xlogx0, L0, Uf, _mid(xmax, xs.cv, xs.cc)), INF)
+        r = tighten(MC(lo, hi, cv, cc))
+    return select_mc(ok, r, unbounded_like(x))
+
+
+def xlogx_operand(eqn, logs):
+    """Index of ``v`` if ``eqn`` is ``v * log(v)`` (either order), else None.
+
+    ``logs`` maps the output variable (or tape slot) of every ``log`` seen so far to its operand.
+    """
+    return xlogx_pair(eqn.primitive.name, eqn.invars, logs)
+
+
+def xlogx_pair(name, ins, logs):
+    """``xlogx_operand`` on the operands ``ins`` (jaxpr variables or tape slots) of a ``name`` row."""
+    if name != "mul" or len(ins) != 2:
+        return None
+    u, v = ins
+    if isinstance(u, jcore.Literal) or isinstance(v, jcore.Literal) or not _hashable(u) or not _hashable(v):
+        return None
+    if logs.get(u) is v or (isinstance(v, int) and logs.get(u) == v):
+        return 1
+    if logs.get(v) is u or (isinstance(u, int) and logs.get(v) == u):
+        return 0
+    return None
+
+
+def _hashable(v):
+    try:
+        hash(v)
+    except TypeError:
+        return False
+    return True
+
+
+def apply_xlogx(ctx, eqn, x):
+    """``mc_xlogx(x)`` for the equation ``eqn`` (``x * log(x)``), outward-widened when ``ctx.safe``."""
+    prev = _interval_only()
+    _MODE.interval_only = ctx.interval_only
+    try:
+        out = mc_xlogx(as_mc(x))
+    finally:
+        _MODE.interval_only = prev
+    return widen(eqn, [x], out) if ctx.safe else out
 
 
 def mc_abs(x: MC) -> MC:
@@ -912,6 +1021,9 @@ def apply_rule(ctx, eqn, invals):
 SUBJAXPR_PARAMS = ("jaxpr", "call_jaxpr", "fun_jaxpr")
 
 
+_READS = {"slice", "squeeze", "reshape", "expand_dims", "convert_element_type"}  # element reads (see eval_jaxpr_mc)
+
+
 def _relaxable(v):
     return isinstance(v, (MC, Unknown))
 
@@ -927,11 +1039,24 @@ def eval_jaxpr_mc(jaxpr, consts, args, ctx: Ctx = Ctx()):
     for v, a in zip(jaxpr.invars, args):
         env[v] = a
 
+    # ``x * log(x)`` is relaxed as one function (``mc_xlogx``): ``logs`` maps the output of every log
+    # to its operand, and ``canon`` merges repeated element reads (``x[0] * jnp.log(x[0])`` slices
+    # ``x`` twice) so that the two operands are recognized as the same value
+    logs, canon, seen = {}, {}, {}
     for eqn in jaxpr.eqns:
         invals = [read(v) for v in eqn.invars]
         name = eqn.primitive.name
+        ins = [canon.get(v, v) if not isinstance(v, jcore.Literal) else v for v in eqn.invars]
+        if name in _READS and len(ins) == 1 and not isinstance(ins[0], jcore.Literal):
+            key = (name, ins[0], repr(sorted(eqn.params.items())))
+            canon[eqn.outvars[0]] = seen.setdefault(key, eqn.outvars[0])
+        if name == "log" and not isinstance(ins[0], jcore.Literal):
+            logs[eqn.outvars[0]] = ins[0]
+        xl = xlogx_pair(name, ins, logs) if name == "mul" else None
         if not any(_relaxable(v) for v in invals):
             outs = eqn.primitive.bind(*invals, **eqn.params)
+        elif xl is not None and is_mc(invals[xl]):
+            outs = apply_xlogx(ctx, eqn, invals[xl])
         elif name in RULES:
             outs = apply_rule(ctx, eqn, invals)
         else:
