@@ -664,3 +664,23 @@ def test_division_overflow_refused():
         export.to_scip(lambda x: -x[0] / (x[0] * x[0] + 1e-30), [0.0], [1.0])
     _, x, obj = _solve(export.to_scip(lambda x: -1e-12 / (x[0] * x[0] + 1e-24), [0.0], [1.0]))  # 1e12: fine
     assert abs(obj + 1e12) < 1e-3
+
+
+def test_variable_power_overflow_refused(tmp_path):
+    """x ** y with a finite bound >= 1e20 overflows in the solver (Couenne returned -3e-12 for a true -1e5)."""
+
+    def f(x):
+        return -1e-25 * x[0] ** x[1]  # x0 ** x1 reaches 1e30
+
+    lo, hi = [1.0, 0.0], [1e3, 10.0]
+    for kw in ({}, {"portable": True}, {"nonsmooth": "reformulate"}):
+        with pytest.raises(ExportError, match="'pow' reaches"):
+            export.to_nl(f, lo, hi, tmp_path / "p.nl", **kw)
+    with pytest.raises(ExportError, match="reaches"):
+        export.to_scip(f, lo, hi)
+    # controls: 1e18 exports; an infinite bound (x can be 0, a domain edge) is not an overflow
+    path = tmp_path / "c.nl"
+    export.to_nl(lambda x: -1e-13 * x[0] ** x[1], lo, [1e3, 6.0], path, portable=True)
+    m = read_nl(str(path))
+    assert abs(float(m.f(jnp.array([1e3, 6.0]))) + 1e5) < 1e-6
+    assert not export.inspect(lambda x: x[0] ** x[1], [0.0, -1.0], [2.0, 1.0], target="nl").refused
