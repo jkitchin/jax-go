@@ -554,11 +554,8 @@ def _quad_shift(quad, n, sign):
     return delta, vars_
 
 
-def classify(prog):
-    """Per-output convexity verdicts of a scalarized ``Program``, or None if there are none.
-
-    Affine outputs are skipped (their relaxation is already exact).
-    """
+def _propagate(prog):
+    """The ``Info`` of every slot of a scalarized ``Program``: (info, atoms, output slots)."""
     n = prog.n
     atoms = _Atoms()
     info = defaultdict(Info)  # a NaN constant slot (const_val NaN, like a variable) is "unknown"
@@ -584,6 +581,16 @@ def classify(prog):
                 r = _const(r.aff[0])
         info[int(out)] = r
     outs = np.concatenate([np.asarray(o).reshape(-1) for o in prog.outs]).astype(int)
+    return info, atoms, outs
+
+
+def classify(prog):
+    """Per-output convexity verdicts of a scalarized ``Program``, or None if there are none.
+
+    Affine outputs are skipped (their relaxation is already exact).
+    """
+    n = prog.n
+    info, atoms, outs = _propagate(prog)
     m = outs.size
     verdicts = []
     affine = np.zeros(m, bool)
@@ -659,6 +666,25 @@ def certificate_of(fn, x):
         if cert is not None:
             cert.size = len(tape.nodes)
         return cert
+
+
+def affine_of(fn, x):
+    """Per output of ``fn``'s scalarized tape at the shape of ``x``: whether it is affine (as
+    ``classify`` sees it), or None if the tape does not scalarize."""
+    from .fbbt import _has_tracer, make_tape
+    from .fbbt_interp import scalarize
+
+    if jnp.ndim(x) != 1:
+        return None
+    with jax.ensure_compile_time_eval():
+        tape = make_tape(fn, x)
+        if _has_tracer(tape):
+            return None
+        prog = scalarize(tape, x.shape[0])
+        if prog is None:
+            return None
+        info, _, outs = _propagate(prog)
+        return np.array([info[int(s)].aff is not None for s in outs], bool)
 
 
 def conditions(cert, lo, hi):

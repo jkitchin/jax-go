@@ -314,3 +314,4 @@ tests/test_xlogx.py::test_entropy_problem_solves_with_finite_bound[-1e-10]
 tests/test_xlogx.py::test_entropy_problem_solves_with_finite_bound[0.0]
 tests/test_xlogx.py::test_separable_entropy_plus_nonconvex_solves_correctly[False]
 tests/test_xlogx.py::test_separable_entropy_plus_nonconvex_solves_correctly[True]
+tests/test_branching.py::test_failed_local_solves_on_a_convex_problem_keep_finite_branch_points

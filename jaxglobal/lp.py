@@ -297,6 +297,26 @@ def _parts_fn(f, ineq, eq, univariate, alphabb=False, multivariate=False, safe=F
     return prepare, parts, rs
 
 
+KELLEY_STALL = 1e-4  # Kelley rounds stop once a round raises the bound by at most this share of the gap
+
+
+def _kelley_go(prev, best, cutoff, first=False):
+    """Whether another Kelley round is worth it for a box whose bound went from ``prev`` to
+    ``best`` in the last round: not when the box is already pruned (``best >= cutoff``), nor
+    when the round raised a finite bound by at most ``KELLEY_STALL`` of the gap to ``cutoff``
+    (of ``1 + |best|`` without a finite cutoff). ``first``: after the first LP (no previous
+    round to compare with), only the pruning test applies. Any number of rounds gives a
+    valid bound (each round's certificate is one), so this only trades bound for time; under
+    ``vmap`` the rounds continue while any box of the batch still wants one."""
+    prev, best, cutoff = jnp.asarray(prev), jnp.asarray(best), jnp.asarray(cutoff)
+    go = ~(best >= cutoff)
+    if first:
+        return go
+    gap = jnp.where(jnp.isfinite(cutoff), cutoff - best, 1.0 + jnp.abs(best))
+    stalled = jnp.isfinite(prev) & jnp.isfinite(best) & (best - prev <= KELLEY_STALL * gap)
+    return go & ~stalled
+
+
 def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, tol=0.0, univariate=False,
                              alphabb=False, multivariate=False, safe=False, exact=False):
     """Return ``bound(lo, hi, cutoff, pool=None, root=None) -> (lb, x_lp, infeasible, lo', hi')`` for one box.
@@ -414,15 +434,16 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
                 return tlo_s + T * (val - err) - SAFE_K * EPS * (jnp.abs(tlo_s) + T * (jnp.abs(val) + err)), _safe_costs(coef[:n], A[:, :n], y)
             return tlo_s + T * (val - err), _safe_costs(coef[:n], A[:, :n], y)
 
-        # Kelley rounds as one lax.scan over a fixed-size cut buffer: slots for
-        # cuts not generated yet hold const = -inf, which rows() turns into
-        # dead rows (0 <= 1), so every round has the same LP shape.
+        # Kelley rounds over a fixed-size cut buffer: slots for cuts not generated yet hold
+        # const = -inf, which rows() turns into dead rows (0 <= 1), so every round has the
+        # same LP shape. The rounds stop early once a round no longer raises the bound
+        # (``KELLEY_STALL``) or the box is pruned (see ``_kelley_go``).
         P0 = const0.shape[0]
         const = jnp.concatenate([const0, jnp.full((n_kelley,) + const0.shape[1:], -jnp.inf)])
         coef = jnp.concatenate([coef0, jnp.zeros((n_kelley,) + coef0.shape[1:])])
 
-        def kelley(carry, k):
-            const, coef, best, rlo, rhi, _ = carry
+        def solve(const, coef, best, rlo, rhi):
+            """One LP over the current cuts: (best', rlo', rhi', u)."""
             A, bvec = rows(const, coef)
             nA = A.shape[0]
             z, y, lb = ipm(
@@ -435,17 +456,22 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
             _, r = dual(A, bvec, y[:nA])
             klo, khi = reduce_ranges(lo, hi, lb, T * r / jnp.where(w > 0, w, 1.0), cutoff)
             rlo, rhi = jnp.maximum(rlo, klo), jnp.minimum(rhi, khi)
-            u = jnp.clip(z[:n], 0.0, 1.0)
-            # Kelley: add cuts at the LP solution (not after the last round)
-            def add(cc):
-                ck, gk, _ = cuts_at(lo + w * u)
-                return cc[0].at[P0 + k].set(ck), cc[1].at[P0 + k].set(gk)
+            return best, rlo, rhi, jnp.clip(z[:n], 0.0, 1.0)
 
-            const, coef = jax.lax.cond(k < n_kelley, add, lambda cc: cc, (const, coef))
-            return (const, coef, best, rlo, rhi, u), None
+        best0 = jnp.where(bad_t, -jnp.inf, tlo)
+        best, rlo, rhi, u = solve(const, coef, best0, lo, hi)
 
-        init = (const, coef, jnp.where(bad_t, -jnp.inf, tlo), lo, hi, jnp.full(n, 0.5))
-        (_, _, best, rlo, rhi, u), _ = jax.lax.scan(kelley, init, jnp.arange(n_kelley + 1))
+        def kelley(carry):
+            # Kelley: cuts at the last LP solution, then the LP again
+            k, const, coef, best, rlo, rhi, u, _ = carry
+            ck, gk, _ = cuts_at(lo + w * u)
+            const, coef = const.at[P0 + k].set(ck), coef.at[P0 + k].set(gk)
+            prev = best
+            best, rlo, rhi, u = solve(const, coef, best, rlo, rhi)
+            return k + 1, const, coef, best, rlo, rhi, u, _kelley_go(prev, best, cutoff)
+
+        init = (0, const, coef, best, rlo, rhi, u, _kelley_go(best0, best, cutoff, first=True))
+        _, _, _, best, rlo, rhi, u, _ = jax.lax.while_loop(lambda c: (c[0] < n_kelley) & c[7], kelley, init)
 
         lb = jnp.where(infeasible, jnp.inf, best)
         return lb, lo + w * u, infeasible, rlo, rhi
@@ -493,13 +519,15 @@ def pool_parts(f, ineq, eq, n, safe=False):
     as tight as a cut can be there; elsewhere a root-box tangent is a weak cut, valid but
     rarely useful). ``exact``: every certified verdict's conditions hold on the box, so
     on its sub-boxes a certified function can be relaxed by itself alone (``_parts_fn``).
+    ``parts_ok(lo, hi, convex=True)`` adds a third value: every part is affine or certified
+    convex on the box (the continuous relaxation of the problem is a convex program there).
     """
     from . import convexity
 
     if not convexity.ENABLED:
         return None
     x = jnp.zeros(n)
-    certs = []  # (cert, side, outputs) per block of parts
+    certs = []  # (cert, side, outputs, all affine when cert is None) per block of parts
     for fn, sides in ((f, ("cv",)), (ineq, ("cv",)), (eq, ("cv", "cc"))):
         if fn is None:
             continue
@@ -511,25 +539,35 @@ def pool_parts(f, ineq, eq, n, safe=False):
         if cert is not None and safe and cert.size > convexity.SAFE_MAX_NODES:
             cert = None
         m = int(np.prod(jax.eval_shape(flat, x).shape))
+        aff = None
+        if cert is None:  # no verdict: unknown, or every output affine (``classify``)
+            try:
+                aff = convexity.affine_of(flat, x)
+            except Exception:
+                aff = None
+            aff = bool(aff is not None and aff.all())
         for side in sides:
-            certs.append((cert, side, m))
+            certs.append((cert, side, m, aff))
     if not any(c is not None and (np.asarray(getattr(c, side + "_mask")) & ~np.asarray(c.affine)).any()
-               for c, side, _ in certs):  # fmt: skip
+               for c, side, _, _ in certs):  # fmt: skip
         return None
 
-    def parts_ok(lo, hi):
+    def parts_ok(lo, hi, convex=False):
         lo, hi = jnp.asarray(lo, jnp.float64), jnp.asarray(hi, jnp.float64)
-        out, exact = [], True
-        for cert, side, m in certs:
+        out, exact, cvx = [], True, True
+        for cert, side, m, aff in certs:
             if cert is None:
                 out.append(np.zeros(m, bool))
+                cvx &= aff
                 continue
             ok_cv, ok_cc = convexity.prepare(cert, lo, hi)
             ok = np.asarray(ok_cv if side == "cv" else ok_cc, bool)
             static = np.asarray(getattr(cert, side + "_mask"), bool)
             exact &= bool(np.all(ok | ~static))
-            out.append(ok & ~np.asarray(cert.affine, bool))
-        return np.concatenate(out), exact
+            affine = np.asarray(cert.affine, bool)
+            cvx &= bool(np.all(ok | affine))
+            out.append(ok & ~affine)
+        return (np.concatenate(out), exact, cvx) if convex else (np.concatenate(out), exact)
 
     return parts_ok
 

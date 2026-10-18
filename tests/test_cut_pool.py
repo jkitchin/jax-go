@@ -259,3 +259,58 @@ def test_root_obbt_starts_while_pool_bound_kernel_builds(monkeypatch):
     assert "bound_pool" in started and "obbt" in started
     assert not late
     assert r.status == "optimal" and abs(r.fun - p.fstar) <= 1e-3 * abs(p.fstar)
+
+
+def test_affine_of_and_convex_flag():
+    """``affine_of`` tells an all-affine function (no certificate) from an unknown one, so
+    ``pool_parts(convex=True)`` flags a problem convex only when every part is certified or affine."""
+    x = jnp.ones(3)
+    assert convexity.affine_of(lambda z: jnp.stack([z[0] + 2 * z[1], 3.0 - z[2]]), x).tolist() == [True, True]
+    assert convexity.affine_of(lambda z: jnp.stack([z[0] + z[1], z[0] * z[1]]), x).tolist() == [True, False]
+    lin = lambda z: z[0] - 2 * z[1] + z[2]  # noqa: E731
+    po = pool_parts(lin, ball, None, 3)
+    mask, exact, cvx = po(-jnp.ones(3), jnp.ones(3), convex=True)
+    assert cvx and exact
+    assert len(po(-jnp.ones(3), jnp.ones(3))) == 2
+    # a bilinear constraint makes the problem non-convex
+    bil = lambda z: jnp.stack([(z[0] - 0.3) ** 2 + z[1] ** 2 - 1.0, z[0] * z[1] - 0.1])  # noqa: E731
+    po2 = pool_parts(lin, bil, None, 3)
+    assert po2 is not None and not po2(-jnp.ones(3), jnp.ones(3), convex=True)[2]
+    # nsig's condition fails on a box with x < 0: not convex there
+    po3 = pool_parts(lin, nsig, None, 3)
+    assert po3(jnp.full(3, 0.5), jnp.ones(3), convex=True)[2]
+    assert not po3(-jnp.ones(3), jnp.ones(3), convex=True)[2]
+
+
+@pytest.mark.parametrize("safe", [False, True])
+def test_kelley_stall_keeps_bound_valid(safe, monkeypatch):
+    """Stopping Kelley rounds early (any stall threshold) gives a valid bound no tighter than the
+    full rounds; with the threshold at 0 the default matches the full rounds."""
+    from jaxglobal import lp
+
+    f, g = (lambda z: norm_obj(z)), ball
+    lo, hi = jnp.full(3, -2.0), jnp.full(3, 2.0)
+    rng = np.random.default_rng(3)
+    xs = rng.uniform(lo, hi, (20000, 3))
+    feas = np.array([float(ball(x)[0]) <= 0 for x in xs])
+    fs = min(float(norm_obj(x)) for x in xs[feas][:3000])
+    out = {}
+    for stall in (0.0, 1e-4, 0.5):
+        monkeypatch.setattr(lp, "KELLEY_STALL", stall)
+        b = jax.jit(make_constrained_bounder(f, g, None, univariate=True, alphabb=True, safe=safe))
+        out[stall] = float(b(lo, hi)[0])
+        assert out[stall] <= fs + 1e-9
+    assert out[0.5] <= out[0.0] + 1e-7
+    assert out[1e-4] <= out[0.0] + 1e-7
+
+
+def test_kelley_go_rule():
+    from jaxglobal.lp import _kelley_go
+
+    inf = jnp.inf
+    assert bool(_kelley_go(-inf, 1.0, inf, first=True))
+    assert not bool(_kelley_go(-inf, 2.0, 1.0, first=True))  # pruned
+    assert bool(_kelley_go(-inf, 1.0, inf))  # first finite bound: keep going
+    assert not bool(_kelley_go(1.0, 1.0, 2.0))  # no progress
+    assert bool(_kelley_go(1.0, 1.5, 2.0))
+    assert not bool(_kelley_go(1.0, 1.0 + 1e-9, inf))

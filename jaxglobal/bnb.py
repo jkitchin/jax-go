@@ -961,12 +961,12 @@ def minimize(
     # convexity certificates on the root box: which parts get a cut pool (reduced-space LP only),
     # and whether every certified verdict holds on the whole box (then on every node box too,
     # so a certified function needs no base relaxation: ``exact``)
-    pmask, exact = None, False
+    pmask, exact, convex = None, False, False
     if constrained and not lifted and cut_pool:
         parts_ok = _cached(("pool_parts", f, ineq, eq, lo.size, bool(safe)),
                            lambda: _pool_parts(f, ineq, eq, lo.size, bool(safe)))  # fmt: skip
         if parts_ok is not None:
-            pmask, exact = parts_ok(lo, hi)
+            pmask, exact, convex = parts_ok(lo, hi, convex=True)
     _mark("kernels")
     opts = dict(n_fw=n_fw, n_kelley=n_kelley, fbbt=bool(fbbt), fbbt_rounds=fbbt_rounds, dbbt=bool(dbbt),
                 obbt=obbt or False, obbt_rounds=obbt_rounds, univariate=univariate, alphabb=alphabb,
@@ -1174,6 +1174,7 @@ def minimize(
             X = np.clip(np.asarray(solve_local(np.clip(starts[do], blo[do], bhi[do]), blo[do], bhi[do])),
                         blo[do], bhi[do])  # fmt: skip
             pool_add(X)
+            pool["nlp_x"] = X
         pool["nlp_time"] += time.perf_counter() - t
         return do
 
@@ -1740,6 +1741,15 @@ def minimize(
         except _CompileTimeout:  # out of time while a kernel compiles; the open boxes are unchanged
             break
         pool_judge(nlp_do, clb, np.concatenate([plb[pp], plb[pp]]))
+        if convex and nlp_do is not None and nlp_do.any():
+            # a convex continuous relaxation: the local solutions are its minimizers in each box,
+            # better places to branch than the LP points (an LP over tangents of the convex
+            # parts is often degenerate at its optimum, with a point far from the minimizer:
+            # on cvxnonsep_normcon40 the nodes fell from 547 to 291). Only branching uses it.
+            X, rows = pool["nlp_x"], np.flatnonzero(nlp_do)
+            ok = np.isfinite(X).all(axis=1)  # a failed solve keeps its LP point
+            cxr = cxr.copy()
+            cxr[rows[ok]] = np.clip(X[ok], clo[rows[ok]], chi[rows[ok]])
         update_incumbent(cx, cf, clb)
         if imask.any() and it >= next_dive:  # dives from the most promising children
             o = np.argsort(clb)[:_DIVES]
