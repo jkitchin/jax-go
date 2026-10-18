@@ -342,7 +342,10 @@ class _Kernels:
             if Q is None and quadratic and not lifted:
                 with poly_lock:
                     if n not in poly_forms:
-                        poly_forms[n] = polynomial_form(f, ineq, eq, n)
+                        try:  # an optional faster bounder: any failure falls back to the reduced-space path
+                            poly_forms[n] = polynomial_form(f, ineq, eq, n)
+                        except Exception:
+                            poly_forms[n] = None
                     Q = poly_forms[n]
             return Q
 

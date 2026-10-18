@@ -43,6 +43,14 @@ from .relax import SAFE_K
 MAX_COLUMNS = 400  # beyond this the IPM's N x N solve per iteration costs more than it gains
 MAX_DEGREE = 6  # polynomial_form: highest monomial degree lifted
 MAX_TERMS = 20000  # polynomial_form: give up when an intermediate polynomial has more terms
+# polynomial_form: give up when a factor (a.x + b) that gets multiplied out has |b| / max|a| above
+# this. Expanding (x - c)^k around 0 replaces one convex term by monomials whose McCormick gaps
+# grow with c while the function's own variation does not; the reduced-space bounder relaxes
+# the factored term directly. Measured on min (x0-c)^4 + (x1-c-1)^2 (x0-c+2)^2 (offset ~c):
+# 15 / 63 / 255 / 511 / 1023 nodes at c = 0 / 2 / 5 / 10 / 20, time limit from c = 50 (safe) or
+# 100 (plain), where the reduced-space path takes 1 node. start50/int50 offsets: alkyl 8.5,
+# ex1252a 3.5, all other polynomial-path instances 0. Not applied at degree 2.
+OFFSET_LIMIT = 10.0
 
 
 class QuadraticForm(NamedTuple):
@@ -106,9 +114,18 @@ def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS):
             r = mul(r, p)
         return r
 
+    def offset(p):  # |constant term| / largest |coefficient| of a non-constant term (0: no offset)
+        lin = max((abs(v) for k, v in p.items() if k), default=0.0)
+        return abs(p.get((), 0.0)) / lin if lin > 0 else 0.0
+
+    worst_offset = 0.0
     for o, a, b, out in zip(prog.op.tolist(), prog.a.tolist(), prog.b.tolist(), prog.out.tolist()):
         name, eqn = prog.opcodes[o][0], prog.opcodes[o][6]
         pa, pb = poly(a), poly(b)
+        if degree > 2 and name in ("mul", "square", "integer_pow"):
+            for p in (pa, pb) if name == "mul" else (pa,):
+                if any(len(k) >= 1 for k in p):  # a product of a non-constant factor (x - c): expanded
+                    worst_offset = max(worst_offset, offset(p))
         if name in ("add", "add_any"):
             r = axpy(pa, pb)
         elif name == "sub":
@@ -129,6 +146,8 @@ def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS):
             return None
         polys[out] = r
 
+    if worst_offset > OFFSET_LIMIT:
+        return None
     rows = [[poly(int(s)) for s in np.asarray(slots).reshape(-1).tolist()] for slots in prog.outs]
     flat = [p for group in rows for p in group]
     monos = {k for p in flat for k in p if len(k) >= 2 and p[k] != 0.0}
@@ -152,7 +171,7 @@ def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS):
         for k, v in p.items():
             if len(k) == 0:
                 c[r] += v
-            else:
+            elif len(k) == 1 or k in col:  # a product whose coefficient cancelled to 0.0 has no column
                 E[r, column(k)] += v
     n_g = len(rows[1]) if ineq is not None else 0
     n_h = len(rows[-1]) if eq is not None else 0

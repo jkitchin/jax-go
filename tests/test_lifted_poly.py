@@ -281,3 +281,41 @@ def test_minimize_cubic_constrained():
     fmin = float(np.min(X[:, 0] * X[:, 1] * X[:, 2] + X[:, 0] ** 2 * X[:, 1]))
     assert r.lower_bound <= fmin + 1e-9
     assert r.fun <= fmin + 1e-3
+
+
+def test_minimize_cancelled_monomial():
+    """x0 x1^2 - x1^2 x0 cancels to a 0.0 coefficient: its product has no column, and the
+    expansion must not index one (it raised KeyError). Optimum 0.11510 as on the reduced path."""
+    f = lambda x: x[0] ** 3 + x[0] * x[1] * x[1] - x[1] * x[1] * x[0] + x[1]  # noqa: E731
+    g = lambda x: jnp.array([0.5 - x[0] - x[1]])  # noqa: E731
+    assert polynomial_form(f, g, None, 2) is not None
+    r = jaxglobal.minimize(f, -np.ones(2), np.ones(2), ineq=g, time_limit=60)
+    assert r.status == "optimal"
+    assert r.fun == pytest.approx(0.1150988, abs=1e-5)
+    assert r.lower_bound <= 0.1150988 + 1e-6
+
+
+def offset_problem(c):
+    f = lambda x: (x[0] - c) ** 4 + (x[1] - c - 1.0) ** 2 * (x[0] - c + 2.0) ** 2  # noqa: E731
+    g = lambda x: jnp.array([(2 * c + 0.5) - x[0] - x[1]])  # noqa: E731
+    return f, g, np.array([c - 1.0, c - 1.0]), np.array([c + 1.0, c + 3.0])
+
+
+def test_polynomial_form_skips_large_offset():
+    """Expanding (x - c)^4 around 0 for large c is a weak, badly conditioned relaxation: the form
+    is skipped (reduced-space path) above OFFSET_LIMIT, kept for a small offset."""
+    assert polynomial_form(*offset_problem(12345.6789)[:2], None, 2) is None
+    assert polynomial_form(*offset_problem(100.0)[:2], None, 2) is None
+    assert polynomial_form(*offset_problem(2.0)[:2], None, 2) is not None
+
+
+@pytest.mark.parametrize("safe", [False, True])
+def test_minimize_large_offset_at_root(safe):
+    """The shifted polynomial solves at the root (as on main), plain and safe; minimum 0 at
+    x = (c, c + 1)."""
+    c = 12345.6789
+    f, g, lo, hi = offset_problem(c)
+    r = jaxglobal.minimize(f, lo, hi, ineq=g, safe=safe, time_limit=60)
+    assert r.status == "optimal" and r.nodes == 1
+    assert r.fun == pytest.approx(0.0, abs=1e-6)
+    assert r.lower_bound <= 1e-9
