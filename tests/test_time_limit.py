@@ -166,8 +166,9 @@ def test_dive_budget_skips_when_time_is_short(monkeypatch):
     monkeypatch.setattr(K, "dive", _CountingDive(K.dive))
     minimize(_mixed, lo, hi, **{**MIXED, "max_iter": 12})  # no time limit: root and periodic dives
     assert K.dive.runs >= 2
-    # a 2 s dive under a 4 s limit: the root dive runs, then no later dive fits in 1.5 x 2 s
-    # (bound calls slowed to 0.1 s so that the search does not finish first)
+    # 2 s per dive-kernel call under a 4 s limit: the root dive's first chunk (one step) runs,
+    # then no further chunk fits in 1.5 x 2 s per step (bound calls slowed to 0.1 s so that the
+    # search does not finish first)
     monkeypatch.setattr(K, "dive", _CountingDive(K.dive.jitted, seconds=2.0))
     _slow_bound(monkeypatch, 0.1)
     t = time.perf_counter()
@@ -192,17 +193,51 @@ def test_dive_share_of_wall_time(monkeypatch):
 
 
 def test_first_dive_estimate_from_bound_kernel(monkeypatch):
-    """Before any dive its cost is estimated as (integer variables) x (slowest bound call):
-    3 x 0.5 s here, so with less than 2.25 s left the root dive is skipped."""
+    """Before any dive its cost per step (integer fixed) is estimated as the slowest bound call:
+    1 s here, so with less than 1.5 s left the root dive is skipped."""
     lo, hi = MIXED_BOX
     minimize(_mixed, lo, hi, **{**MIXED, "max_iter": 3})
     K = _kernels(_mixed)
     monkeypatch.setattr(bnb, "_DIVE_FRAC", np.inf)  # skipped by the time limit, not by the share
     monkeypatch.setattr(K, "dive", _CountingDive(K.dive))
-    _slow_bound(monkeypatch, 0.5)
+    _slow_bound(monkeypatch, 1.0)
     r = minimize(_mixed, lo, hi, time_limit=2.0, **MIXED)
     assert r.status == "time_limit" and K.dive.runs == 0
     monkeypatch.undo()
+
+
+def test_dive_runs_in_chunks_when_the_whole_dive_does_not_fit(monkeypatch):
+    """The dive kernel runs in chunks of steps, so it starts when one step fits (1.5 x 0.5 s)
+    though the whole dive at that estimate (3 steps) would not; the chunks after the first
+    are sized from the measured cost."""
+    lo, hi = MIXED_BOX
+    minimize(_mixed, lo, hi, **{**MIXED, "max_iter": 3})
+    K = _kernels(_mixed)
+    monkeypatch.setattr(bnb, "_DIVE_FRAC", np.inf)
+    monkeypatch.setattr(K, "dive", _CountingDive(K.dive))
+    _slow_bound(monkeypatch, 0.5)
+    minimize(_mixed, lo, hi, time_limit=2.0, **MIXED)  # a whole dive (3 x 0.5 s, x 1.5) would not fit
+    assert K.dive.runs >= 1
+    monkeypatch.undo()
+
+
+def test_dive_chunks_continue_one_dive():
+    """Steps 0..n in one call and in chunks (0..1, 1..n) give the same boxes and flags."""
+    lo, hi = MIXED_BOX
+    minimize(_mixed, lo, hi, **{**MIXED, "max_iter": 3})
+    K = _kernels(_mixed)
+    rng = np.random.default_rng(3)
+    k = bnb._DIVES
+    L, H = np.repeat(lo[None], k, 0), np.repeat(hi[None], k, 0)
+    X = rng.uniform(L, H)
+    F0, cut = jnp.zeros(k, jnp.bool_), jnp.asarray(np.inf)
+    s = lambda p: jnp.asarray(p, jnp.int32)  # noqa: E731
+    one = K.dive.jitted(L, H, X, cut, F0, s(0), s(3))
+    a = K.dive.jitted(L, H, X, cut, F0, s(0), s(1))
+    two = K.dive.jitted(a[0], a[1], X, cut, a[2], s(1), s(3))
+    for u, v in zip(one, two):
+        np.testing.assert_array_equal(np.asarray(u), np.asarray(v))
+    assert np.all(np.asarray(one[0])[:, 4:] == np.asarray(one[1])[:, 4:])  # every integer fixed
 
 
 def _done(value=None, error=None):
