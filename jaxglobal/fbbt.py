@@ -759,7 +759,11 @@ def make_fbbt(f, ineq=None, eq=None, rounds=5, feas_tol=1e-6, safe=False, interp
             from .fbbt_interp import make_propagate, use_interpreter
 
             on = interpret is True or (interpret == "auto" and use_interpreter(tape, n))
-            interp[n] = make_propagate(tape, ineq, eq, n, feas_tol, rounds, safe, integer=integer) if on else None
+            # Built lazily, usually inside the first jit trace.  Build-time
+            # constants must stay concrete: the propagator is cached across
+            # traces, and a tracer captured here leaks into the next trace.
+            with jax.ensure_compile_time_eval():
+                interp[n] = make_propagate(tape, ineq, eq, n, feas_tol, rounds, safe, integer=integer) if on else None
         return interp[n]
 
     def fbbt(lo, hi, cutoff=INF):

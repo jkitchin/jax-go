@@ -117,3 +117,21 @@ def test_interpreter_is_used_inside_jit_and_vmap(monkeypatch):
     for interpret in (False, True):
         jax.make_jaxpr(jax.jit(jax.vmap(make_fbbt(f, g, h, interpret=interpret), in_axes=(0, 0, None))))(B, B + 1, 0.0)
         assert bool(calls) == interpret
+
+def test_second_trace_does_not_reuse_first_trace_constants(sweep):
+    """The interpreter is built lazily inside the first trace and cached for later ones (other
+    batch shapes): its constants must be concrete, not tracers of the first trace. Before the
+    fix the ahead-of-time compile of a second shape took them as extra inputs ("compiled for
+    N inputs but called with 3") and jit raised UnexpectedTracerError."""
+    f, g, h = scalar_model()
+    fb = jax.jit(jax.vmap(make_fbbt(f, g, h, rounds=3, interpret=True), in_axes=(0, 0, None)))
+    one = jax.jit(make_fbbt(f, g, h, rounds=3, interpret=True))
+    lo0, hi0 = -2.0 * np.ones(3), 2.0 * np.ones(3)
+    ref = np.asarray(one(jnp.asarray(lo0), jnp.asarray(hi0), 0.5)[0])
+    for b in (4, 2):
+        L, H = jnp.asarray(np.tile(lo0, (b, 1))), jnp.asarray(np.tile(hi0, (b, 1)))
+        arg = jax.ShapeDtypeStruct((b, 3), jnp.float64)
+        exe = fb.trace(arg, arg, jax.ShapeDtypeStruct((), jnp.float64)).lower().compile()
+        out = exe(L, H, 0.5)
+        np.testing.assert_allclose(np.asarray(out[0]), np.tile(ref, (b, 1)))
+        np.testing.assert_allclose(np.asarray(fb(L, H, 0.5)[0]), np.tile(ref, (b, 1)))
