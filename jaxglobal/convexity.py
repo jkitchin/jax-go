@@ -65,6 +65,7 @@ by a bound on the rounding of the tangent ``J (y - x)`` over the box.
 from __future__ import annotations
 
 import math
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -559,7 +560,7 @@ def classify(prog):
     """
     n = prog.n
     atoms = _Atoms()
-    info = {}
+    info = defaultdict(Info)  # a NaN constant slot (const_val NaN, like a variable) is "unknown"
     for i in range(n):
         u = Info(aff=(0.0, {i: 1.0}), quad=(0.0, {i: 1.0}, {}), cvx=E, ccv=E)
         _signs_of_affine(u, atoms)

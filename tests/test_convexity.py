@@ -225,6 +225,18 @@ def test_negative_even_power_needs_a_sign():
     _check_relaxation(NONCONVEX["neg_even_pow_of_cvx"][0], lo, hi, np.random.default_rng(0))
 
 
+def test_nan_constant_is_unknown():
+    """A NaN literal makes a constant slot that looks like a variable slot; the row gets no verdict
+    (and the other rows keep theirs) instead of a KeyError in ``classify``."""
+    fn = vec(lambda x: x[0] ** 2 + jnp.nan, lambda x: jnp.exp(x[1]), lambda x: x[0] + 0.0 * jnp.nan * x[1])
+    cert = certificate_of(fn, jnp.ones(3))
+    assert cert.cv_mask.tolist() == [False, True, False]
+    lo, hi = jnp.full(3, 0.5), jnp.full(3, 2.0)
+    r = make_relaxer(fn, univariate=True, alphabb=True)
+    m = r(jnp.ones(3), lo, hi, r.prepare(lo, hi))
+    assert float(m.cv[1]) == pytest.approx(float(jnp.exp(1.0)))
+
+
 def test_vector_outputs_and_affine_skipped():
     fn = vec(lambda x: x[0] + 2 * x[1], lambda x: jnp.exp(x[0]), lambda x: x[0] * x[1], lambda x: jnp.sqrt(x[2]))
     cert = certificate_of(fn, jnp.ones(3))
