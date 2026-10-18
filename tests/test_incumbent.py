@@ -64,3 +64,41 @@ def test_polish_respects_constraints():
     assert r.verified and r.status == "optimal"
     assert abs(r.fun + 3.5) <= 1e-6
     assert np.all(np.asarray(g(jnp.asarray(r.x))) <= 1e-6) and np.all(r.x[:2] == np.round(r.x[:2]))
+
+
+def _st_z():
+    """MINLPLib st_z (optimum 0 at x = 0) on a finite box. The relaxation minimizer sits at
+    x3 = -feas_tol, violating x1 + x2 - x3 <= 0 by exactly feas_tol, with f = -2e-6 < 0."""
+
+    def f(x):
+        return -x[0] ** 2 - x[1] ** 2 - x[2] ** 2 + 2 * x[2]
+
+    def ineq(x):
+        return jnp.stack([x[0] + x[1] - x[2], -x[0] + x[1] - x[2], 12 * x[0] + 5 * x[1] + 12 * x[2] - 22.8,
+                          12 * x[0] + 12 * x[1] + 7 * x[2] - 17.1, -6 * x[0] + x[1] + x[2] - 1.9])  # fmt: skip
+
+    lo, hi = np.array([-100.0, 0.0, -100.0]), np.array([100.0, 100.0, 100.0])
+    return minimize(f, lo, hi, ineq=ineq, abs_tol=1e-6, rel_tol=1e-4, feas_tol=1e-6)
+
+
+@needs_pounce
+def test_incumbent_repaired_to_strict_feasibility():
+    r = _st_z()
+    assert r.status == "optimal" and r.verified
+    assert r.max_violation <= 1e-9  # repaired, not the feas_tol-violating relaxation point
+    assert r.fun >= -1e-8  # no objective value below the true optimum 0
+    assert r.lower_bound <= r.fun
+    assert "repaired" in r.message
+
+
+@needs_pounce
+def test_incumbent_repair_does_not_walk_away():
+    """The feas_tol-feasible minimizer (-5, 0) (f = -5) is strictly feasible only at y = 1 (f = 5),
+    while x ~ 0, y = 0 is strictly feasible with f ~ 0. A repair to (-5, 1) would be reported
+    "optimal" with f = 5 against a lower bound of -5: the relaxed incumbent is kept instead."""
+    f = lambda x: x[0] + 10 * x[1]  # noqa: E731
+    g = lambda x: jnp.atleast_1d(0.9e-6 * (1 - x[1]) - x[0] * (x[0] + 5) ** 2)  # noqa: E731
+    r = minimize(f, np.array([-10.0, 0.0]), np.array([10.0, 2.0]), ineq=g, abs_tol=1e-6, rel_tol=1e-6, feas_tol=1e-6)
+    assert r.verified
+    if r.status == "optimal":
+        assert r.fun - r.lower_bound <= 1e-3 * (1 + abs(r.fun))
