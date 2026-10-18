@@ -233,12 +233,13 @@ ax1.invert_yaxis()
 fig.tight_layout()
 
 # %% [markdown]
-# Compilation dominates every cold solve. It is 85% of the reactor network's
-# 17.7 s and more than 94% for each of the other four problems. Once compiled,
-# the same solves take 0.02 to 2.6 s; Hartmann-6 works through about 1100
-# nodes in 0.07 s, roughly 16,000 nodes per second. In the warm solves (right),
-# bounding takes 70–85% of the time and the local solves most of the rest. The
-# exception is Eggholder, a 0.01 s solve of 47 nodes, where the local solves and
+# Compilation dominates every cold solve. It is about 90% of the reactor
+# network's 4.2 s and Haverly's 3.5 s and more than 95% for each of the other three
+# problems. Once compiled, the same solves take 0.01 to 0.4 s; Hartmann-6 works
+# through about 1100 nodes in 0.05 s, roughly 20,000 nodes per second. In the
+# warm solves (right), bounding takes 80–90% of the time and the local solves
+# most of the rest. The exception is Eggholder, a 0.01 s solve of 41 nodes,
+# where the local solves and
 # the fixed per-iteration bookkeeping weigh as much as the bounding.
 #
 # So jaxglobal pays seconds of start-up per function and microseconds to
