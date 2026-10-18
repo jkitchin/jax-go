@@ -523,6 +523,7 @@ def mc_monomial(coef, factors, safe=False, nround=0):
     W = Lhi - Llo
     z = jnp.minimum(Lcc, Lhi)
     cc = eL + jnp.where(W > 0, (eH - eL) / jnp.where(W > 0, W, 1.0), 0.0) * (z - Llo)
+    cc = jnp.where(jnp.isinf(eH), jnp.inf, cc)  # exp(L.hi) overflowed: no secant (inf * 0 at the corner)
     cv, lo, hi = jnp.exp(jnp.maximum(Lcv, Llo)), eL, eH
     if safe:
         # each log is within a few ulps of its magnitude and the secant evaluations, scalings and the
@@ -598,17 +599,27 @@ class Monomials:
                 if fu is not None and fv is not None:
                     sgn = -1.0 if name == "div" else 1.0
                     fac = dict(fu[1])
+                    exact = True
                     for kk, (bv, a) in fv[1].items():
-                        fac[kk] = (bv, fac[kk][1] + sgn * a) if kk in fac else (bv, sgn * a)
+                        if kk in fac:
+                            e0, e1 = fac[kk][1], sgn * a
+                            t = e0 + e1
+                            exact &= (e0 - (t - (t - e0))) + (e1 - (t - e0)) == 0  # TwoSum: no rounding
+                            fac[kk] = (bv, t)
+                        else:
+                            fac[kk] = (bv, sgn * a)
                     rec = (fu[0] * fv[0] if sgn > 0 else fu[0] / fv[0], fac, fu[2] or fv[2], fu[3] + fv[3] + 1)
+                    if not exact:  # a rounded exponent sum is not the function's monomial: unusable
+                        rec = (np.nan,) + rec[1:]
         if rec is None or len(rec[1]) > self.MAX_FACTORS:
             return out
+        if not (np.finfo(np.float64).tiny <= rec[0] < np.inf):  # NaN from here on: products keep it
+            rec = (np.nan,) + rec[1:]
         self.rec[outvar] = rec
         coef, fac, has_pow, nround = rec
         fac = [(bv, a) for bv, a in fac.values() if a != 0]
-        # a coef that over- or underflowed (1e300 * 1e300, 1 / 1e-310) is not the function's: leave it
-        normal = bool(np.finfo(np.float64).tiny <= coef < np.inf)
-        if outvar in self.consumed or not has_pow or len(fac) < 2 or not normal:
+        # a coef that over- or underflowed at any step (1e300 * 1e300, 1 / 1e-310) is NaN: leave it
+        if outvar in self.consumed or not has_pow or len(fac) < 2 or not (coef > 0):
             return out
         shp = jnp.shape(out.lo)
         if any(jnp.shape(bv.lo) != shp for bv, _ in fac):

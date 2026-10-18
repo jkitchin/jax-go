@@ -150,18 +150,38 @@ def test_safe_covers_values_exp_flushes_to_zero():
 
 @pytest.mark.parametrize("safe", [False, True])
 def test_coefficients_that_overflow_or_scale_below_normal(safe):
-    """A constant product that overflows (1e300 * 1e300, 1 / 1e-310) leaves the term to the product rule;
-    a small coefficient gets the absolute safe margin after scaling, not before."""
-    cases = [(lambda x: x[0] ** 2.5 * x[1] * 1e300 * 1e300, [1e-80, 1e-100], [2e-80, 2e-100])]
-    if safe:  # (plain mode's division rule alone already gives inf for / 1e-310)
-        cases.append((lambda x: x[0] ** 2.5 * x[1] / 1e-310, [1e-100, 1e-50], [2e-100, 2e-50]))
-        cases.append((lambda x: 1e-23 * x[0] ** 2.5 * x[1] ** 0.5, [1e-120, 1.0], [1.0000001e-120, 1.0]))
-    for f, lo, hi in cases:
+    """A constant product that over- or underflows at any step (1e300 * 1e300, 1 / 1e-310) or an exponent
+    sum that rounds leaves the term to the product rule; a small coefficient gets the absolute safe margin
+    after scaling, not before. Each case: f, lo, hi, the point, f's exact value there."""
+    A = 2.0**53
+    cases = [(lambda x: x[0] ** 2.5 * x[1] * 1e300 * 1e300, [1e-80, 1e-100], [2e-80, 2e-100], "lo", 1e300)]
+    if safe:  # (plain mode alone already misses these: x / 1e-310 is inf, subnormal steps lose bits)
+        cases += [
+            (lambda x: x[0] ** 2.5 * x[1] / 1e-310, [1e-100, 1e-50], [2e-100, 2e-50], "lo", 1e10),
+            (lambda x: 1e-23 * x[0] ** 2.5 * x[1] ** 0.5, [1e-120, 1.0], [1.0000001e-120, 1.0], "lo", 1e-323),
+            (lambda x: x[0] ** 2.5 * x[1] * 1e-170 * 1e-153 * 1e300 * 1e100, [1.0, 1.0], [1.0000001] * 2, "lo", 1e77),
+            (lambda x: x[0] ** 5.0 * x[0] ** A / x[0] ** A * x[1] ** 2.5, [1.0, 1.0], [1 + 7e-14, 1.0000001], "hi",
+             (1 + 7e-14) ** 5 * 1.0000001**2.5),
+        ]
+    for f, lo, hi, at, v in cases:
         lo, hi = jnp.array(lo), jnp.array(hi)
-        v = float(f(np.asarray(lo)))
-        out = relax(f, safe=safe)(lo, lo, hi)
-        assert not np.isnan([float(out.lo), float(out.hi), float(out.cv), float(out.cc)]).any()
-        assert float(out.lo) <= v <= float(out.hi) and float(out.cv) <= v <= float(out.cc)
+        out = relax(f, safe=safe)(lo if at == "lo" else hi, lo, hi)
+        b = [float(out.lo), float(out.hi), float(out.cv), float(out.cc)]
+        assert b[0] <= v * (1 + 1e-15) <= np.inf and v * (1 - 1e-15) <= b[1]
+        if not np.isnan(b[2:]).all():  # (x ** A / x ** A: the product rule's cv and cc are NaN on main)
+            assert b[2] <= v * (1 + 1e-15) and v * (1 - 1e-15) <= b[3]
+
+
+def test_cc_where_the_exponential_overflows():
+    """exp(L.hi) = inf: the secant of exp is inf * 0 at the lower corner; cc must be inf there, not NaN.
+    (Safe mode: plain mode's product rule already gives cc = 0 < f here on main.)"""
+
+    def f(x):
+        return x[0] ** 2.5 * x[1] ** 2.5
+
+    lo, hi = jnp.array([1.0, 1.0]), jnp.array([1e100, 1e100])
+    out = relax(f, safe=True)(lo, lo, hi)
+    assert not np.isnan(float(out.cc)) and float(out.cc) >= 1.0
 
 
 @pytest.mark.parametrize("safe", [False, True])
