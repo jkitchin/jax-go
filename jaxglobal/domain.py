@@ -39,6 +39,11 @@ from .fbbt import joint_tape, make_fbbt
 _POOL = []  # one compiler thread, created on first use
 _SETTLE_ROUNDS = 5  # rounds of monotone caps + FBBT in bound_domain
 _LP_ROUNDS = 4  # rounds of LP bounds + FBBT in bound_domain
+# Tapes of at most this many nodes: the structural sweeps below (dependency masks, row upper bounds, the
+# Jacobian) run as one jitted program. Applied eagerly, each primitive is its own small XLA compile
+# (~100 of them, ~1 s, on a 3-variable model); on larger tapes eager wins, because one program's compile
+# grows faster than the number of distinct (primitive, shape) pairs.
+_JIT_MAX_NODES = 400
 
 
 class DomainTimeout(Exception):
@@ -50,13 +55,19 @@ def used_variables(f, ineq, eq, n):
     from .univariate import _dep_masks
 
     tape = joint_tape(f, ineq, eq, jnp.zeros(n))
-    with jax.ensure_compile_time_eval():
+
+    def outs():
         masks = _dep_masks(tape, n)
-        used = np.zeros(n, bool)
-        for a in tape.outs:
-            if isinstance(a, int) and a in masks:
-                m = np.asarray(masks[a]) > 0
-                used |= m.reshape(-1, n).any(0)
+        return [jnp.any(masks[a].reshape(-1, n) > 0, axis=0) for a in tape.outs if isinstance(a, int) and a in masks]
+
+    used = np.zeros(n, bool)
+    if len(tape.nodes) <= _JIT_MAX_NODES:
+        masks = jax.jit(outs)()
+    else:
+        with jax.ensure_compile_time_eval():
+            masks = outs()
+    for m in masks:
+        used |= np.asarray(m)
     return used
 
 
@@ -103,19 +114,40 @@ def _row_structure(f, ineq, eq, n):
     return np.concatenate(D), np.concatenate(N), np.concatenate(K)
 
 
-def _row_upper(f, ineq, eq, lo, hi):
-    """Interval upper bound of every output row ``[f, ineq..., eq...]`` over the box (eager FBBT forward sweep)."""
+def _row_upper_fn(f, ineq, eq, n):
+    """``(lo, hi) ->`` interval upper bound of every output row ``[f, ineq..., eq...]`` over the box.
+
+    One FBBT forward sweep; on a small tape (``_JIT_MAX_NODES``) compiled once and reused for every box."""
     from .fbbt import Const, _forward
 
-    with jax.ensure_compile_time_eval():
-        tape = joint_tape(f, ineq, eq, jnp.zeros(lo.size))
-        vals, _ = _forward(tape, (jnp.asarray(lo), jnp.asarray(hi)), {})
+    tape = joint_tape(f, ineq, eq, jnp.zeros(n))
+
+    def upper(lo, hi):
+        vals, _ = _forward(tape, (lo, hi), {})
         out = []
         for a in tape.outs:
             v = a.val if isinstance(a, Const) else vals[a]
             v = getattr(v, "hi", v)
-            out.append(np.atleast_1d(np.asarray(v, np.float64)).ravel())
-    return np.concatenate(out)
+            out.append(jnp.ravel(jnp.atleast_1d(jnp.asarray(v, jnp.float64))))
+        return jnp.concatenate(out)
+
+    small = len(tape.nodes) <= _JIT_MAX_NODES
+    jit_upper = jax.jit(upper) if small else None
+
+    def call(lo, hi):
+        lo, hi = jnp.asarray(lo, jnp.float64), jnp.asarray(hi, jnp.float64)
+        if small:
+            return np.asarray(jit_upper(lo, hi))
+        with jax.ensure_compile_time_eval():
+            return np.asarray(upper(lo, hi))
+
+    call.small = small  # monotone_bounds compiles its Jacobian on the same condition
+    return call
+
+
+def _row_upper(f, ineq, eq, lo, hi):
+    """Interval upper bound of every output row ``[f, ineq..., eq...]`` over the box (FBBT forward sweep)."""
+    return _row_upper_fn(f, ineq, eq, np.asarray(lo).size)(lo, hi)
 
 
 def monotone_bounds(f, ineq, eq, lo, hi, integer=None, struct=None):
@@ -151,7 +183,9 @@ def monotone_bounds(f, ineq, eq, lo, hi, integer=None, struct=None):
     x0 = np.where(np.isfinite(lo) & np.isfinite(hi), 0.5 * (np.where(np.isfinite(lo), lo, 0) + np.where(np.isfinite(hi), hi, 0)),
                   np.where(np.isfinite(lo), lo + 1.0, np.where(np.isfinite(hi), hi - 1.0, 0.0)))  # fmt: skip
     used = [fn for fn in (f, ineq, eq) if fn is not None]
-    J = np.asarray(jax.jacfwd(lambda x: jnp.concatenate([jnp.atleast_1d(fn(x)) for fn in used]))(jnp.asarray(x0)))
+    row_upper = _row_upper_fn(f, ineq, eq, n)
+    jac = jax.jacfwd(lambda x: jnp.concatenate([jnp.atleast_1d(fn(x)) for fn in used]))
+    J = np.asarray((jax.jit(jac) if row_upper.small else jac)(jnp.asarray(x0)))
     J = J.reshape(-1, n)
     if J.shape[0] != dep.shape[0]:
         return lo, hi
@@ -171,7 +205,7 @@ def monotone_bounds(f, ineq, eq, lo, hi, integer=None, struct=None):
             if len(need):
                 L, H = lo.copy(), hi.copy()
                 L[j] = H[j] = 0.0
-                R = _row_upper(f, ineq, eq, L, H)[need]
+                R = row_upper(L, H)[need]
                 if not np.all(np.isfinite(R)):
                     continue
                 cap = np.max(R / -J[need, j]) if side > 0 else np.min(-R / J[need, j])
