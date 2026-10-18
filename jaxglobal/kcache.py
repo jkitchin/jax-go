@@ -12,10 +12,12 @@ The directory is ``$JAXGLOBAL_CACHE_DIR`` (default ``~/.cache/jaxglobal``);
 ``JAXGLOBAL_CACHE=0`` disables both. An already configured JAX compilation
 cache is left alone.
 
-Both are pruned once per process, least recently used first: ``xla/`` beyond
-``_MAX_XLA_BYTES``, ``kernels/`` beyond ``_MAX_KERNELS`` files, and kernels of
-other jaxglobal sources (which can never load again) once unused for
-``_STALE_SECS``. ``clear_cache()`` (``python -c "import jaxglobal.kcache as k; k.clear_cache()"``)
+Both are pruned once per process, oldest first: ``xla/`` beyond
+``_MAX_XLA_BYTES`` (by last access where the filesystem records reads, else by
+write: APFS does not), ``kernels/`` beyond ``_MAX_KERNELS`` files (a load marks
+its file used), and kernels of other jaxglobal sources (which can never load
+again) once unused for ``_STALE_SECS``. Only files named like cache entries are
+ever removed. ``clear_cache()`` (``python -c "import jaxglobal.kcache as k; k.clear_cache()"``)
 removes both.
 
 A problem's fingerprint hashes the jaxprs of ``f``, ``ineq`` and ``eq`` and of
@@ -29,7 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-import shutil
+import re
 import tempfile
 import time
 
@@ -45,6 +47,12 @@ _MAX_XLA_BYTES = 2 * 1024**3
 _XLA_PRUNE_TO = 0.75
 _STALE_SECS = 86400.0  # kernels of another jaxglobal source are removed once unused this long
 _SOURCE = []
+# names of the files the caches own (nothing else in their directories is ever removed): JAX's
+# entries ``<module>-<sha256>-cache`` (and ``-atime``), jaxglobal's kernels ``[<source>-]<sha256>-...``
+# and their temporary files
+_XLA_NAME = re.compile(r"^.+-[0-9a-f]{64}-(cache|atime)$")
+_KERNEL_NAME = re.compile(r"^(?:[0-9a-f]{12}-)?[0-9a-f]{64}-.*\.(bin|noexport)$")
+_TMP_PREFIX = "jaxglobal-tmp-"
 _PRUNED = []  # kernels/ was pruned in this process
 
 
@@ -72,18 +80,11 @@ def enable_compilation_cache():
 
 
 def prune_xla(path, max_bytes=None):
-    """Remove the least recently used files of the XLA cache directory ``path`` when it holds more
-    than ``max_bytes`` (default ``_MAX_XLA_BYTES``), down to ``_XLA_PRUNE_TO`` of that."""
+    """Remove the oldest JAX cache entries of the directory ``path`` (by last access, where the
+    filesystem records reads, else by last write) when they take more than ``max_bytes`` (default
+    ``_MAX_XLA_BYTES``), down to ``_XLA_PRUNE_TO`` of that. Other files are left alone."""
     max_bytes = _MAX_XLA_BYTES if max_bytes is None else max_bytes
-    try:
-        files = []
-        with os.scandir(path) as it:
-            for e in it:
-                if e.is_file(follow_symlinks=False):
-                    st = e.stat(follow_symlinks=False)
-                    files.append((max(st.st_atime, st.st_mtime), st.st_size, e.path))
-    except OSError:
-        return
+    files = [(max(st.st_atime, st.st_mtime), st.st_size, f) for f, st in _owned(path, _XLA_NAME.match)]
     total = sum(f[1] for f in files)
     if total <= max_bytes:
         return
@@ -92,9 +93,34 @@ def prune_xla(path, max_bytes=None):
             break
         try:
             os.remove(f)
-            total -= size
-        except OSError:
+        except FileNotFoundError:  # another process pruned it: gone all the same
             pass
+        except OSError:
+            continue
+        total -= size
+
+
+def _owned(d, match):
+    """``(path, lstat)`` of the regular files in directory ``d`` whose names ``match`` (none if ``d``
+    is missing or a symbolic link)."""
+    out = []
+    try:
+        if os.path.islink(d):
+            return out
+        with os.scandir(d) as it:
+            for e in it:
+                if match(e.name) and e.is_file(follow_symlinks=False):
+                    try:
+                        out.append((e.path, e.stat(follow_symlinks=False)))
+                    except OSError:
+                        pass
+    except OSError:
+        pass
+    return out
+
+
+def _is_kernel(name):
+    return bool(_KERNEL_NAME.match(name)) or name.startswith(_TMP_PREFIX)
 
 
 def _source_hash():
@@ -177,25 +203,23 @@ def _prune_kernels(d, force=False):
         return
     _PRUNED.append(True)
     mine, now = _source_hash()[:12] + "-", time.time()
-    try:
-        files = []
-        with os.scandir(d) as it:
-            for e in it:
-                if e.is_file(follow_symlinks=False):
-                    files.append((e.stat(follow_symlinks=False).st_mtime, e.path, e.name))
-    except OSError:
-        return
     keep = []
-    for mtime, path, name in files:
-        stale = not name.startswith(mine) and now - mtime > _STALE_SECS
-        if not stale:
-            keep.append((mtime, path))
+    for path, st in _owned(d, _is_kernel):
+        name = os.path.basename(path)
+        if name.startswith(mine) or now - st.st_mtime <= _STALE_SECS:
+            if not name.startswith(_TMP_PREFIX):  # a recent temporary file: another process's write
+                keep.append((st.st_mtime, path))
             continue
         try:
             os.remove(path)
         except OSError:
             pass
-    for _, path in sorted(keep)[:-_MAX_KERNELS]:
+    _drop_oldest(keep)
+
+
+def _drop_oldest(files):
+    """Remove the oldest of ``files`` (``(mtime, path)``) beyond ``_MAX_KERNELS``."""
+    for _, path in sorted(files)[:-_MAX_KERNELS]:
         try:
             os.remove(path)
         except OSError:
@@ -203,20 +227,19 @@ def _prune_kernels(d, force=False):
 
 
 def clear_cache():
-    """Remove jaxglobal's disk caches (``xla/`` and ``kernels/`` under ``cache_root()``); returns
-    the bytes freed. (A JAX compilation cache configured elsewhere is not touched.)"""
+    """Remove jaxglobal's cache entries (in ``xla/`` and ``kernels/`` under ``cache_root()``);
+    returns the bytes freed. Other files there, a directory that is a symbolic link, and a JAX
+    compilation cache configured elsewhere are left alone."""
     root, freed = cache_root(), 0
     if root is None:
         return 0
-    for sub in ("xla", "kernels"):
-        d = os.path.join(root, sub)
-        for top, _, names in os.walk(d):
-            for name in names:
-                try:
-                    freed += os.lstat(os.path.join(top, name)).st_size
-                except OSError:
-                    pass
-        shutil.rmtree(d, ignore_errors=True)
+    for sub, match in (("xla", _XLA_NAME.match), ("kernels", _is_kernel)):
+        for path, st in _owned(os.path.join(root, sub), match):
+            try:
+                os.remove(path)
+                freed += st.st_size
+            except OSError:
+                pass
     return freed
 
 
@@ -226,6 +249,10 @@ def load(key):
     if path is None:
         return None
     if os.path.exists(path + ".noexport"):
+        try:
+            os.utime(path + ".noexport")  # recently used: kept by the pruning
+        except OSError:
+            pass
         return False
     try:
         with open(path + ".bin", "rb") as fh:
@@ -248,13 +275,11 @@ def save(key, exported):
     try:
         os.makedirs(d, exist_ok=True)
         data, ext = (b"", ".noexport") if exported is None else (exported.serialize(), ".bin")
-        fd, tmp = tempfile.mkstemp(dir=d)
+        fd, tmp = tempfile.mkstemp(dir=d, prefix=_TMP_PREFIX)
         with os.fdopen(fd, "wb") as fh:
             fh.write(data)
         os.replace(tmp, path + ext)
-        files = sorted((os.path.join(d, f) for f in os.listdir(d)), key=os.path.getmtime)
-        for old in files[:-_MAX_KERNELS]:
-            os.remove(old)
+        _drop_oldest([(st.st_mtime, f) for f, st in _owned(d, _KERNEL_NAME.match)])
     except OSError:
         pass
 
