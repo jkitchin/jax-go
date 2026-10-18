@@ -30,7 +30,7 @@ SLOW = {
 
 
 def pytest_configure(config):
-    config.addinivalue_line("markers", "slow: takes >= 2 s; skipped on CI (see tests/slow_tests.txt)")
+    config.addinivalue_line("markers", "slow: takes >= 1 s; skipped on CI (see tests/slow_tests.txt)")
 
 
 def pytest_collection_modifyitems(config, items):
