@@ -50,15 +50,22 @@ jobs:
       # tests/conftest.py caches XLA executables and jaxglobal kernels in .jax_cache/;
       # carrying it between runs skips most compiles. Kernels from older sources are
       # keyed on a source hash and never reused, so a partial restore is safe.
-      - name: Cache compiled kernels
-        uses: actions/cache@v4
+      - name: Restore compiled kernels
+        uses: actions/cache/restore@v4
         with:
           path: .jax_cache
           key: jax-cache-${{ hashFiles('jaxglobal/**/*.py', 'tests/**/*.py', 'pyproject.toml') }}
           restore-keys: jax-cache-
       - name: Run tests
-        # Tests that take >= 4 s (tests/slow_tests.txt) run only on a manual dispatch with
+        # Tests that take >= 2 s (tests/slow_tests.txt) run only on a manual dispatch with
         # "all"; the full suite, fuzz and check_wrong are pre-merge gates run locally.
         run: >-
           python -m pytest -q -ra -n auto --timeout 600 --durations=25
           ${{ inputs.all && ' ' || '-m "not slow"' }} tests
+      # Saved even when a test fails, so the next run starts warm.
+      - name: Save compiled kernels
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .jax_cache
+          key: jax-cache-${{ hashFiles('jaxglobal/**/*.py', 'tests/**/*.py', 'pyproject.toml') }}
