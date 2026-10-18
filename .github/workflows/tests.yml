@@ -25,7 +25,7 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - name: Install
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev]" pytest-xdist
       # The MINLPLib instances are gitignored (fetch.py downloads them); cache them so
       # minlplib.org is hit only when the selection changes. Without them ~20 tests skip.
       - name: Cache MINLPLib instances
@@ -43,4 +43,5 @@ jobs:
           python benchmarks/minlplib/fetch.py
           python benchmarks/minlplib/fetch.py --integer
       - name: Run tests
-        run: python -m pytest -q -ra tests
+        # one worker per core; --durations lists the slowest tests
+        run: python -m pytest -q -ra -n auto --durations=60 tests
