@@ -339,7 +339,8 @@ def _propagate_rows(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds, integer=()):
 
         return lax.fori_loop(0, K, step, (lo, hi, empty))
 
-    def fbbt(lo, hi, cutoff=INF):
+    def fbbt(lo, hi, cutoff=INF, all_slots=False):
+        """With ``all_slots`` the bounds of every scalar slot of ``prog`` are returned, not just x."""
         cutoff = jnp.asarray(cutoff, jnp.float64)
         L0 = jnp.where(is_c, cval, -INF).at[:n].set(lo)
         H0 = jnp.where(is_c, cval, INF).at[:n].set(hi)
@@ -354,6 +355,8 @@ def _propagate_rows(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds, integer=()):
 
         Pl, Ph, empty = lax.fori_loop(0, rounds, round_, (L0, H0, jnp.array(False)))
         vl, vh, e = forward((Pl, Ph))
+        if all_slots:
+            return jnp.minimum(vl, vh), jnp.maximum(vl, vh), empty | e
         xl, xh = vl[:n], vh[:n]
         return jnp.minimum(xl, xh), jnp.maximum(xl, xh), empty | e
 
