@@ -155,7 +155,8 @@ def test_foreign_files_survive_pruning_and_clearing(tmp_path, monkeypatch):
     foreign = [_file(tmp_path / sub / name, 10**4, age=10 * 86400)
                for sub in ("xla", "kernels") for name in ("my_cuda_kernel.cu", "notes-cache", "a.bin")]  # fmt: skip
     ours = [_xla(tmp_path / "xla", i) for i in range(3)]
-    ours += [_file(tmp_path / "kernels" / f"{'0' * 12}-{i:064x}-bound-16.bin", 100, age=86400 * (2 - i))
+    # +60 s: the marker save() writes below takes its mtime from the filesystem clock, which can trail time.time()
+    ours += [_file(tmp_path / "kernels" / f"{'0' * 12}-{i:064x}-bound-16.bin", 100, age=86400 * (2 - i) + 60)
              for i in range(3)]  # fmt: skip
     kcache.prune_xla(str(tmp_path / "xla"), max_bytes=1)
     kcache._prune_kernels(str(tmp_path / "kernels"), force=True)
