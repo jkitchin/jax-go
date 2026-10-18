@@ -135,6 +135,19 @@ def test_not_applied_in_interval_mode_or_to_plain_products():
         R.mc_monomial = orig
 
 
+def test_safe_covers_values_exp_flushes_to_zero():
+    """A monomial below the normal range: exp of its log-space bounds flushes to 0, so safe mode adds an
+    absolute margin on top of the relative one (intersected with the product rule, hi stayed at 0)."""
+
+    def f(x):
+        return x[0] ** 2.5 * x[1] ** 0.5
+
+    lo, hi = jnp.array([1e-124, 1.0]), jnp.array([1.0000001e-124, 1.0])
+    out = relax(f, safe=True)(lo, lo, hi)
+    assert float(out.hi) >= 1e-310 and float(out.cc) >= 1e-310
+    assert float(out.lo) <= 1e-310 and float(out.cv) <= 1e-310
+
+
 @pytest.mark.parametrize("safe", [False, True])
 def test_small_posynomial_problem(safe):
     """min 5 x^1.2781 y^-0.1959 z^2.4242 / w^0.9904 + 0.2 w s.t. x * y >= 4, z + w >= 3 on a positive box:

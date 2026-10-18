@@ -530,8 +530,11 @@ def mc_monomial(coef, factors, safe=False):
         # exp(+-d) (1 +- SAFE_K eps) of exact; the secant of exp is off by at most (d + ulps) eH.
         # A relative margin m = 2 SAFE_K eps ((k + 1) S + 2) covers both (exp(-d) >= 1 - d).
         m = lax.stop_gradient(2.0 * SAFE_K * float(jnp.finfo(eL.dtype).eps) * ((len(factors) + 1) * S + 2.0))
-        cv, lo = cv * (1.0 - m), lo * (1.0 - m)
-        hi, cc = hi * (1.0 + m), cc + m * eH
+        # exp flushes values below the normal range to 0, where no relative margin helps: an absolute
+        # tiny on top covers it, and the monomial is positive so lo and cv stay at 0 or above.
+        tiny = float(jnp.finfo(eL.dtype).tiny)
+        cv, lo = jnp.maximum(cv * (1.0 - m) - tiny, 0.0), jnp.maximum(lo * (1.0 - m) - tiny, 0.0)
+        hi, cc = hi * (1.0 + m) + tiny, cc + m * eH + tiny
     return ok, MC(coef * lo, coef * hi, coef * cv, coef * cc)
 
 
