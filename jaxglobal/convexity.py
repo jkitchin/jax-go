@@ -78,6 +78,7 @@ ENABLED = True  # module switch for ablations (``profile_root.py --set convexity
 # at the point; XLA's compile time for that grows badly with the tape (a 1644-node quadratic
 # does not compile in 5 minutes), so above this size safe mode keeps the base relaxation.
 SAFE_MAX_NODES = 600
+EXACT = True  # skip the base relaxation of fully certified functions (``exact_certificate``)
 MAX_QUAD_TERMS = 20_000  # stop tracking a slot's quadratic form beyond this many terms
 MAX_QUAD_VARS = 400  # eigen test only up to this many variables
 QUAD_TOL = 1e-9  # relative eigenvalue margin of the quadratic rule
@@ -512,7 +513,7 @@ class Certificate:
     ``(C,)`` index the rows of ``atom_A`` ``(K, n)``, ``atom_c`` ``(K,)``;
     ``cv_delta``/``cc_delta`` ``(m,)`` the uniform alpha of the quadratic rule
     (0 for exact verdicts), applied to the variables ``cv_vars``/``cc_vars``
-    ``(m, n)``.
+    ``(m, n)``. ``affine`` ``(m,)``: outputs that are affine (no verdict needed).
     """
 
     def __init__(self, **kw):
@@ -585,9 +586,11 @@ def classify(prog):
     outs = np.concatenate([np.asarray(o).reshape(-1) for o in prog.outs]).astype(int)
     m = outs.size
     verdicts = []
-    for s in outs:
+    affine = np.zeros(m, bool)
+    for k, s in enumerate(outs):
         r = info[int(s)]
         if r.aff is not None:
+            affine[k] = True
             verdicts.append((None, None, None, None))
             continue
         cv = (r.cvx, 0.0, None) if r.cvx is not None else None
@@ -623,7 +626,7 @@ def classify(prog):
         cv_need=np.zeros((m, C), bool), cc_need=np.zeros((m, C), bool),
         cv_delta=np.zeros(m), cc_delta=np.zeros(m), cv_vars=np.zeros((m, n), bool), cc_vars=np.zeros((m, n), bool),
         cond_kind=np.array([kinds[k] for k, _ in conds], int), cond_atom=np.array([aidx[a] for _, a in conds], int),
-        atom_A=A, atom_c=c0,
+        atom_A=A, atom_c=c0, affine=affine,
     )  # fmt: skip
     for k, (cv, cc, _, _) in enumerate(verdicts):
         for side, v in (("cv", cv), ("cc", cc)):
@@ -731,8 +734,43 @@ def values(flat, cert, x, lo, hi, data, safe):
     return cv, cc
 
 
-def wrap(fn, base, safe=False):
-    """``base`` relaxer of ``fn`` tightened by the convexity certificate (a ``univariate.Relaxer``)."""
+def exact_certificate(cert, sides=("cv", "cc"), conditional=False):
+    """``cert`` with the affine outputs added as exact verdicts, if every output is affine or
+    certified **unconditionally** (with ``conditional``: possibly under conditions) on each side
+    in ``sides``; else None.
+
+    Then ``f`` itself (plus the quadratic rule's uniform shift) is a valid relaxation on every
+    finite box (with ``conditional``: on every box where the conditions hold, and -inf/+inf on
+    the others, see ``values``) and the base relaxation can be skipped: it is never tighter
+    than a convex function's own value (``max(base, f) = f`` for an unshifted verdict). The
+    caller picks ``conditional`` when its boxes all lie in one where the conditions hold."""
+    if cert is None:
+        return None
+    aff = np.asarray(cert.affine, bool)
+    if conditional:
+        free = np.ones(aff.shape, bool), np.ones(aff.shape, bool)
+    else:
+        free = ~np.asarray(cert.cv_need).any(axis=1), ~np.asarray(cert.cc_need).any(axis=1)
+    ok = {"cv": np.asarray(cert.cv_mask) & free[0], "cc": np.asarray(cert.cc_mask) & free[1]}
+    if aff.all() or not all((aff | ok[sd]).all() for sd in sides):
+        return None
+    kw = dict(cert.__dict__)
+    kw["cv_mask"] = ok["cv"] | aff
+    kw["cc_mask"] = ok["cc"] | aff
+    return Certificate(**kw)
+
+
+def wrap(fn, base, safe=False, sides=("cv", "cc"), conditional=False):
+    """``base`` relaxer of ``fn`` tightened by the convexity certificate (a ``univariate.Relaxer``).
+
+    ``sides``: the sides of the relaxation the caller uses. When every output is affine or
+    certified on those sides unconditionally (``exact_certificate``: convex quadratics, norms,
+    log-sum-exp of affine maps, ...), the base relaxation is not evaluated at all: the result is
+    ``f`` (with the quadratic rule's shift) on the certified sides, -inf/+inf on the others,
+    and infinite interval bounds. That removes the McCormick / alphaBB pass over the tape, which
+    dominates the node cost on large quadratics (a 1581-row tape for smallinvDAX). With
+    ``conditional`` that holds for conditional verdicts too (``exact_certificate``): on a box
+    where a condition fails the relaxation is then -inf/+inf."""
     from .fbbt import tape_cache
     from .relax import MC, tighten
     from .univariate import Relaxer
@@ -751,11 +789,22 @@ def wrap(fn, base, safe=False):
             return None
         return cert
 
+    def exact_of(x):
+        return exact_certificate(cert_of(x), sides, conditional) if EXACT else None
+
     def prep(lo, hi):
+        ex = exact_of(lo)
+        if ex is not None:
+            return None, prepare(ex, lo, hi)
         cert = cert_of(lo)
         return base.prepare(lo, hi), (prepare(cert, lo, hi) if cert is not None else None)
 
     def call(x, lo, hi, data):
+        ex = exact_of(x)
+        if ex is not None:
+            vcv, vcc = values(flat, ex, x, lo, hi, data[1], safe)
+            inf = jnp.full(vcv.shape, jnp.inf)
+            return MC(-inf, inf, vcv, vcc)
         m = base.call(x, lo, hi, data[0])
         if data[1] is None:
             return m
