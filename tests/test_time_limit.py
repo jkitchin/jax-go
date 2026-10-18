@@ -219,3 +219,31 @@ def test_ready_kernel_not_dispatched_past_deadline():
     assert not ran
     k(*ARGS, deadline=None)
     assert len(ran) == 1
+
+
+def _late_incumbent(x):
+    return jnp.sum((x - 0.4) ** 2) + jnp.sin(3 * x[0]) * x[1] + 0.3 * jnp.cos(5 * x[2])
+
+
+def test_root_obbt_kernel_started_when_dives_find_first_incumbent(monkeypatch):
+    """No constraints and no incumbent after the root bound: root OBBT is not needed yet, so its
+    kernel is not started. When the root dives then find the first incumbent, OBBT runs: its
+    kernel must be started in the background (and waited for until the deadline), not compiled
+    synchronously by the ``jax.jit`` fallback, which has no deadline."""
+    calls, first = [], [True]
+    call = bnb._Precompiled.__call__
+
+    def counting(self, *args, **kw):
+        if self.name == "obbt":
+            calls.append(self._key(args) in self.ready)
+        out = call(self, *args, **kw)
+        if self.name == "bound" and first[0]:  # the root bound finds no feasible candidate
+            first[0] = False
+            out = (*out[:2], jnp.full_like(out[2], jnp.inf), *out[3:])
+        return out
+
+    monkeypatch.setattr(bnb._Precompiled, "__call__", counting)
+    r = minimize(_late_incumbent, -3 * np.ones(4), 3 * np.ones(4), integer=[0, 1, 2, 3],
+                 local_solve=False, time_limit=120)  # fmt: skip
+    assert np.isfinite(r.fun)
+    assert calls == [True]

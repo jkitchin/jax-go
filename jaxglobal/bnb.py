@@ -1250,11 +1250,16 @@ def minimize(
         one when there are no constraints), and not when the root bound already closes the gap."""
         return bool(obbt) and (constrained or np.isfinite(ub)) and not (ub - float(lb.min()) <= tol())
 
-    if obbt == "root" and padded.mesh is None and need_obbt():
+    def start_root_obbt():
+        """Compile the root OBBT kernel in the background (once; ``start`` skips a started shape)."""
+        if obbt == "root" and padded.mesh is None:
+            K.obbt.start(1, lo.size, functools.partial(K.fingerprint, lo.size) if kcache.cache_root() else None)
+
+    if need_obbt():
         # compile the root OBBT kernel only now, while the root dives run: a problem whose root
         # bound and first incumbent close the gap (most small ones) never traces or compiles it,
         # and the bound kernel's compile does not compete with it for the CPU
-        K.obbt.start(1, lo.size, functools.partial(K.fingerprint, lo.size) if kcache.cache_root() else None)
+        start_root_obbt()
     _mark("root_dives")
     if imask.any() and np.all(np.isfinite(lb)) and np.all(np.isfinite(rxr)):  # root dives: relaxation point, perturbed
         P = np.clip(rxr + rng.normal(size=(_DIVES, lo.size)) * 0.1 * (rhi - rlo) * (np.arange(_DIVES) > 0)[:, None],
@@ -1273,6 +1278,10 @@ def minimize(
             fixed_solve(L, H, S)
     _mark("root_obbt")
     if need_obbt():  # (the search would end at once on a closed gap: OBBT would only cost its compile)
+        # the dives may have found the first incumbent (no constraints): start the kernel now if
+        # not yet, so that the call below waits for it until the deadline instead of compiling
+        # synchronously through ``jax.jit`` (which has no deadline)
+        start_root_obbt()
         try:
             lb2, xc, fc, rlo2, rhi2, rxr2 = evaluate(rlo, rhi, with_obbt=True)
         except _CompileTimeout:  # the root bound stands; the search loop then stops on the time limit
