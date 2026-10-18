@@ -65,6 +65,28 @@ def _gap_scores(Q, lo, hi, x):
     return out
 
 
+_SHRINK = (8.0, 100.0)  # _branch_widths: rescale only variables root tightening narrowed at least [0]-fold, by at most [1]-fold
+
+
+def _branch_widths(width0, rlo, rhi, shrink=_SHRINK):
+    """The reference widths that branching scores measure relative widths against: ``width0``,
+    except for a variable that root tightening (FBBT, OBBT; the widest over the root boxes)
+    narrowed at least ``shrink[0]``-fold, which is measured against its root width instead,
+    but at most ``shrink[1]``-fold narrower than ``width0``.
+
+    Measured against the user's box, a variable that root OBBT narrowed a lot starts the search
+    looking almost split already, and pseudocost (gains per squared relative width; untried
+    variables scored at the mean pseudocost) then never tries it: ex8_4_1's slope, in all ten
+    bilinear terms, is cut from [-2, 2] to width 0.24 and was never branched on (23811 nodes;
+    1523 with its root width). Modest narrowing is left alone: rescaling nous1's variables
+    narrowed 1.2-7x doubled its nodes. The ``shrink[1]`` floor keeps a variable that tightening
+    all but fixed (width 1e-6 of 10 on pooling_adhya1stp) from looking as wide as an untouched
+    one. Only branching scores use these widths: bounds are unaffected."""
+    rw = np.max(np.asarray(rhi) - np.asarray(rlo), axis=0)
+    ok = np.isfinite(width0) & np.isfinite(rw) & (rw > 0) & (rw * shrink[0] <= width0)
+    return np.where(ok, np.maximum(np.where(ok, rw, 1.0), width0 / shrink[1]), width0)
+
+
 def make_bounder(f, n_fw=20, univariate=False, alphabb=False, multivariate=False, return_xr=False, safe=False):
     """Return ``bound(lo, hi, cutoff) -> (lb, x, f(x), lo', hi')`` for one box.
 
@@ -1715,6 +1737,7 @@ def minimize(
             pass
     _mark("search")
     open_lo, open_hi, open_lb, open_xr = rlo, rhi, lb, rxr
+    width0 = _branch_widths(width0, rlo, rhi)
     sumL, sumR, cnt = np.zeros(lo.size), np.zeros(lo.size), np.zeros(lo.size)  # pseudocost sums, observations
 
     def pseudo_scores(relw, free, xr):
