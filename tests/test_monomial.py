@@ -149,6 +149,22 @@ def test_safe_covers_values_exp_flushes_to_zero():
 
 
 @pytest.mark.parametrize("safe", [False, True])
+def test_coefficients_that_overflow_or_scale_below_normal(safe):
+    """A constant product that overflows (1e300 * 1e300, 1 / 1e-310) leaves the term to the product rule;
+    a small coefficient gets the absolute safe margin after scaling, not before."""
+    cases = [(lambda x: x[0] ** 2.5 * x[1] * 1e300 * 1e300, [1e-80, 1e-100], [2e-80, 2e-100])]
+    if safe:  # (plain mode's division rule alone already gives inf for / 1e-310)
+        cases.append((lambda x: x[0] ** 2.5 * x[1] / 1e-310, [1e-100, 1e-50], [2e-100, 2e-50]))
+        cases.append((lambda x: 1e-23 * x[0] ** 2.5 * x[1] ** 0.5, [1e-120, 1.0], [1.0000001e-120, 1.0]))
+    for f, lo, hi in cases:
+        lo, hi = jnp.array(lo), jnp.array(hi)
+        v = float(f(np.asarray(lo)))
+        out = relax(f, safe=safe)(lo, lo, hi)
+        assert not np.isnan([float(out.lo), float(out.hi), float(out.cv), float(out.cc)]).any()
+        assert float(out.lo) <= v <= float(out.hi) and float(out.cv) <= v <= float(out.cc)
+
+
+@pytest.mark.parametrize("safe", [False, True])
 def test_small_posynomial_problem(safe):
     """min 5 x^1.2781 y^-0.1959 z^2.4242 / w^0.9904 + 0.2 w s.t. x * y >= 4, z + w >= 3 on a positive box:
     the bound reaches the optimum found by a dense local search (no wrong answer, plain and safe)."""

@@ -479,7 +479,7 @@ def _const_float(v):
     return a if np.isfinite(a) else None
 
 
-def mc_monomial(coef, factors, safe=False):
+def mc_monomial(coef, factors, safe=False, nround=0):
     """Relaxation of the monomial ``coef * prod_i b_i ** a_i`` (``coef > 0``) in log space.
 
     On a box where every base is positive and bounded (``0 < lo_i``, ``hi_i < inf``) the monomial
@@ -497,7 +497,8 @@ def mc_monomial(coef, factors, safe=False):
     sums with nonnegative weights), and ``cv <= monomial <= cc`` on the box. Factor-by-factor McCormick
     products lose that a posynomial term is convex in ``log x``; this keeps it, and is intersected with
     the product's. With ``safe`` everything is moved outward by a relative margin of ``SAFE_K`` ulps
-    times the error scale of the log-space sum (see the comment below). Returns ``(ok, MC)``: ``ok``
+    times the error scale of the log-space sum (see the comment below), plus ``nround`` roundings in
+    ``coef`` (a finite, normal float), and then by an absolute ``tiny``. Returns ``(ok, MC)``: ``ok``
     marks the boxes where it applies; elsewhere the result is a dummy.
     """
     ok = jnp.asarray(True)
@@ -529,12 +530,15 @@ def mc_monomial(coef, factors, safe=False):
         # d = SAFE_K eps (k + 1) S of the exact ones. exp of them is then within a factor
         # exp(+-d) (1 +- SAFE_K eps) of exact; the secant of exp is off by at most (d + ulps) eH.
         # A relative margin m = 2 SAFE_K eps ((k + 1) S + 2) covers both (exp(-d) >= 1 - d).
-        m = lax.stop_gradient(2.0 * SAFE_K * float(jnp.finfo(eL.dtype).eps) * ((len(factors) + 1) * S + 2.0))
-        # exp flushes values below the normal range to 0, where no relative margin helps: an absolute
-        # tiny on top covers it, and the monomial is positive so lo and cv stay at 0 or above.
+        # coef carries nround roundings and the scaling by it one more, each within an ulp.
+        m = 2.0 * SAFE_K * float(jnp.finfo(eL.dtype).eps) * ((len(factors) + 1) * S + 3.0 + nround)
+        m = lax.stop_gradient(m)
+        # exp and the scaling flush values below the normal range to 0, where no relative margin helps:
+        # an absolute tiny after scaling covers it, and the monomial is positive so lo and cv stay >= 0.
         tiny = float(jnp.finfo(eL.dtype).tiny)
-        cv, lo = jnp.maximum(cv * (1.0 - m) - tiny, 0.0), jnp.maximum(lo * (1.0 - m) - tiny, 0.0)
-        hi, cc = hi * (1.0 + m) + tiny, cc + m * eH + tiny
+        lo, cv = (jnp.maximum(coef * v * (1.0 - m) - tiny, 0.0) for v in (lo, cv))
+        hi, cc = coef * hi * (1.0 + m) + tiny, coef * (cc + m * eH) * (1.0 + m) + tiny
+        return ok, MC(lo, hi, cv, cc)
     return ok, MC(coef * lo, coef * hi, coef * cv, coef * cc)
 
 
@@ -562,13 +566,13 @@ class Monomials:
     def __init__(self, consumed, ctx: Ctx):
         self.consumed = consumed
         self.ctx = ctx
-        self.rec = {}  # key -> (coef, {base key: (base MC, exponent)}, has_pow)
+        self.rec = {}  # key -> (coef, {base key: (base MC, exponent)}, has_pow, roundings in coef)
 
     def _factor(self, k, v):
         if _hashable(k) and k in self.rec:
             return self.rec[k]
         if is_mc(v) and _hashable(k):
-            return (1.0, {k: (v, 1.0)}, False)
+            return (1.0, {k: (v, 1.0)}, False, 0)
         return None
 
     def observe(self, name, ins, invals, outvar, out):
@@ -578,7 +582,7 @@ class Monomials:
         if name == "pow":
             p = _const_float(invals[1])
             if is_mc(invals[0]) and p is not None and _hashable(ins[0]):
-                rec = (1.0, {ins[0]: (invals[0], p)}, True)
+                rec = (1.0, {ins[0]: (invals[0], p)}, True, 0)
         else:
             u, v = ins
             cu, cv = _const_float(invals[0]), _const_float(invals[1])
@@ -588,7 +592,7 @@ class Monomials:
                 c, k, val = (cu, v, invals[1]) if cu is not None else (cv, u, invals[0])
                 fr = self._factor(k, val) if c > 0 else None
                 if fr is not None and (name == "mul" or cv is not None):
-                    rec = (fr[0] * c, fr[1], fr[2])
+                    rec = (fr[0] * c, fr[1], fr[2], fr[3] + (2 if name == "div" else 1))
             else:
                 fu, fv = self._factor(u, invals[0]), self._factor(v, invals[1])
                 if fu is not None and fv is not None:
@@ -596,18 +600,20 @@ class Monomials:
                     fac = dict(fu[1])
                     for kk, (bv, a) in fv[1].items():
                         fac[kk] = (bv, fac[kk][1] + sgn * a) if kk in fac else (bv, sgn * a)
-                    rec = (fu[0] * fv[0] if sgn > 0 else fu[0] / fv[0], fac, fu[2] or fv[2])
+                    rec = (fu[0] * fv[0] if sgn > 0 else fu[0] / fv[0], fac, fu[2] or fv[2], fu[3] + fv[3] + 1)
         if rec is None or len(rec[1]) > self.MAX_FACTORS:
             return out
         self.rec[outvar] = rec
-        coef, fac, has_pow = rec
+        coef, fac, has_pow, nround = rec
         fac = [(bv, a) for bv, a in fac.values() if a != 0]
-        if outvar in self.consumed or not has_pow or len(fac) < 2 or not (coef > 0):
+        # a coef that over- or underflowed (1e300 * 1e300, 1 / 1e-310) is not the function's: leave it
+        normal = bool(np.finfo(np.float64).tiny <= coef < np.inf)
+        if outvar in self.consumed or not has_pow or len(fac) < 2 or not normal:
             return out
         shp = jnp.shape(out.lo)
         if any(jnp.shape(bv.lo) != shp for bv, _ in fac):
             return out
-        ok, m = mc_monomial(coef, fac, self.ctx.safe)
+        ok, m = mc_monomial(coef, fac, self.ctx.safe, nround)
         return select_mc(ok, intersect_mc(out, m), out)
 
 
