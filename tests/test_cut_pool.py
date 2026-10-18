@@ -226,3 +226,36 @@ def test_exact_switch_off_keeps_base():
         convexity.EXACT = True
     assert np.isfinite(float(m_off.lo[0]))
     assert float(m_on.cv[0]) == pytest.approx(float(m_off.cv[0]), rel=1e-12)
+
+
+def test_root_obbt_starts_while_pool_bound_kernel_builds(monkeypatch):
+    """With the cut pool, the bound kernel built in the background is ``bound_pool`` (with the pool's
+    arguments): the root OBBT build still starts while the main thread waits for it, not only after
+    the root bound. The pool kernel's build is held until the OBBT build starts (or 20 s)."""
+    import threading
+
+    from jaxglobal import bnb
+    from jaxglobal.problems import CONSTRAINED_PROBLEMS
+
+    monkeypatch.setenv("JAXGLOBAL_CACHE", "0")  # no kernels loaded from disk
+    gate, late, started = threading.Event(), [], []
+    lower, start = bnb._Precompiled._lower, bnb._Precompiled.start
+
+    def held_lower(self, args, fingerprint):
+        if self.name == "bound_pool" and not gate.wait(20):
+            late.append(self.name)
+        return lower(self, args, fingerprint)
+
+    def watched_start(self, *a, **k):
+        started.append(self.name)
+        if self.name == "obbt":
+            gate.set()
+        return start(self, *a, **k)
+
+    monkeypatch.setattr(bnb._Precompiled, "_lower", held_lower)
+    monkeypatch.setattr(bnb._Precompiled, "start", watched_start)
+    p = next(q for q in CONSTRAINED_PROBLEMS if q.name == "G06")
+    r = minimize(lambda x: p.f(x), p.lo, p.hi, ineq=p.ineq, eq=p.eq, time_limit=60)  # a new f: new kernels
+    assert "bound_pool" in started and "obbt" in started
+    assert not late
+    assert r.status == "optimal" and abs(r.fun - p.fstar) <= 1e-3 * abs(p.fstar)
