@@ -102,3 +102,22 @@ def test_incumbent_repair_does_not_walk_away():
     assert r.verified
     if r.status == "optimal":
         assert r.fun - r.lower_bound <= 1e-3 * (1 + abs(r.fun))
+
+
+@needs_pounce
+def test_local_solution_feasible_after_clipping():
+    """pounce must not relax the variable bounds (Ipopt's default ``bound_relax_factor`` 1e-8).
+
+    The optimum has x0 at its upper bound with an equality of slope 1e4 in x0: a solution
+    relaxed by 1e-8 past the bound and clipped back violates the equality by about 1e-4,
+    so ``screen`` rejects it (ex5_4_3 found its optimum at the root and threw it away
+    for 50 s this way)."""
+    from jaxglobal.local import make_local
+
+    lo, hi = np.array([0.0, 0.0]), np.array([1.0, 2e4])
+    f = lambda x: -x[0] - 1e-6 * x[1]  # noqa: E731
+    eq = lambda x: jnp.atleast_1d(x[1] - 1e4 * x[0])  # noqa: E731
+    solve = make_local(f, None, eq, lo, hi, "pounce")
+    X = np.clip(np.asarray(solve(np.array([[0.3, 100.0], [0.9, 1e4]]))), lo, hi)
+    assert np.all(np.abs(X[:, 1] - 1e4 * X[:, 0]) <= 1e-6)
+    assert np.allclose(X[:, 0], 1.0, atol=1e-6)
