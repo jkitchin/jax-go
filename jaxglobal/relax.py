@@ -368,8 +368,8 @@ def mc_log(x: MC) -> MC:
     else:
         d = LOG_DELTA * U
         z = _mid(U, xp.cv, xp.cc)
-        cc = jnp.where(z >= d, jnp.log(jnp.maximum(z, d)), jnp.log(d) + (z - d) / d)
-        rp = MC(jnp.full_like(U, -INF), jnp.log(U), jnp.full_like(U, -INF), jnp.minimum(cc, jnp.log(U)))
+        cc = jnp.where(z >= d, jnp.log(jnp.where(z >= d, z, d)), jnp.log(d) + (z - d) / d)  # tie-free: no max
+        rp = MC(jnp.full_like(U, -INF), jnp.log(U), jnp.full_like(U, -INF), jnp.where(cc < jnp.log(U), cc, jnp.log(U)))
     return select_mc(ok, concave_rule(jnp.log, xs, xs.hi), select_mc(part, rp, unbounded_like(x)))
 
 
@@ -412,10 +412,11 @@ def mc_xlogx(x: MC) -> MC:
         ld = jnp.log(d)
 
         def g_d(z):
-            return jnp.where(z >= d, _xlogx0(jnp.maximum(z, d)), d * ld + (1.0 + ld) * (z - d))
+            # ``where``, not ``maximum``: at z == d a max tie would halve the slope (an invalid cut)
+            return jnp.where(z >= d, _xlogx0(jnp.where(z >= d, z, d)), d * ld + (1.0 + ld) * (z - d))
 
         cv = g_d(_mid(xmin, xs.cv, xs.cc))
-        fin = jnp.isfinite(U)
+        fin = jnp.isfinite(U) & jnp.isfinite(gU)  # hi * log(hi) can overflow for a finite hi
         Uf = jnp.where(fin, U, L0 + 1.0)
         xmax = jnp.where(gU >= gL, Uf, L0)
         cc = jnp.where(fin, _secant(_xlogx0, L0, Uf, _mid(xmax, xs.cv, xs.cc)), INF)

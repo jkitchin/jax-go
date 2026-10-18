@@ -154,3 +154,81 @@ def test_entropy_problem_solves_with_finite_bound(lo0):
     assert r.status == "optimal"
     assert np.isfinite(r.lower_bound) and r.lower_bound <= fstar + 1e-9
     assert abs(r.fun - fstar) < 1e-5
+
+
+# --- regressions from the review of PR #41 ---------------------------------------------------------
+
+
+@pytest.mark.parametrize("lo", [1e-6, 0.1, 0.125, 0.3, 1.0 / np.e, 0.5, 2.0])
+def test_cv_slope_at_lower_end_is_exact(lo):
+    """At ``x == lo`` (``d == lo``) the cv gradient is ``g'(lo) = 1 + log(lo)``, not half of it: a
+    ``maximum(z, d)`` guard tied there and JAX split its derivative 50/50, which gave invalid cuts
+    (lo = 0.1: the cut at 0.15 was above ``g``)."""
+    hi = 3.0
+    cv = lambda p: mc_xlogx(_mc(lo, hi, p)).cv  # noqa: E731
+    s = float(jax.grad(cv)(jnp.asarray(lo)))
+    if lo < np.exp(-1.0):  # where tighten's max(cv, lo) does not touch cv
+        assert np.isclose(s, 1.0 + np.log(lo), rtol=1e-12, atol=1e-12)
+    Z = np.linspace(lo, hi, 2001)
+    assert np.all(float(cv(jnp.asarray(lo))) + s * (Z - lo) <= g(Z) + 1e-12 * (1 + np.abs(g(Z))))
+
+
+@pytest.mark.parametrize("safe", [False, True])
+def test_relax_cut_at_lower_end_valid(safe):
+    """The same through ``relax`` of the user-level function (plain and safe mode)."""
+    lo, hi = 0.1, 1.0
+    f = lambda x: x[0] * jnp.log(x[0])  # noqa: E731
+    r = lambda x: relax(f, safe=safe)(x, jnp.array([lo]), jnp.array([hi])).cv  # noqa: E731
+    p = jnp.array([lo])
+    s = float(jax.grad(r)(p)[0])
+    Z = np.linspace(lo, hi, 2001)
+    assert np.all(float(r(p)) + s * (Z - lo) <= g(Z) + 1e-12)
+
+
+def test_log_cc_slope_at_delta_is_exact():
+    """mc_log's cc on a box touching 0 at exactly ``z == d = LOG_DELTA * hi``: slope ``1/d``."""
+    from jaxglobal.relax import LOG_DELTA
+
+    hi = 2.0
+    d = LOG_DELTA * hi
+    cc = lambda p: mc_log(_mc(0.0, hi, p)).cc  # noqa: E731
+    s = float(jax.grad(cc)(jnp.asarray(d)))
+    assert np.isclose(s, 1.0 / d, rtol=1e-12)
+    Z = np.concatenate([np.linspace(1e-12, 4 * d, 500), np.linspace(d, hi, 500)])
+    assert np.all(float(cc(jnp.asarray(d))) + s * (Z - d) >= np.log(Z) - 1e-12 * (1 + np.abs(np.log(Z))))
+
+
+@pytest.mark.parametrize("safe", [False, True])
+@pytest.mark.parametrize("univariate", [False, True])
+def test_frank_wolfe_box_bound_valid(safe, univariate):
+    """make_bounder (Frank-Wolfe on cv, steps exactly onto vertices) on ``x log x + a x`` over
+    [0.125, 1], minimum -0.18 at 0.18: the bound was -0.1706 (above the minimum)."""
+    from jaxglobal.bnb import make_bounder
+
+    xs = 0.18
+    a = -1 - np.log(xs)
+    f = lambda x: x[0] * jnp.log(x[0]) + a * x[0]  # noqa: E731
+    lb = float(make_bounder(f, safe=safe, univariate=univariate)(jnp.array([0.125]), jnp.array([1.0]))[0])
+    assert lb <= -xs + 1e-12
+
+
+@pytest.mark.parametrize("safe", [False, True])
+def test_separable_entropy_plus_nonconvex_solves_correctly(safe):
+    """sum_i (x_i log x_i + a x_i) on [0.125, 1]^3 plus a two-well y-term: reported "optimal" with a
+    lower bound above the true minimum -0.543001 before."""
+    xs, n = 0.18, 3
+    a = -1 - np.log(xs)
+    f = lambda x: jnp.sum(x[:n] * jnp.log(x[:n]) + a * x[:n]) + (x[n] ** 2 - 1) ** 2 + 0.003 * x[n]  # noqa: E731
+    lo, hi = np.array([0.125] * n + [-1.5]), np.array([1.0] * n + [2.0])
+    ys = np.linspace(-1.5, 2, 200001)
+    true = -n * xs + np.min((ys**2 - 1) ** 2 + 0.003 * ys)
+    r = minimize(f, lo, hi, time_limit=20, local_solve=False, safe=safe)
+    assert r.lower_bound <= true + 1e-6
+    assert r.status == "optimal" and abs(r.fun - true) < 1e-4
+
+
+def test_secant_with_overflowing_hi_is_inf_not_nan():
+    """``hi * log(hi)`` overflows for hi ~ 1e306: cc is +inf instead of NaN."""
+    m = mc_xlogx(_mc(3.0, 1e306, 3.0))
+    assert not any(np.isnan(float(c)) for c in m)
+    assert float(m.cc) == np.inf and np.isclose(float(m.cv), 3 * np.log(3))
