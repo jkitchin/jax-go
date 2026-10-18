@@ -19,3 +19,21 @@ else:
     jax.config.update("jax_compilation_cache_dir", str(CACHE))
     jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
     jax.config.update("jax_persistent_cache_min_entry_size_bytes", 0)
+
+
+# Tests listed in slow_tests.txt get the `slow` marker; CI deselects them with -m "not slow".
+SLOW = {
+    line.strip()
+    for line in (pathlib.Path(__file__).parent / "slow_tests.txt").read_text().splitlines()
+    if line.strip() and not line.startswith("#")
+}
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "slow: takes >= 4 s; skipped on CI (see tests/slow_tests.txt)")
+
+
+def pytest_collection_modifyitems(config, items):
+    for item in items:
+        if item.nodeid in SLOW:
+            item.add_marker("slow")
