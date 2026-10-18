@@ -504,11 +504,37 @@ def _ipm(c, pat, vals, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10, target=j
     return z, yb, best
 
 
+def squares_bounded_below(Q):
+    """Whether a tangent (a lower bound ``w_p >= 2 p x - p^2``) on some square column can change
+    the lifted LP's value: False when no column is a square, or when every square column ``w``
+    enters the objective with coefficient <= 0 and every inequality row ``g <= 0`` with
+    coefficient <= 0, appears in no equality or RLT row and is no factor of another column.
+
+    Then raising ``w`` to its secant (the one row that bounds it above, ``w <= (l + u) x - l u``)
+    keeps every other row feasible and does not raise the objective, and the secant is above
+    ``x^2`` and so above every tangent: the LP optimum is attained with all tangent rows slack,
+    and Kelley rounds only re-solve the same LP. This is the case of reverse-convex distance
+    constraints ``(x_i - x_j)^2 + (y_i - y_j)^2 >= d^2`` (circle packing), where only the
+    secants of the squares bind."""
+    P = len(Q.pairs)
+    n = Q.E.shape[1] - P
+    sq = np.flatnonzero(Q.pairs[:, 0] == Q.pairs[:, 1])
+    if sq.size == 0:
+        return False
+    cols = n + sq
+    g = Q.E[1:1 + Q.n_g][:, cols]
+    h = Q.E[1 + Q.n_g:1 + Q.n_g + Q.n_h][:, cols]
+    factor = np.isin(cols, Q.pairs)
+    used = (Q.E[0, cols] > 0) | (g > 0).any(0) | (h != 0).any(0) | factor
+    if Q.rlt.size:
+        used |= (Q.rlt[:, cols] != 0).any(0)
+    return bool(used.any())
+
+
 def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False):
     """Return ``bound(lo, hi, cutoff) -> (lb, x_lp, infeasible, lo', hi')`` for one box
     (the contract of ``lp.make_constrained_bounder``) from the lifted LP of ``Q``."""
-    squares = bool(np.any(Q.pairs[:, 0] == Q.pairs[:, 1]))
-    n_kelley = n_kelley if squares else 0  # the bilinear facets are already the envelopes
+    n_kelley = n_kelley if squares_bounded_below(Q) else 0  # else the tangents are redundant
     layouts = {}
 
     def bound(lo, hi, cutoff=jnp.inf):

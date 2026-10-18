@@ -118,3 +118,73 @@ def test_minimize_haverly_quadratic():
     assert r.lower_bound <= -400.0 + 1e-6
     r0 = jaxglobal.minimize(f, lo, hi, ineq=g, eq=h, rel_tol=1e-4, abs_tol=1e-6, time_limit=120, quadratic=False)
     assert r0.status == "optimal" and r.nodes <= r0.nodes
+
+
+def _three_circles():
+    """Three unit-diameter circles in a W x H rectangle, minimize W H: v = (x1, y1, ..., W, H, a)."""
+    n = 9
+
+    def f(v):
+        return v[8]
+
+    def g(v):
+        c = [(v[0], v[1]), (v[2], v[3]), (v[4], v[5])]
+        d = [1.0 - (c[i][0] - c[j][0]) ** 2 - (c[i][1] - c[j][1]) ** 2 for i in range(3) for j in range(i + 1, 3)]
+        box = [v[2 * i + k] + 0.5 - v[6 + k] for i in range(3) for k in range(2)]
+        return jnp.stack(d + box)
+
+    def h(v):
+        return jnp.atleast_1d(v[6] * v[7] - v[8])
+
+    lo = np.array([0.5] * 6 + [1.0, 1.0, 1.0])
+    hi = np.array([3.5] * 6 + [4.0, 4.0, 16.0])
+    return f, g, h, lo, hi, n
+
+
+def test_squares_bounded_below():
+    """Kelley tangents on the squares are skipped only where no row needs a square bounded below."""
+    from jaxglobal.quadratic import squares_bounded_below
+
+    f, g, h, lo, hi, n = _three_circles()
+    assert not squares_bounded_below(quadratic_form(f, g, h, n))  # reverse-convex: only secants bind
+    assert squares_bounded_below(quadratic_form(lambda x: x[0] ** 2 + x[1], None, None, 2))  # convex objective
+    assert squares_bounded_below(quadratic_form(lambda x: x[1], lambda x: x[0] ** 2 - x[1], None, 2))  # convex row
+    assert squares_bounded_below(quadratic_form(lambda x: x[1], None, lambda x: x[0] ** 2 - x[1], 2))  # equality
+    assert not squares_bounded_below(quadratic_form(lambda x: -x[0] ** 2 + x[1], None, None, 2))  # concave
+    assert not squares_bounded_below(quadratic_form(lambda x: x[0] * x[1], None, None, 2))  # no square
+
+
+def test_skipped_tangents_do_not_change_the_bound(monkeypatch):
+    """On boxes of the circle model the bound without Kelley rounds equals the bound with them."""
+    import jaxglobal.quadratic as qd
+
+    f, g, h, lo, hi, n = _three_circles()
+    Q = quadratic_form(f, g, h, n)
+    rng = np.random.default_rng(3)
+    boxes = []
+    for _ in range(16):
+        c = rng.uniform(lo, hi)
+        w = rng.uniform(0.3, 1.0) * (hi - lo)
+        boxes.append((np.clip(c - w, lo, hi), np.clip(c + w, lo, hi)))
+    skip = make_quadratic_bounder(Q, n_kelley=4, tol=1e-6)
+    monkeypatch.setattr(qd, "squares_bounded_below", lambda Q: True)
+    full = make_quadratic_bounder(Q, n_kelley=4, tol=1e-6)
+    checked = 0
+    for blo, bhi in boxes:
+        a, b = skip(jnp.asarray(blo), jnp.asarray(bhi))[0], full(jnp.asarray(blo), jnp.asarray(bhi))[0]
+        if b > 1e3 or a > 1e3:  # an infeasible box: both certificates diverge and prune it
+            assert a > 1e3 and b > 1e3
+        else:
+            assert abs(a - b) <= 1e-6 * (1 + abs(b))
+            checked += 1
+    assert checked >= 3
+
+
+def test_circle_packing_solves():
+    """Three unit circles: the optimal rectangle is 1 x 3 (area 3) or the triangle packing area."""
+    f, g, h, lo, hi, n = _three_circles()
+    r = jaxglobal.minimize(f, lo, hi, ineq=g, eq=h, time_limit=60)
+    assert r.status == "optimal"
+    assert r.lower_bound <= r.fun + 1e-6
+    # stacked triangle: W = 1 + sqrt(3)/2... the solver's answer must be at most the 1 x 3 strip
+    assert r.fun <= 3.0 + 1e-6
