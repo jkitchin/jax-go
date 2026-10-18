@@ -197,3 +197,43 @@ def test_lp_bounds_leave_truly_free_variables_alone():
     R = LinearRelaxation(f, lambda x: jnp.atleast_1d(x[0] - x[1]), None, 2)
     l2, h2 = R.bounds(np.array([-INF, -1.0]), np.array([INF, 1.0]), cutoff=1.0)
     assert l2[0] == -INF and h2[0] <= 1.0 + 1e-2  # x0 <= x1 <= 1, x0 unbounded below
+
+
+def _same(a, b):
+    """Exact equality of nested results (NaN equal to NaN)."""
+    if isinstance(a, (tuple, list)):
+        return isinstance(b, (tuple, list)) and len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b))
+    if a is None or b is None:
+        return a is b
+    return np.array_equal(np.asarray(a), np.asarray(b), equal_nan=True)
+
+
+_JIT_CASES = [
+    ("sqrt", lambda x: jnp.sqrt(x[0]) + x[1], lambda x: jnp.atleast_1d(x[0] * x[1] - 1), None, [0, -INF], [INF, INF]),
+    ("div", lambda x: x[0] / x[1] + x[2], lambda x: jnp.array([x[2] - x[0], x[1] - 3]), None,
+     [-INF, 1, -INF], [INF, INF, INF]),
+    ("const_row", lambda x: x[0], lambda x: jnp.array([1.0 + 0 * x[0], x[0] - x[1]]), None, [-INF, -1], [INF, 1]),
+    ("abs_max", lambda x: jnp.abs(x[0]) + jnp.maximum(x[1], x[2]), lambda x: jnp.atleast_1d(x[0] + x[1] + x[2] - 1),
+     lambda x: jnp.atleast_1d(x[0] - 2 * x[2]), [-INF, -INF, 0], [INF, INF, INF]),
+    ("nan_lo", lambda x: x[0] + x[1], lambda x: jnp.atleast_1d(x[0] * x[1] - 1), None, [0, 0], [INF, INF]),
+] + [(p.name, p.f, p.ineq, p.eq, p.lo, np.where(np.arange(len(p.hi)) % 2 == 0, INF, p.hi))
+     for p in CONSTRAINED_PROBLEMS if p.name in ("G06", "haverly", "reactor")]  # fmt: skip
+
+
+@pytest.mark.parametrize("case", _JIT_CASES, ids=[c[0] for c in _JIT_CASES])
+def test_jitted_sweeps_match_eager(case, monkeypatch):
+    """The structural sweeps give the same results jitted (small tapes) and eager (large ones)."""
+    from jaxglobal import domain as D
+
+    _, f, g, h, lo, hi = case
+    lo, hi = np.asarray(lo, float), np.asarray(hi, float)
+    boxes = [(lo, hi), (np.where(np.isfinite(lo), lo, -5), np.where(np.isfinite(hi), hi, 5)), (0 * lo, 0 * hi)]
+    out = {}
+    for mode, limit in (("jit", 10**9), ("eager", -1)):
+        monkeypatch.setattr(D, "_JIT_MAX_NODES", limit)
+        with np.errstate(all="ignore"):
+            rows = [D._row_upper(f, g, h, L, H) for L, H in boxes]
+        s = D._row_structure(f, g, h, lo.size)
+        mb = D.monotone_bounds(f, g, h, lo.copy(), hi.copy(), struct=s) if s is not None else None
+        out[mode] = (D.used_variables(f, g, h, lo.size), rows, mb, D.bound_domain(f, g, h, lo, hi)[:3])
+    assert _same(out["jit"], out["eager"])
