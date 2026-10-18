@@ -1,6 +1,8 @@
 """Global cut pool of convex parts (``lp.make_pool_cuts``, ``lp.pool_parts``), the exact
 convexity mode (``convexity.exact_certificate``) and the early-stopping FBBT rounds."""
 
+import time
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -165,12 +167,18 @@ def test_pool_probe_verdicts(monkeypatch, verdict):
 
     lo, hi = -3 * np.ones(3), 3 * np.ones(3)
     r0 = minimize(f, lo, hi, ineq=g, cut_pool=0, max_iter=2000)
-    for _ in range(2):  # the zero-row kernel compiles in the background: certainly ready the second time
+    # the zero-row kernel compiles in the background after an "off" verdict; with a cold kernel
+    # cache (JAXGLOBAL_CACHE=0) it may not be ready in the second run either, so retry a few times
+    for attempt in range(6):
+        if attempt:
+            time.sleep(2.0)
         rows.clear()
         r = minimize(f, lo, hi, ineq=g, max_iter=2000)
         assert r.status == "optimal"
         assert r.fun == pytest.approx(r0.fun, rel=1e-5, abs=1e-6)
         assert r.lower_bound <= r0.fun + 1e-6
+        if attempt >= 1 and (verdict == "on" or 0 in rows):
+            break
     assert rows[0] > 0  # the probe runs with the pool's rows
     assert (0 in rows) == (verdict == "off")
 
