@@ -216,7 +216,7 @@ def test_dive_runs_in_chunks_when_the_whole_dive_does_not_fit(monkeypatch):
     monkeypatch.setattr(bnb, "_DIVE_FRAC", np.inf)
     monkeypatch.setattr(K, "dive", _CountingDive(K.dive))
     _slow_bound(monkeypatch, 0.5)
-    minimize(_mixed, lo, hi, time_limit=3.0, **MIXED)
+    minimize(_mixed, lo, hi, time_limit=2.0, **MIXED)  # a whole dive (3 x 0.5 s, x 1.5) would not fit
     assert K.dive.runs >= 1
     monkeypatch.undo()
 
