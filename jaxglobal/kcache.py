@@ -51,7 +51,7 @@ def enable_compilation_cache():
     except OSError:
         return
     jax.config.update("jax_compilation_cache_dir", path)
-    jax.config.update("jax_persistent_cache_min_compile_time_secs", 0.2)
+    jax.config.update("jax_persistent_cache_min_compile_time_secs", 0.0)
 
 
 def _source_hash():
