@@ -665,14 +665,202 @@ ELEMENTWISE_BACK = {"add", "add_any", "sub", "mul", "div", "neg", "exp", "exp2",
                     "select_n", "clamp", "gt", "ge", "lt", "le", "eq", "ne", "and", "or", "not"}  # fmt: skip
 
 
-def guarded_slots(tape):
-    """Slots whose value may be irrelevant at some points: used, directly or through other
-    equations, only as a case of a ``select_n`` (``jnp.where``).
+# Primitives whose result is defined where an operand is NaN (``NaN > 0.5`` is False): the value
+# of their operands does not reach the output, so a domain rule on an operand (``sqrt(x) > 0.5``
+# narrowing ``x >= 0``) would cut points where the expression is defined.
+NAN_STOP = {"gt", "ge", "lt", "le", "eq", "ne", "is_finite"}
 
-    ``jnp.where(x > 0.5, jnp.log(x), 0.0)`` evaluates ``log(x)`` at every point but uses it only
-    where ``x > 0.5``, so neither its domain (``x > 0``) nor its interval may narrow ``x`` at the
-    other points. Every other slot is used unconditionally: its value enters an output (or a
-    predicate) at every point, so the backward rules may narrow its inputs.
+# Equations whose operand elements reach the output elements by a known pattern (``_operand_mask``).
+_RESHAPE_LIKE = {"reshape", "squeeze", "expand_dims", "convert_element_type", "copy", "copy_p", "reduce_precision"}
+
+
+def stops_nan(node):
+    """True if the equation's result is defined where its operands are NaN: a comparison, a cast
+    to a non-float dtype, ``x ** 0``. Its operands' values do not reach the result."""
+    name, p = node.eqn.primitive.name, node.eqn.params
+    return name in NAN_STOP or (name == "convert_element_type" and not jnp.issubdtype(p["new_dtype"], jnp.inexact)) \
+        or (name == "integer_pow" and p["y"] == 0)  # fmt: skip
+
+
+def _unbcast_mask(m, shape, xp):
+    """OR of the mask ``m`` over the dimensions an operand of ``shape`` was broadcast along."""
+    shape = tuple(shape)
+    if m.shape == shape:
+        return m
+    lead = m.ndim - len(shape)
+    if lead < 0:
+        return xp.broadcast_to(xp.any(m), shape)
+    if lead:
+        m = xp.any(m, axis=tuple(range(lead)))
+    ones = tuple(i for i, s in enumerate(shape) if s == 1 and m.shape[i] != 1)
+    if ones:
+        m = xp.any(m, axis=ones, keepdims=True)
+    return m if m.shape == shape else xp.broadcast_to(xp.any(m), shape)
+
+
+def _set(z, idx, v, xp):
+    if xp is np:
+        z = z.copy()
+        z[idx] = v
+        return z
+    return z.at[idx].set(v)
+
+
+def _operand_mask(node, i, m, shape, xp=jnp, value=None):
+    """Elements of operand ``i`` (of ``shape``) of ``node`` whose value reaches an element of its
+    (single) output where the bool mask ``m`` is True; an operand that is not a slice, broadcast,
+    reshape, ... of the output counts as reaching it wherever any element of ``m`` does (always
+    safe: a False element only withholds narrowing). ``xp`` is ``np`` (static) or ``jnp``;
+    ``value(slot)`` is the value of a slot that does not depend on x (an index), or None."""
+    eqn = node.eqn
+    name, p = eqn.primitive.name, eqn.params
+    shape = tuple(shape)
+    if stops_nan(node):
+        return xp.zeros(shape, bool)
+    if name in ELEMENTWISE_BACK or name in _ELEMENTWISE_NAN:
+        return _unbcast_mask(m, shape, xp)
+    if i == 0 and name in _RESHAPE_LIKE and int(np.prod(shape)) == int(np.prod(m.shape)):
+        return xp.reshape(m, shape)
+    if i == 0 and name == "broadcast_in_dim":
+        bd = p["broadcast_dimensions"]
+        new = tuple(d for d in range(m.ndim) if d not in bd)
+        if new:
+            m = xp.any(m, axis=new)
+        ones = tuple(k for k, s in enumerate(shape) if s == 1 and m.shape[k] != 1)
+        if ones:
+            m = xp.any(m, axis=ones, keepdims=True)
+        return xp.reshape(m, shape)
+    if name == "transpose":
+        return xp.transpose(m, tuple(int(k) for k in np.argsort(p["permutation"])))
+    if name == "rev":
+        return xp.flip(m, tuple(p["dimensions"])) if p["dimensions"] else m
+    if name == "slice":
+        st = p["strides"] or (1,) * len(shape)
+        idx = tuple(slice(a, b, c) for a, b, c in zip(p["start_indices"], p["limit_indices"], st))
+        return _set(xp.zeros(shape, bool), idx, m, xp)
+    if name == "concatenate":
+        d = p["dimension"]
+        k = sum(int(v.aval.shape[d]) for v in eqn.invars[:i])
+        idx = (slice(None),) * d + (slice(k, k + shape[d]),)
+        return m[idx]
+    if i == 0 and name in ("reduce_sum", "reduce_max", "reduce_min", "reduce_prod"):
+        return xp.broadcast_to(xp.expand_dims(m, tuple(p["axes"])), shape)
+    if name == "select_n":
+        return _unbcast_mask(m, shape, xp)
+    if i == 0 and name in _GATHER_LIKE:
+        t = _transpose_mask(node, m, shape, xp, value)
+        if t is not None:
+            return t
+    if name in _FULL_USE:  # every operand element reaches some output element: used if all are
+        return xp.broadcast_to(xp.all(m), shape)
+    # no known element pattern (scatter, dynamic_update_slice, a gather at variable indices, ...):
+    # an operand element may be overwritten or dropped, so none counts as reaching the output
+    return xp.zeros(shape, bool)
+
+
+_GATHER_LIKE = {"gather", "dynamic_slice", "pad"}
+# elementwise primitives without a backward rule that propagate NaN element by element
+_ELEMENTWISE_NAN = {"floor", "ceil", "round", "atan2", "asin", "acos", "acosh", "atanh", "rem", "nextafter",
+                    "lgamma", "digamma", "erf_inv", "reduce_precision", "real", "imag"}  # fmt: skip
+# equations whose every output element reads every operand element it can (NaN propagates through
+# ``0 * NaN``): an operand element reaches the output if all output elements are used
+_FULL_USE = {"dot_general", "cumsum", "cumprod", "cummax", "cummin", "cumlogsumexp", "sort",
+             "stack", "se", "se_d1", "se_d2", "matern12", "matern12_d1", "matern12_d2", "matern32",
+             "matern32_d1", "matern32_d2", "matern52", "matern52_d1", "matern52_d2", "gp_std",
+             "expected_improvement", "probability_of_improvement"}  # fmt: skip
+
+
+def _transpose_mask(node, m, shape, xp, value=None):
+    """Operand mask of a gather-like equation (linear in operand 0, picking elements) by transposing
+    it at the mask; None if an integer operand (index) is not a constant."""
+    eqn = node.eqn
+    dt = eqn.invars[0].aval.dtype
+    args = [None]
+    for a, v in zip(node.ins[1:], eqn.invars[1:]):
+        if jnp.issubdtype(v.aval.dtype, jnp.inexact):
+            args.append(jnp.zeros(v.aval.shape, v.aval.dtype))
+        else:
+            v = a.val if isinstance(a, Const) else (None if value is None else value(a))
+            if v is None or (xp is np and isinstance(v, jax.core.Tracer)):
+                return None
+            args.append(v)
+
+    def run():
+        def lin(v):
+            return eqn.primitive.bind(v, *args[1:], **eqn.params)
+
+        (t,) = jax.linear_transpose(lin, jax.ShapeDtypeStruct(shape, dt))(jnp.asarray(m).astype(dt))
+        return t != 0
+
+    try:
+        if xp is np:
+            with jax.ensure_compile_time_eval():
+                return np.asarray(run())
+        return run()
+    except Exception:  # an equation that is not linear in its operand: no element pattern
+        return None
+
+
+def _constant_slots(tape):
+    """Concrete values of the integer slots that do not depend on x (``gather`` indices)."""
+    known = {}
+    with jax.ensure_compile_time_eval():
+        for node in tape.nodes:
+            if len(node.outs) != 1 or jnp.issubdtype(tape.shapes[node.outs[0]][1], jnp.inexact):
+                continue
+            if not all(isinstance(a, Const) or a in known for a in node.ins):
+                continue
+            args = [a.val if isinstance(a, Const) else known[a] for a in node.ins]
+            if any(isinstance(v, jax.core.Tracer) for v in args):
+                continue
+            try:
+                known[node.outs[0]] = np.asarray(node.eqn.primitive.bind(*args, **node.eqn.params))
+            except Exception:
+                continue
+    return known
+
+
+def value_live(tape):
+    """Per slot, the bool mask of its elements whose value reaches an output (statically).
+
+    An element is dead if no output uses it (``jnp.log(x)[0]`` uses only element 0 of
+    ``log(x)``) or if it reaches the outputs only through comparison operands (``NAN_STOP``):
+    the expression is defined where it is NaN. Neither its domain nor an empty interval may then
+    narrow or cut the box. ``jnp.where`` cases count as used (``guarded_slots`` handles them)."""
+    known = _constant_slots(tape)
+    live = {}
+    for a in tape.outs:
+        if not isinstance(a, Const):
+            live[a] = np.ones(tape.shapes[a][0], bool)
+    for node in reversed(tape.nodes):
+        ms = [live.get(s) for s in node.outs]
+        if all(m is None or not m.any() for m in ms):
+            continue
+        for i, a in enumerate(node.ins):
+            if isinstance(a, Const):
+                continue
+            shp = tuple(tape.shapes[a][0])
+            if len(node.outs) == 1:
+                mi = np.asarray(_operand_mask(node, i, ms[0], shp, np, known.get), bool)
+            else:  # ``split``, ...: used if every output is
+                mi = np.full(shp, all(m is not None and m.all() for m in ms))
+            live[a] = mi if a not in live else live[a] | mi
+    return live
+
+
+def guarded_slots(tape):
+    """Slots whose value may be irrelevant at some points or elements.
+
+    * used, directly or through other equations, only as a case of a ``select_n``
+      (``jnp.where``): ``jnp.where(x > 0.5, jnp.log(x), 0.0)`` evaluates ``log(x)`` at every point
+      but uses it only where ``x > 0.5``, so neither its domain (``x > 0``) nor its interval may
+      narrow ``x`` at the other points;
+    * with an element that does not reach the outputs, or reaches them only through a comparison
+      (``value_live``).
+
+    Every other slot is used unconditionally: its value enters an output at every point, so the
+    backward rules may narrow its inputs. ``_backward`` tracks, per element, where a guarded slot
+    is used.
     """
     users = {}
     for node in tape.nodes:
@@ -683,6 +871,8 @@ def guarded_slots(tape):
     for node in reversed(tape.nodes):
         if not all(s in sure or s not in users for s in node.outs):
             continue
+        if stops_nan(node):  # ``sqrt(x) > 0.5`` is defined (False) where ``sqrt(x)`` is NaN
+            continue
         cases = node.eqn.primitive.name == "select_n"
         p = node.ins[0] if cases else None
         for i, a in enumerate(node.ins):
@@ -692,7 +882,10 @@ def guarded_slots(tape):
                 if not (isinstance(p, Const) and np.all(np.asarray(p.val).astype(np.int32) == i - 1)):
                     continue
             sure.add(a)
-    return frozenset(s for s in tape.shapes if s != 0 and s not in sure)
+    live = value_live(tape)
+    partial = {s for s in tape.shapes if s in live and not live[s].all()}
+    partial |= {s for s in tape.shapes if s not in live}
+    return frozenset(s for s in tape.shapes if s != 0 and (s not in sure or s in partial))
 
 
 def _fit(m, shape, elementwise):
@@ -731,6 +924,7 @@ def _backward(tape, vals, out_bounds, guarded=frozenset(), fbad=None):
     def shape(a):
         return jnp.shape(a.val) if isinstance(a, Const) else tape.shapes[a][0]
 
+    known = _constant_slots(tape) if guarded else {}
     for node in reversed(tape.nodes):
         name = node.eqn.primitive.name
         elementwise = name in ELEMENTWISE_BACK
@@ -755,21 +949,32 @@ def _backward(tape, vals, out_bounds, guarded=frozenset(), fbad=None):
             for i, a in enumerate(node.ins):
                 if isinstance(a, Const) or a not in guarded:
                     continue
-                if name == "select_n" and i > 0:
+                if len(node.outs) > 1:
+                    mi = jnp.ones(shape(a), bool) if m is True else _fit(m, shape(a), elementwise)
+                elif name == "select_n" and i > 0:
                     mi = False if sel is None else jnp.broadcast_to(sel[i - 1], shape(node.outs[0])) & (
                         True if m is True else m)
-                    mi = _fit(mi, shape(a), True) if mi is not False else False
+                    mi = _operand_mask(node, i, mi, shape(a), jnp, known.get) if mi is not False else False
+                elif m is True:  # static: only the elements of ``a`` the output reads (``x[0]``)
+                    mi = _operand_mask(node, i, np.ones(shape(node.outs[0]), bool), shape(a), np, known.get)
                 else:
-                    mi = jnp.ones(shape(a), bool) if m is True else _fit(m, shape(a), elementwise)
+                    mi = _operand_mask(node, i, jnp.broadcast_to(m, shape(node.outs[0])), shape(a), jnp, known.get)
                 if mi is not False:
                     act[a] = mi if a not in act else act[a] | mi
         rule = BACK.get(name)
         if rule is None or not all(s in b for s in node.outs):
             continue
+        if name == "convert_element_type" and stops_nan(node):  # int(x) <= 0 holds for x < 1, not x <= 0
+            continue
         ins = [cur(a) for a in node.ins]
         if not any(is_mc(v) for v in ins):
             continue
         Z = [b[s] for s in node.outs]
+        if m is not True and name in EXACT_BACK and len(Z) == 1:
+            # an element move: the elements not used carry no information (unbounded), and each
+            # operand element is narrowed by the used elements it was moved to only
+            Z = [(jnp.where(m, Z[0][0], -INF), jnp.where(m, Z[0][1], INF))]
+            m = True
         cands = rule(node.eqn, Z[0] if len(Z) == 1 else Z, *ins)
         for a, c in zip(node.ins, cands):
             if c is None or isinstance(a, Const) or a not in b:
@@ -850,6 +1055,8 @@ def propagate(tape, lo, hi, out_bounds, rounds, safe=False, integer=()):
 
     def fix(s, c):
         shp, dt = tape.shapes[s]
+        if not jnp.issubdtype(dt, jnp.inexact):  # bounds of an integer slot may be infinite
+            dt = jnp.result_type(float)
         return tuple(jnp.broadcast_to(jnp.asarray(v, dt), shp) for v in c)
 
     def body(_, carry):

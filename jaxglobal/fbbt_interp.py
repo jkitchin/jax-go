@@ -33,7 +33,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import lax
 
-from .fbbt import BACK, CTX, DOMAIN_FLOOR, INF, SAFE_CTX, Const, _clean, _empty, _meet2, _pad, round_integers
+from .fbbt import BACK, CTX, DOMAIN_FLOOR, INF, SAFE_CTX, Const, _clean, _empty, _meet2, _pad, round_integers, stops_nan
 from .relax import MC, RULES, apply_rule, is_mc
 
 # equations that only move elements: the interpreter renumbers slots, no row
@@ -89,7 +89,7 @@ def _scalarize(tape, n):
     rows, opcodes, opkey = [], [], {}
     for node in tape.nodes:
         eqn, name = node.eqn, node.eqn.primitive.name
-        if len(node.outs) != 1:
+        if len(node.outs) != 1 or stops_nan(node):  # rows would pass NaN through an int cast or x**0
             return None
         shape = tuple(tape.shapes[node.outs[0]][0])
         if name in STRUCTURAL:
@@ -185,6 +185,24 @@ SCHEDULE_MIN_ROWS = 300
 STALL = 1e-3
 
 
+def _live_rows(prog):
+    """``prog`` without the rows whose result reaches no output.
+
+    ``jnp.log(x)[0]`` computes ``log`` of every element of ``x``; the rows of the unused elements
+    would apply log's domain (``x > 0``) to variables it does not constrain, and report a box
+    without such points empty."""
+    live = set(int(s) for o in prog.outs for s in np.ravel(o))
+    keep = np.zeros(len(prog.op), bool)
+    for k in range(len(prog.op) - 1, -1, -1):
+        if int(prog.out[k]) in live:
+            keep[k] = True
+            live.add(int(prog.a[k]))
+            live.add(int(prog.b[k]))
+    if keep.all():
+        return prog
+    return prog._replace(op=prog.op[keep], a=prog.a[keep], b=prog.b[keep], out=prog.out[keep])
+
+
 def make_propagate(tape, ineq, eq, n, feas_tol, rounds, safe=False, scheduled=None, integer=()):
     """``fbbt(lo, hi, cutoff) -> (lo, hi, empty)`` by interpreting the scalarized tape, or None.
 
@@ -192,7 +210,10 @@ def make_propagate(tape, ineq, eq, n, feas_tol, rounds, safe=False, scheduled=No
     step instead of row by row.
     """
     prog = scalarize(tape, n)
-    if prog is None or len(prog.op) == 0:
+    if prog is None:
+        return None
+    prog = _live_rows(prog)
+    if len(prog.op) == 0:
         return None
     fwd, bwd = _branches(prog, safe)
     if scheduled is None:

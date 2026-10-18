@@ -30,7 +30,7 @@ import jax
 import jax.numpy as jnp
 from jax import lax
 
-from .fbbt import Const, _forward, make_tape, tape_cache
+from .fbbt import Const, _forward, guarded_slots, make_tape, tape_cache
 from .relax import SAFE_K, is_mc
 
 INF = jnp.inf
@@ -230,9 +230,10 @@ def _plan_of(f):
     def build(x):
         tape = make_tape(f, x)
         try:
-            return tape, make_plan(tape)
+            plan = make_plan(tape)
         except Unsupported:
-            return tape, None
+            return tape, None, frozenset()
+        return tape, plan, guarded_slots(tape)
 
     return tape_cache(build)
 
@@ -284,10 +285,11 @@ def _bilinear(xl, xu, yl, yu):
 class _Pass:
     """One box: slot values, relaxations, and the backward pass over the plan."""
 
-    def __init__(self, tape, plan, lo, hi, deep, cap, safe=False):
+    def __init__(self, tape, plan, lo, hi, deep, cap, safe=False, guarded=frozenset()):
         self.tape, self.plan, self.lo, self.hi, self.deep, self.cap = tape, plan, lo, hi, deep, cap
         self.safe = safe
-        self.vals, _ = _forward(tape, (lo, hi), {}, safe)
+        # an empty interval of an untaken jnp.where arm (or an unused element) is unbounded, not crossed
+        self.vals, _ = _forward(tape, (lo, hi), {}, safe, guarded)
         self.rel, self.tight = {}, {}
         self.var = {0} | {s for node, _, _ in plan for s in node.outs}
 
@@ -409,7 +411,7 @@ def make_crown(f, deep=True, cap=512, safe=False):
     plan_of = _plan_of(f)
 
     def bound(lo, hi, return_x=False):
-        tape, plan = plan_of(lo)
+        tape, plan, guarded = plan_of(lo)
         out = tape.outs[0]
         res = (jnp.asarray(-INF, lo.dtype), lo)
         if plan is None:
@@ -418,7 +420,7 @@ def make_crown(f, deep=True, cap=512, safe=False):
             res = (jnp.sum(jnp.asarray(out.val, lo.dtype)), lo)
             return res if return_x else res[0]
         try:
-            ps = _Pass(tape, plan, lo, hi, deep, cap, safe)
+            ps = _Pass(tape, plan, lo, hi, deep, cap, safe, guarded)
             if out not in ps.var:  # f does not depend on x
                 return (jnp.sum(ps.vals[out]), lo) if return_x else jnp.sum(ps.vals[out])
             ps.out = out

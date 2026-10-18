@@ -65,6 +65,28 @@ def _gap_scores(Q, lo, hi, x):
     return out
 
 
+_SHRINK = (8.0, 100.0)  # _branch_widths: rescale only variables root tightening narrowed at least [0]-fold, by at most [1]-fold
+
+
+def _branch_widths(width0, rlo, rhi, shrink=_SHRINK):
+    """The reference widths that branching scores measure relative widths against: ``width0``,
+    except for a variable that root tightening (FBBT, OBBT; the widest over the root boxes)
+    narrowed at least ``shrink[0]``-fold, which is measured against its root width instead,
+    but at most ``shrink[1]``-fold narrower than ``width0``.
+
+    Measured against the user's box, a variable that root OBBT narrowed a lot starts the search
+    looking almost split already, and pseudocost (gains per squared relative width; untried
+    variables scored at the mean pseudocost) then never tries it: ex8_4_1's slope, in all ten
+    bilinear terms, is cut from [-2, 2] to width 0.24 and was never branched on (23811 nodes;
+    1523 with its root width). Modest narrowing is left alone: rescaling nous1's variables
+    narrowed 1.2-7x doubled its nodes. The ``shrink[1]`` floor keeps a variable that tightening
+    all but fixed (width 1e-6 of 10 on pooling_adhya1stp) from looking as wide as an untouched
+    one. Only branching scores use these widths: bounds are unaffected."""
+    rw = np.max(np.asarray(rhi) - np.asarray(rlo), axis=0)
+    ok = np.isfinite(width0) & np.isfinite(rw) & (rw > 0) & (rw * shrink[0] <= width0)
+    return np.where(ok, np.maximum(np.where(ok, rw, 1.0), width0 / shrink[1]), width0)
+
+
 def make_bounder(f, n_fw=20, univariate=False, alphabb=False, multivariate=False, return_xr=False, safe=False):
     """Return ``bound(lo, hi, cutoff) -> (lb, x, f(x), lo', hi')`` for one box.
 
@@ -602,6 +624,122 @@ def _round_bounds(lo, hi, mask):
     return lo, hi
 
 
+_REPAIR_SIZE = 10_000  # integer repair: largest rows x variables Jacobian it extracts (else it is off; the eager read takes seconds beyond)
+_REPAIR_STEPS = 64  # integer repair: most +-1 moves per rounded point
+_REPAIR_SWAPS = 200  # integer repair: swap moves (one +1, another -1) only with at most this many integers
+_REPAIR_PTS = 4  # integer repair: most rounded relaxation points repaired per batch of local solves
+
+
+def _integer_rows(ineq, eq, lo, hi, imask, jac=None, seed=0):
+    """The linear constraint rows on integer variables only: ``(A, c, is_eq)`` with each row's
+    value ``A @ x[imask] + c`` (an inequality ``<= 0``, an equality ``== 0``), or None.
+
+    Rounding the integers of a relaxation point can violate such a row (a budget), and no
+    solve of the continuous variables can repair that. Read numerically: the constraint
+    Jacobian at two random points of the box; a row qualifies when its Jacobian is the same at
+    both, zero on every continuous variable, and its values agree with that linear form. The
+    rows only guide ``_repair_rounding``; every point it proposes is still screened against
+    all the constraints. None when there are no such rows or the Jacobian would exceed
+    ``_REPAIR_SIZE`` entries. ``jac``: the Jacobian's sparsity ``(rows, cols)``
+    (``Structure.jac``), when known: without a row on integers only, nothing is computed."""
+    g, h = _vec(ineq), _vec(eq)
+    n = lo.size
+    if not imask.any() or (ineq is None and eq is None):
+        return None
+    if jac is not None:
+        r, cl = (np.asarray(a) for a in jac)
+        touched = np.zeros(int(r.max(initial=-1)) + 1, bool)
+        touched[r] = True
+        cont_rows = np.zeros_like(touched)
+        cont_rows[r[~imask[cl]]] = True
+        if not (touched & ~cont_rows).any():
+            return None
+    try:
+        rows = lambda x: jnp.concatenate([g(x), h(x)])  # noqa: E731
+        with jax.ensure_compile_time_eval():
+            m_ineq = int(np.size(jax.eval_shape(g, jax.ShapeDtypeStruct((n,), jnp.float64))))
+            m = m_ineq + int(np.size(jax.eval_shape(h, jax.ShapeDtypeStruct((n,), jnp.float64))))
+        if m == 0 or m * n > _REPAIR_SIZE:
+            return None
+        rng = np.random.default_rng(seed)
+        a = np.where(np.isfinite(lo), lo, np.minimum(hi, 0.0) - 10.0)  # a finite part of the box
+        b = np.where(np.isfinite(hi), hi, a + 20.0)
+        P = a + (b - a) * rng.uniform(0.1, 0.9, size=(2, n))
+        jacobian = jax.jacfwd(rows)  # (eager: tracing and compiling it under jit costs more)
+        V = [np.asarray(rows(jnp.asarray(p)), np.float64) for p in P]
+        J = [np.asarray(jacobian(jnp.asarray(p)), np.float64).reshape(m, n) for p in P]
+    except Exception:  # an optional heuristic: anything the Jacobian cannot follow turns it off
+        return None
+    scale = 1.0 + np.abs(J[0]).max(axis=1)
+    pred = V[0] + J[0] @ (P[1] - P[0])
+    ok = (np.all(np.isfinite(J[0]) & np.isfinite(J[1]), axis=1) & np.isfinite(V[0]) & np.isfinite(V[1])
+          & np.all(J[0][:, ~imask] == 0.0, axis=1) & np.all(J[1][:, ~imask] == 0.0, axis=1)
+          & np.all(np.abs(J[0] - J[1]) <= 1e-9 * scale[:, None], axis=1)
+          & (np.abs(pred - V[1]) <= 1e-8 * (scale + np.abs(V[1])))
+          & np.any(J[0][:, imask] != 0.0, axis=1))  # fmt: skip
+    if not ok.any():
+        return None
+    A = J[0][ok][:, imask]
+    c = V[0][ok] - A @ P[0][imask]
+    return A, c, (np.arange(m) >= m_ineq)[ok]
+
+
+def _repair_rounding(xi, ref, lo, hi, rows, tol, max_steps=_REPAIR_STEPS):
+    """Greedy repair of rounded integer values ``xi`` against linear rows ``rows`` (``_integer_rows``).
+
+    Each step makes the move (one integer +-1, or when none helps and there are few integers
+    a swap: one +1, another -1) that most reduces the rows' scaled violation per unit of
+    added distance from the relaxation values ``ref``; it stops when every row holds to
+    ``tol`` or no move reduces the violation. ``lo``, ``hi`` are the integers' bounds.
+    Returns the repaired integers, or None if the rows are not met. It only proposes a
+    candidate incumbent: no bound depends on it."""
+    A0, c0, is_eq = rows
+    s = 1.0 + np.abs(A0).max(axis=1)
+    A, c = A0 / s[:, None], c0 / s  # rows scaled: the violation sums comparable units
+    x = np.clip(np.round(xi), lo, hi)
+
+    def viol(V):  # (m, k) row values -> (k,) total violation
+        return np.sum(np.where(is_eq[:, None], np.abs(V), np.maximum(V, 0.0)), axis=0)
+
+    def holds(x):
+        r = A0 @ x + c0
+        return bool(np.all(np.where(is_eq, np.abs(r), r) <= tol))
+
+    k = x.size
+    for _ in range(max_steps):
+        if holds(x):
+            return x
+        v = A @ x + c
+        cur = float(viol(v[:, None])[0])
+        best = None
+        jj, dd = np.tile(np.arange(k), 2), np.repeat([1.0, -1.0], k)  # single moves x_j += d
+        okm = (x[jj] + dd >= lo[jj]) & (x[jj] + dd <= hi[jj])
+        red = cur - viol(v[:, None] + A[:, jj] * dd)
+        dist = np.abs(x[jj] + dd - ref[jj]) - np.abs(x[jj] - ref[jj])  # in [-1, 1]
+        score = np.where(okm & (red > 1e-12), red / (1.0 + dist + 1e-3), -np.inf)
+        i = int(np.argmax(score))
+        if np.isfinite(score[i]):
+            best = ((jj[i],), (dd[i],))
+        if best is None and k <= _REPAIR_SWAPS:
+            up, dn = np.meshgrid(np.arange(k), np.arange(k), indexing="ij")
+            up, dn = up.ravel(), dn.ravel()
+            sel = (up != dn) & (x[up] + 1 <= hi[up]) & (x[dn] - 1 >= lo[dn])
+            up, dn = up[sel], dn[sel]
+            if len(up):
+                red = cur - viol(v[:, None] + A[:, up] - A[:, dn])
+                dist = (np.abs(x[up] + 1 - ref[up]) - np.abs(x[up] - ref[up])
+                        + np.abs(x[dn] - 1 - ref[dn]) - np.abs(x[dn] - ref[dn]))
+                score = np.where(red > 1e-12, red / (2.0 + dist + 1e-3), -np.inf)
+                i = int(np.argmax(score))
+                if np.isfinite(score[i]):
+                    best = ((up[i], dn[i]), (1.0, -1.0))
+        if best is None:
+            return None
+        for jj, dd in zip(*best):
+            x[jj] += dd
+    return x if holds(x) else None
+
+
 def _verify(f, ineq, eq, x, fun, lo, hi, feas_tol, integer=None):
     """Re-evaluate ``x`` outside jit in float64: ``(max_violation, ok, reason)``.
 
@@ -713,6 +851,14 @@ _ETA, _M = 2, 4  # branch_var="reliability": observations to trust a pseudocost,
 _BAL = 10.0  # branch_var="strong": candidates are at least 1/_BAL as wide as the widest variable
 _Q, _ETA_MS = 2, 0.5  # branch_var="strong": split on up to _Q variables at once, those scoring >= _ETA_MS * best
 _PROFILE = None  # benchmarks/profile_root.py: a callable(stage) told when each setup / root stage of ``minimize`` begins
+
+
+def _auto_branch_var(imask):
+    """The rule ``branch_var="auto"`` picks (measured, see ``minimize``'s docstring): pseudocost
+    without integer variables, width with them. (Pseudocost when every nonlinear variable is a
+    general integer helps the hard ones, tln4/5, nvs19/23/24, smallinvDAXr3b010-011, but takes
+    ~1.5x the nodes on small ones: ex1265a 127 -> 701, tloss 31 -> 127, nvs13 107 -> 199.)"""
+    return "width" if np.asarray(imask).any() else "pseudocost"
 
 
 def _mark(stage):
@@ -852,7 +998,8 @@ def minimize(
     pseudocost and strong solves one more than width but loses flay04m or nous1), ``"width"`` (largest
     relative width among nonlinear variables; on the lifted quadratic LP, relative width
     times the McCormick gap of the variable's products at the relaxation point), ``"pseudocost"`` (product score
-    of per-variable bound gains observed so far) or ``"reliability"`` (like
+    of per-variable bound gains observed so far; with integer variables, among the integers
+    fractional at the relaxation point when there are any) or ``"reliability"`` (like
     pseudocost, but variables with fewer than ``_ETA`` observations are
     strong-branched, up to ``_M`` of them per box, within the ``batch`` budget)
     or ``"strong"`` (every parent is split on its best-scored variable, and the
@@ -925,8 +1072,8 @@ def minimize(
         raise ValueError(
             f"branch_var must be 'auto', 'width', 'pseudocost', 'reliability' or 'strong', not {branch_var!r}"
         )
-    if branch_var == "auto":  # measured choice, see the docstring
-        branch_var = "width" if imask.any() else "pseudocost"
+    if branch_var == "auto":
+        branch_var = _auto_branch_var(imask)
     if obbt not in (False, None, "root", "tree"):
         raise ValueError(f"obbt must be False, 'root' or 'tree', not {obbt!r}")
     if crown not in (False, None, True, "auto"):
@@ -1060,23 +1207,65 @@ def minimize(
         With integer variables a start (an LP point, which can violate the nonlinear
         constraints far more than any rounding can repair) is first solved as the
         continuous relaxation; that point is rounded at the ``ROUNDINGS`` thresholds and
-        each rounding is fix-and-solved: integers fixed, continuous variables free."""
+        each rounding is fix-and-solved: integers fixed, continuous variables free. A nearest
+        rounding that gets no feasible point is also repaired (``repaired``) and solved again."""
         S = np.clip(np.asarray(starts, dtype=np.float64), lo, hi)
         if imask.any():
             R = np.clip(np.asarray(solve_local(S, options=options)), lo, hi)  # NLP relaxation
             pool_add(R)
             fl = np.floor(R)
             fixed = np.concatenate([np.clip(fl + (R - fl > t), lo, hi) for t in ROUNDINGS])
-            fixed = np.unique(np.where(imask, fixed, np.concatenate([R] * len(ROUNDINGS))), axis=0)
+            fixed = np.where(imask, fixed, np.concatenate([R] * len(ROUNDINGS)))
+            fixed, inv = np.unique(fixed, axis=0, return_inverse=True)
             L, H = np.where(imask, fixed, lo), np.where(imask, fixed, hi)
             X = np.clip(np.asarray(solve_local(fixed, L, H, options=options)), L, H)
+            F = screen(X)
+            # a nearest rounding (ROUNDINGS[0]) with no feasible completion: repair its integers
+            # against the linear rows on integers only, and fix-and-solve the repaired points too
+            near = np.asarray(inv).reshape(-1)[:len(R)]
+            bad = np.unique(near[~np.isfinite(F[near])])
+            Y = repaired(fixed[bad], R[[int(np.flatnonzero(near == b)[0]) for b in bad]]) if len(bad) else []
+            if len(Y):
+                L, H = np.where(imask, Y, lo), np.where(imask, Y, hi)
+                Y = np.clip(np.asarray(solve_local(Y, L, H, options=options)), L, H)
+                X, F = np.concatenate([X, Y]), np.concatenate([F, screen(Y)])
         else:
             X = np.clip(np.asarray(solve_local(S, options=options)), lo, hi)
-        F = screen(X)
+            F = screen(X)
         i = int(np.argmin(F))
         if np.isfinite(F[i]):
             pool_add(X[i])
         return X[i], float(F[i])
+
+    int_rows = []  # [rows] once read (``_integer_rows``): the linear rows on integers only, or [None]
+
+    def repaired(X, R):
+        """The rounded points ``X`` (k, n) whose integers violate a linear row on integers only,
+        repaired (``_repair_rounding``, towards the relaxation points ``R``): (k', n), the
+        continuous values kept. At most ``_REPAIR_PTS`` repairs per call; they only propose
+        candidate incumbents (fix-and-solved, then screened)."""
+        out = np.zeros((0, lo.size))
+        if _past(deadline):
+            return out
+        if not int_rows:
+            st = K.structure(lo.size)
+            int_rows.append(_integer_rows(ineq, eq, lo, hi, imask, jac=None if st is None else st.jac))
+        rows = int_rows[0]
+        if rows is None:
+            return out
+        A, c, is_eq = rows
+        res = A @ X[:, imask].T + c[:, None]
+        bad = np.flatnonzero(np.any(np.where(is_eq[:, None], np.abs(res), res) > _STRICT_FRAC * feas_tol, axis=0))
+        Y = []
+        for i in bad[:_REPAIR_PTS]:
+            if not (np.all(np.isfinite(X[i])) and np.all(np.isfinite(R[i]))):
+                continue
+            xi = _repair_rounding(X[i, imask], R[i, imask], lo[imask], hi[imask], rows, _STRICT_FRAC * feas_tol)
+            if xi is not None:
+                y = X[i].copy()
+                y[imask] = xi
+                Y.append(y)
+        return np.array(Y) if Y else out
 
     def screen(X):
         """Objective values of candidate incumbents ``X`` (k, n), ``inf`` for any that is not one.
@@ -1557,6 +1746,7 @@ def minimize(
             pass
     _mark("search")
     open_lo, open_hi, open_lb, open_xr = rlo, rhi, lb, rxr
+    width0 = _branch_widths(width0, rlo, rhi)
     sumL, sumR, cnt = np.zeros(lo.size), np.zeros(lo.size), np.zeros(lo.size)  # pseudocost sums, observations
 
     def pseudo_scores(relw, free, xr):
@@ -1590,6 +1780,19 @@ def minimize(
     converged = False
     for it in range(1, max_iter + 1):
         open_lb = np.where(np.isnan(open_lb), -np.inf, open_lb)  # NaN bound = no information
+        point = (open_lo == open_hi).all(axis=1)
+        if point.any():
+            # a box shrunk to one point holds just that point: evaluated exactly (``screen``, the
+            # incumbent check), it becomes the incumbent if it is one, and the box closes either
+            # way. Otherwise splitting copies it, and with no incumbent to prune against a bound
+            # that is huge but finite (x0^2 + x1^2 = 7 over integers: 1.6e266) kept the copies
+            # open until max_iter.
+            Fp = screen(open_lo[point])
+            i = int(np.argmin(Fp))
+            if Fp[i] < ub:
+                ub, xbest = float(Fp[i]), open_lo[point][i].copy()
+            keep_pt = ~point
+            open_lo, open_hi, open_lb, open_xr = open_lo[keep_pt], open_hi[keep_pt], open_lb[keep_pt], open_xr[keep_pt]
         keep = open_lb < ub - tol()
         if not keep.all():
             pruned_lb = min(pruned_lb, float(open_lb[~keep].min()))
@@ -1632,6 +1835,10 @@ def minimize(
         else:
             score, _ = pseudo_scores(relw, phi > plo, pxr)
             if branch_var == "pseudocost":
+                if imask.any():  # as with width, integers fractional at the relaxation point first
+                    # (tloss: 2815 nodes without this, 127 with it, 31 with width)
+                    fcand = imask & free & (np.abs(pxr - np.round(pxr)) > INT_TOL) & (score >= 0)
+                    score = np.where(fcand.any(axis=1, keepdims=True) & ~fcand, -1.0, score)
                 pv = np.argmax(score, axis=1)
                 pp = np.arange(k)
                 groups = [[i] for i in range(k)]
@@ -1746,9 +1953,16 @@ def minimize(
                 big = 1e12 * (1 + np.abs(plb[pp]))
                 gl, gr = np.where(gl <= big, gl, np.inf), np.where(gr <= big, gr, np.inf)
             r2 = relw[pp, pv] ** 2
-            # integer splits: per unit moved, v - p down and p + 1 - v up (p = the split point)
-            dl = np.where(isint, np.maximum(v_split - pt, 1e-6), r2) if imask.any() else r2
-            dr = np.where(isint, np.maximum(pt + 1.0 - v_split, 1e-6), r2) if imask.any() else r2
+            # integer splits: per unit moved, v - p down and p + 1 - v up (p = the split point);
+            # 0.5 each when v is integral (the split is at the midpoint), as pseudo_scores assumes
+            # (dividing by a 1e-6 floor there inflated that variable's pseudocost a millionfold)
+            if imask.any():
+                fs = v_split - pt  # (not ``f``: that is the objective)
+                fr = (fs > INT_TOL) & (fs < 1.0 - INT_TOL)
+                dl = np.where(isint, np.where(fr, fs, 0.5), r2)
+                dr = np.where(isint, np.where(fr, 1.0 - fs, 0.5), r2)
+            else:
+                dl = dr = r2
             good = np.isfinite(gl) & np.isfinite(gr) & (dl > 1e-24) & (dr > 1e-24)
             np.add.at(sumL, pv[good], gl[good] / dl[good])
             np.add.at(sumR, pv[good], gr[good] / dr[good])

@@ -51,24 +51,37 @@ def test_default_evaluations_match_nodes():
         )  # +1: the root is re-bounded after root OBBT
 
 
-def test_auto_branching_rule():
+def test_auto_branching_rule(monkeypatch):
     """branch_var="auto" (the default) is pseudocost without integer variables, width with them.
 
-    Both problems are ones where the two rules take different numbers of nodes
-    (hartmann3 157 width / 93 pseudocost; shubert with x0 integer 53 / 77)."""
-    h3 = next(p for p in PROBLEMS if p.name == "hartmann3")
+    The decision is checked directly: node counts are not compared across solves, since the
+    first solve with new kernels can take a different path while they compile."""
+    import numpy as np
+
+    from jaxglobal import bnb
+
+    assert bnb._auto_branch_var(np.zeros(2, bool)) == "pseudocost"
+    assert bnb._auto_branch_var(np.array([True, False])) == "width"
+    picked = []
+    rule = bnb._auto_branch_var
+    monkeypatch.setattr(
+        bnb, "_auto_branch_var", lambda m: picked.append(rule(m)) or picked[-1]
+    )
     sh = next(p for p in PROBLEMS if p.name == "shubert")
-    n = lambda r: (r.status, r.nodes, r.evaluations)  # noqa: E731
+    assert solve(sh).status == solve(sh, integer=[0]).status == "optimal"
     assert (
-        n(solve(h3, branch_var="width"))
-        != n(solve(h3, branch_var="pseudocost"))
-        == n(solve(h3))
-    )
-    w, pc = (
-        solve(sh, integer=[0], branch_var="width"),
-        solve(sh, integer=[0], branch_var="pseudocost"),
-    )
-    assert n(pc) != n(w) == n(solve(sh, integer=[0]))
+        solve(sh, branch_var="width").status == "optimal"
+    )  # an explicit rule is not replaced
+    assert picked == ["pseudocost", "width"]
+
+
+def test_pseudocost_with_integers():
+    """Pseudocost on an integer problem splits fractional integers first and records integer
+    pseudocosts per unit of the split's move (0.5 each side for an integral value)."""
+    sh = next(p for p in PROBLEMS if p.name == "shubert")
+    for integer in ([0], [0, 1]):
+        r = solve(sh, integer=integer, branch_var="pseudocost")
+        assert r.status == "optimal" and r.verified
 
 
 def test_invalid_options():
@@ -89,6 +102,22 @@ def test_orthant_multisection_reaches_optimum(p, q, monkeypatch):
     assert r.status == "optimal"
     assert abs(r.fun - p.fstar) < 1e-4 * (1 + abs(p.fstar))
     assert r.lower_bound <= p.fstar + 1e-6 * (1 + abs(p.fstar))
+
+
+def test_branch_widths_root_box_with_floor():
+    """A variable root tightening narrowed at least ``_SHRINK[0]``-fold is measured against its
+    root width, floored at ``width0 / _SHRINK[1]``; modestly narrowed, never-split (inf) and
+    root-fixed variables keep the original width."""
+    import numpy as np
+
+    from jaxglobal.bnb import _SHRINK, _branch_widths
+
+    w0 = np.array([4.0, 10.0, 1.0, np.inf, 2.0, 2.0])
+    rlo = np.array([[-0.7, 0.0, 0.0, 0.0, 1.0, 0.0], [-0.6, 0.0, 0.2, 0.0, 1.0, 0.0]])
+    rhi = np.array([[-0.4, 1e-6, 1.0, 5.0, 1.0, 0.5], [-0.5, 1e-6, 0.5, 5.0, 1.0, 0.5]])
+    w = _branch_widths(w0, rlo, rhi)
+    assert np.allclose(w[:3], [0.3, 10.0 / _SHRINK[1], 1.0])  # widest root box; floor; unchanged
+    assert w[3] == np.inf and w[4] == 2.0 and w[5] == 2.0  # never split; root-fixed; only 4x
 
 
 def test_failed_local_solves_on_a_convex_problem_keep_finite_branch_points(monkeypatch):
