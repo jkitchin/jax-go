@@ -244,3 +244,33 @@ def test_ineq_rlt_tightens_ordered_circles():
     assert with_rlt > without + 1e-3
     r = jaxglobal.minimize(f, lo, hi, ineq=g, eq=h, time_limit=60)
     assert r.status == "optimal"
+
+
+def test_ineq_rlt_fixed_factor_does_not_prune():
+    """With x_0 and x_2 fixed (l = u, as an integer at a node), both bound-factor rows of each
+    pair reduce to an equality that McCormick also implies. Rounded without a margin, these
+    equalities were inconsistent, and the plain-mode bound came out near 1e262 on a box full of
+    feasible points."""
+    Qm = np.array([[0.28281908172344156, 0.2596506987470373, -3.6431196440771165],
+                   [0.2596506987470373, 2.715464715007119, 1.6820062383392957],
+                   [-3.6431196440771165, 1.6820062383392957, -0.8238176752930403]])  # fmt: skip
+    q = np.array([-1.2703317571778174, 0.16215033395753317, 1.2702236737716768])
+    a, c = np.array([0.6992995640278481, 0.0, 1.472172139560809]), 0.04733789657258362
+
+    def f(x):
+        return sum(Qm[i, j] * x[i] * x[j] for i in range(3) for j in range(3)) + sum(q[i] * x[i] for i in range(3))
+
+    def g(x):
+        return jnp.atleast_1d(a[0] * x[0] + a[2] * x[2] + c)
+
+    Q = quadratic_form(f, g, None, 3)
+    assert len(Q.qr_g) > 0
+    lo = np.array([-2.9989852470807135, -0.3965467285767672, -1.9431734172297537])
+    hi = np.array([-2.9989852470807135, 1.9556236877657316, -1.9431734172297537])
+    xs = np.stack([np.full(41, lo[0]), np.linspace(lo[1], hi[1], 41), np.full(41, lo[2])], axis=1)
+    assert np.all(xs @ a + c <= 0)  # every point of the box is feasible
+    fmin = min(float(f(x)) for x in xs)
+    for tol in (0.0, 1e-6):
+        for safe in (False, True):
+            lb = float(make_quadratic_bounder(Q, tol=tol, safe=safe)(jnp.asarray(lo), jnp.asarray(hi))[0])
+            assert lb <= fmin + 1e-9 * (1 + abs(fmin)), (tol, safe, lb, fmin)

@@ -469,6 +469,15 @@ def _lp(Q, L, lo, hi, tol, safe, cutoff=None):
 
     b = margin(b, absAv)
     t0 = 4 * P + Q.n_g + 2 * Q.n_h + 2 * len(Q.rlt_var)  # first tangent row
+    if T2 and not safe:
+        # The bound-factor rows need a rounding margin in plain mode too. When x_k is fixed
+        # (l_k = u_k, e.g. an integer at a node), both rows of a pair reduce to the equality
+        # a.(w_k - l_k x) = 0, which McCormick also implies. Rounded, these equalities can be
+        # inconsistent by a few ulps. The weak-duality certificate of that empty LP then
+        # diverges and prunes a box that holds feasible points.
+        q0 = t0 + L.n_tan * P
+        qm = EPS * (N + 3) * (jnp.abs(b[q0:q0 + 2 * T2]) + abs(tol) + absAv[q0:q0 + 2 * T2])
+        b = b.at[q0:q0 + 2 * T2].add(qm)
 
     def tangents(vals, b, x, k):
         """Tangents ``-w + 2 p x_i <= p^2`` at ``p = x_i`` for the squares, as round ``k``'s rows."""
