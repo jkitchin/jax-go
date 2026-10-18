@@ -346,20 +346,23 @@ def _int_pow(u, k, atoms):
     m = _as_mono(u, atoms)
     if m is not None:
         _apply_mono(o, (m[0] ** k, {a: k * p for a, p in m[1].items()}))
-    if k % 2 == 0:
+    if k < 0:  # t^k, k < 0: convex decreasing on t > 0; (even k) convex increasing on t < 0
+        o.cvx = _first(o.cvx, _both(u.ccv, u.pos), _both(u.cvx, u.neg) if k % 2 == 0 else None)
+        o.pos = _first(o.pos, u.pos)
+        o.nn = _first(o.nn, u.pos)
+        if k % 2 == 0:  # (an even negative power is +inf, not convex, across t = 0)
+            o.pos = _first(o.pos, u.neg)
+            o.nn = _first(o.nn, u.neg)
+    elif k % 2 == 0:
         o.nn = E
         o.cvx = _first(o.cvx, E if u.aff is not None else None, _both(u.cvx, u.nn), _both(u.ccv, u.np_))
-    elif k > 0:  # odd >= 3: convex increasing on t >= 0, concave increasing on t <= 0
+    else:  # odd >= 3: convex increasing on t >= 0, concave increasing on t <= 0
         o.cvx = _first(o.cvx, _both(u.cvx, u.nn))
         o.ccv = _first(o.ccv, _both(u.ccv, u.np_))
         o.nn = _first(o.nn, u.nn)
         o.np_ = _first(o.np_, u.np_)
         o.pos = _first(o.pos, u.pos)
         o.neg = _first(o.neg, u.neg)
-    else:  # t^k, k < 0: convex decreasing on t > 0
-        o.cvx = _first(o.cvx, _both(u.ccv, u.pos))
-        o.pos = _first(o.pos, u.pos)
-        o.nn = _first(o.nn, u.pos)
     return o
 
 

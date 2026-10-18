@@ -45,6 +45,8 @@ RULES = {
     "sq_cvx_nn": (lambda x: (jnp.exp(x[0]) + x[1] ** 2) ** 2, "cv"),
     "odd_pow": (lambda x: (x[0] + x[1]) ** 3, "cv"),
     "inv_affine": (lambda x: 1.0 / (x[0] + x[1]), "cv"),
+    "neg_even_pow": (lambda x: (x[0] + x[1]) ** -2, "cv"),  # convex on each side of 0, not across it
+    "neg_even_pow_cvx_neg": (lambda x: (-jnp.sqrt(x[0] + 4.0) - 1.0) ** -2, "cv"),  # t^-2 incr. on t < 0
     "inv_concave": (lambda x: 2.0 / jnp.sqrt(x[0]), "cv"),
     "neg_inv": (lambda x: -1.0 / (x[0] + 0.5 * x[2]), "cc"),
     "log_affine": (lambda x: jnp.log(x[0] + x[1]), "cc"),
@@ -76,6 +78,7 @@ NONCONVEX = {
     "mono_one_pos_lt1": (lambda x: x[0] ** 1.5 * x[1] ** -0.6, None),  # one positive, sum < 1
     "exp_of_concave": (lambda x: jnp.exp(jnp.sqrt(x[0] + 4.0)), None),
     "log_of_convex": (lambda x: jnp.log(x[0] ** 2 + 1.0), None),
+    "neg_even_pow_of_cvx": (lambda x: (1.0 + x[0] ** 2) ** -2, None),  # a bump: concave near 0
 }
 
 
@@ -207,6 +210,19 @@ def test_nonconvex_gets_no_convex_verdict(name):
         assert not ok_cv or allowed == "cv", name
         assert not ok_cc or allowed == "cc", name
         _check_relaxation(fn, lo, hi, rng)
+
+
+def test_negative_even_power_needs_a_sign():
+    """``u^k`` with even ``k < 0`` is +inf at ``u = 0``: no verdict on a box where ``u`` crosses 0, and
+    none for a convex ``u`` that is merely nonnegative (``(1 + x^2)^-2`` is a bump)."""
+    f = lambda x: x[0] ** -2  # noqa: E731
+    for g in (f, lambda x: jnp.power(x[0], -2.0)):
+        assert _flags(g, np.array([-1.0, 0.0, 0.0]), np.ones(3))[1] is False
+        assert _flags(g, np.array([0.5, 0.0, 0.0]), np.ones(3))[1] is True
+    lo, hi = -np.ones(3), np.ones(3)
+    _check_relaxation(f, lo, hi, np.random.default_rng(0))
+    assert not _flags(NONCONVEX["neg_even_pow_of_cvx"][0], lo, hi)[1]
+    _check_relaxation(NONCONVEX["neg_even_pow_of_cvx"][0], lo, hi, np.random.default_rng(0))
 
 
 def test_vector_outputs_and_affine_skipped():
