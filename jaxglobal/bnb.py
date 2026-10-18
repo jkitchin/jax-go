@@ -1688,8 +1688,10 @@ def minimize(
             # better places to branch than the LP points (an LP over tangents of the convex
             # parts is often degenerate at its optimum, with a point far from the minimizer:
             # on cvxnonsep_normcon40 the nodes fell from 547 to 291). Only branching uses it.
+            X, rows = pool["nlp_x"], np.flatnonzero(nlp_do)
+            ok = np.isfinite(X).all(axis=1)  # a failed solve keeps its LP point
             cxr = cxr.copy()
-            cxr[nlp_do] = np.clip(pool["nlp_x"], clo[nlp_do], chi[nlp_do])
+            cxr[rows[ok]] = np.clip(X[ok], clo[rows[ok]], chi[rows[ok]])
         update_incumbent(cx, cf, clb)
         if imask.any() and it >= next_dive:  # dives from the most promising children
             o = np.argsort(clb)[:_DIVES]
