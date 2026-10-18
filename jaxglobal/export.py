@@ -952,9 +952,9 @@ class _Lowering:
             if op == "pow" and g.is_const(args[1]) and g.value(args[1]) >= 0:
                 pass  # x ** k, k >= 0: grows like exp
             elif op in ("div", "pow"):
-                # 1/d or x ** -k: an infinite bound means d (or x) can be 0, a pole; a finite bound >= 1e20 means it
-                # gets within ~1e-20 of 0 without crossing it, and the value really overflows
-                if not np.isfinite(m) or (op == "pow" and not g.is_const(args[1])):
+                # 1/d, x ** -k or x ** y: an infinite bound is a pole or domain edge (d or x can be 0); a finite
+                # bound >= 1e20 means the value really overflows
+                if not np.isfinite(m):
                     continue
             msg = (
                 f"an exported '{op}' reaches {m:.3g} (>= {BIGM_REFUSE:g}, SCIP's infinity) on the box although "
