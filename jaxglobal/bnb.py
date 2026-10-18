@@ -1204,6 +1204,10 @@ def minimize(
         # a pool switched off by the probe: the zero-row variant skips the rows' LP cost
         args = (jnp.zeros((0, lo.size + 2)), pool_args()[1]) if plain_kernel() else pool_args()
         lb, x, fx, rlo, rhi, xr = run(bound_kernel, padded(blo, bhi), cutoff, k, args)
+        # a NaN bound carries no information: -inf, never a bound that could prune the box
+        # or claim optimality (and np.maximum / min would otherwise spread it to other bounds)
+        lb = np.where(np.isnan(lb), -np.inf, lb)
+        x = np.where(np.isnan(x).any(axis=1, keepdims=True), 0.5 * (blo + bhi), x)  # (a NaN point is no local start)
         if pool is not None:  # the LP points of the lowest bounds: where the pool's cuts are needed next
             live = np.isfinite(lb) & (lb < ub)
             if live.any():
@@ -1732,6 +1736,7 @@ def minimize(
         open_lb = np.concatenate([open_lb[rest], new_lb])
         open_xr = np.concatenate([open_xr[rest], new_xr])
 
+    open_lb = np.where(np.isnan(open_lb), -np.inf, open_lb)  # (children added by the last iteration)
     glb = min(float(open_lb.min()) if len(open_lb) else np.inf, pruned_lb, ub)
     if converged:
         status = "optimal" if np.isfinite(ub) else "infeasible"
