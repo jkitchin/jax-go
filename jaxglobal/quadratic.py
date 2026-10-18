@@ -40,7 +40,12 @@ import numpy as np
 from .lp import EPS, reduce_ranges
 from .relax import SAFE_K
 
-MAX_RLT_SUPPORT = 3  # ineq_rlt: linear inequalities with at most this many variables
+MAX_RLT_SUPPORT = 12  # ineq_rlt: linear inequalities with at most this many variables
+# ineq_rlt: rows with at most this many variables take the pair budget first. Wider rows only
+# fill what is left: on trim loss (tln4, tln5) a pattern's capacity row sum_i a_i y_i <= W times
+# its multiplicity m (m * y_i are the columns) gives sum_i a_i w_i <= W m, which links the demand
+# rows sum_m w_mi >= d_i to the number of rolls cut (root bound 2.42 -> 7.66 on tln4, opt 8.3).
+SMALL_RLT_SUPPORT = 3
 RLT_PAIRS = 3.0  # ineq_rlt: at most this many (row, k) pairs per product column (two LP rows each)
 MAX_COLUMNS = 400  # beyond this the IPM's N x N solve per iteration costs more than it gains
 # polynomial_form: the cap when some monomial has degree > 2. The reduced-space fallback traces
@@ -274,7 +279,8 @@ def ineq_rlt(Q, n, max_support=None, max_pairs=None):
     the secant of ``d^2`` over ``[0, u_j - l_i]`` instead of over ``[l_i - u_j, u_j - l_i]``,
     which the McCormick facets of the three products alone give (circle packing with ordered
     identical circles, kall_circles_*). At most ``max_pairs`` pairs (default: ``RLT_PAIRS``
-    per product column), those with ``k`` in the row's support first."""
+    per product column), those with ``k`` in the row's support first, then those of rows with at
+    most ``SMALL_RLT_SUPPORT`` variables."""
     P = len(Q.pairs)
     max_pairs = int(RLT_PAIRS * P) if max_pairs is None else max_pairs
     max_support = MAX_RLT_SUPPORT if max_support is None else max_support
@@ -283,7 +289,7 @@ def ineq_rlt(Q, n, max_support=None, max_pairs=None):
     for a, b in col:
         partners.setdefault(a, set()).add(b)
         partners.setdefault(b, set()).add(a)
-    cand = []  # (k not in the row's support, row, k): a factor of the row's own variables first
+    cand = []  # (k not in the row's support, wide row, row, k): a factor of the row's own variables first
     for r in range(Q.n_g):
         row = Q.E[1 + r]
         if np.any(row[n:] != 0):
@@ -292,9 +298,9 @@ def ineq_rlt(Q, n, max_support=None, max_pairs=None):
         if not 2 <= len(supp) <= max_support:
             continue
         common = set.intersection(*(partners.get(m, set()) | ({m} if (m, m) in col else set()) for m in supp))
-        cand += [(k not in supp, r, k) for k in sorted(common)]
+        cand += [(k not in supp, len(supp) > SMALL_RLT_SUPPORT, r, k) for k in sorted(common)]
     gi, gk, er, ec, ew, ea, ek = [], [], [], [], [], [], []
-    for _, r, k in sorted(cand)[:max_pairs]:
+    for _, _, r, k in sorted(cand)[:max_pairs]:
         row = Q.E[1 + r]
         ent = {}
         for m in np.flatnonzero(row[:n]):
