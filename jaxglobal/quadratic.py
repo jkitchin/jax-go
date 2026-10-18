@@ -506,35 +506,39 @@ def _ipm(c, pat, vals, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10, target=j
 
 def squares_bounded_below(Q):
     """Whether a tangent (a lower bound ``w_p >= 2 p x - p^2``) on some square column can change
-    the lifted LP's value: False when no column is a square, or when every square column ``w``
-    enters the objective with coefficient <= 0 and every inequality row ``g <= 0`` with
-    coefficient <= 0, appears in no equality or RLT row and is no factor of another column.
+    the lifted LP's value; see ``square_needs_lower``."""
+    return bool(square_needs_lower(Q).any())
 
-    Then raising ``w`` to its secant (the one row that bounds it above, ``w <= (l + u) x - l u``)
-    keeps every other row feasible and does not raise the objective, and the secant is above
-    ``x^2`` and so above every tangent: the LP optimum is attained with all tangent rows slack,
-    and Kelley rounds only re-solve the same LP. This is the case of reverse-convex distance
-    constraints ``(x_i - x_j)^2 + (y_i - y_j)^2 >= d^2`` (circle packing), where only the
-    secants of the squares bind."""
+
+def square_needs_lower(Q):
+    """``(P,)`` mask of the square columns whose tangents can change the lifted LP's value.
+
+    A square column ``w`` does not need them when it enters the objective with coefficient
+    <= 0 and every inequality row ``g <= 0`` with coefficient <= 0, appears in no equality or
+    RLT row and is no factor of another column. Then raising ``w`` to its secant (the one row
+    that bounds it above, ``w <= (l + u) x - l u``) keeps every other row feasible and does not
+    raise the objective, and the secant is above ``x^2`` and so above every tangent: some LP
+    optimum has all of that column's tangent rows slack, and Kelley tangents on it only
+    re-solve the same LP. This is the case of reverse-convex distance constraints
+    ``(x_i - x_j)^2 + (y_i - y_j)^2 >= d^2`` (circle packing), where only the secants of the
+    squares bind, and of concave quadratic objectives."""
     P = len(Q.pairs)
     n = Q.E.shape[1] - P
-    sq = np.flatnonzero(Q.pairs[:, 0] == Q.pairs[:, 1])
-    if sq.size == 0:
-        return False
-    cols = n + sq
+    sq = Q.pairs[:, 0] == Q.pairs[:, 1]
+    cols = n + np.arange(P)
     g = Q.E[1:1 + Q.n_g][:, cols]
     h = Q.E[1 + Q.n_g:1 + Q.n_g + Q.n_h][:, cols]
-    factor = np.isin(cols, Q.pairs)
-    used = (Q.E[0, cols] > 0) | (g > 0).any(0) | (h != 0).any(0) | factor
+    used = (Q.E[0, cols] > 0) | (g > 0).any(0) | (h != 0).any(0) | np.isin(cols, Q.pairs)
     if Q.rlt.size:
         used |= (Q.rlt[:, cols] != 0).any(0)
-    return bool(used.any())
+    return sq & used
 
 
 def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False):
     """Return ``bound(lo, hi, cutoff) -> (lb, x_lp, infeasible, lo', hi')`` for one box
     (the contract of ``lp.make_constrained_bounder``) from the lifted LP of ``Q``."""
-    n_kelley = n_kelley if squares_bounded_below(Q) else 0  # else the tangents are redundant
+    need = square_needs_lower(Q)
+    n_kelley = n_kelley if need.any() else 0  # else the tangents are redundant
     layouts = {}
 
     def bound(lo, hi, cutoff=jnp.inf):
@@ -562,25 +566,35 @@ def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False):
                 lbv = lbv - SAFE_K * EPS * (N + 3) * (fmag + jnp.abs(f0) + cn * jnp.abs(val))
             return lbv
 
+        I, J = jnp.asarray(Q.pairs[:, 0]), jnp.asarray(Q.pairs[:, 1])
+        needj = jnp.asarray(need)
+
         def round_(carry, k):
-            vals, b, best, rlo, rhi, _ = carry
+            """One LP. A Kelley round runs only while the previous LP point violates a tangent
+            of a square that needs one (``need``) and the box is not pruned: otherwise that
+            point stays feasible, hence optimal, with the new tangents (no IPM iterations)."""
+            vals, b, best, rlo, rhi, vprev, active = carry
             A, bu = _unit(pat, vals, b, vlo, scale, safe)
             target = (cutoff - f0) / cn + 1e-9 * (1 + jnp.abs(cutoff) / cn)  # unit-space value that prunes
-            z, y, val = _ipm(chat, pat, A, bu, ipm_iters, target=target,
+            z, y, val = _ipm(chat, pat, A, bu, jnp.where(active, ipm_iters, 0), target=target,
                              cert=lambda y: _certificate(pat, A, bu, y, chat, safe)[0])  # fmt: skip
-            lb = jnp.where(jnp.isnan(val) | ~finite, -jnp.inf, lower(val))
+            lb = jnp.where(jnp.isnan(val) | ~finite | ~active, -jnp.inf, lower(val))
             best = jnp.maximum(best, lb)
             _, r = _certificate(pat, A, bu, y, chat, safe)
             klo, khi = reduce_ranges(vlo[:n], vlo[:n] + scale[:n], lb, cn * r[:n] / scale[:n], cutoff)
-            rlo, rhi = jnp.maximum(rlo, klo), jnp.minimum(rhi, khi)
-            v = vlo + scale * jnp.clip(z, 0.0, 1.0)
+            rlo = jnp.where(active, jnp.maximum(rlo, klo), rlo)
+            rhi = jnp.where(active, jnp.minimum(rhi, khi), rhi)
+            v = jnp.where(active, vlo + scale * jnp.clip(z, 0.0, 1.0), vprev)
             if n_kelley:  # Kelley: tangents of the squares at the LP solution (not after the last round)
+                gap = jnp.where(needj, v[I] * v[J] - v[n:], -jnp.inf)  # x^2 - w: > 0 cuts the point off
+                active = active & (best < cutoff) & jnp.any(gap > 1e-9 * (1.0 + scale[n:]))
                 vals, b = jax.lax.cond(k < n_kelley, lambda: tangents(vals, b, v, jnp.minimum(k, n_kelley - 1)),
                                        lambda: (vals, b))  # fmt: skip
-            return (vals, b, best, rlo, rhi, v[:n]), None
+            return (vals, b, best, rlo, rhi, v, active), None
 
-        init = (vals0, b0, jnp.array(-jnp.inf, lo.dtype), lo, hi, 0.5 * (lo + hi))
-        (_, _, best, rlo, rhi, x), _ = jax.lax.scan(round_, init, jnp.arange(n_kelley + 1))
+        init = (vals0, b0, jnp.array(-jnp.inf, lo.dtype), lo, hi, vlo + 0.5 * scale, jnp.array(True))
+        (_, _, best, rlo, rhi, x, _), _ = jax.lax.scan(round_, init, jnp.arange(n_kelley + 1))
+        x = x[:n]
         infeasible = best == jnp.inf
         rlo, rhi = jnp.where(finite, rlo, lo), jnp.where(finite, rhi, hi)
         return best, jnp.clip(x, lo, hi), infeasible, rlo, rhi
