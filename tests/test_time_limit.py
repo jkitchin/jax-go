@@ -160,6 +160,9 @@ def test_dive_budget_skips_when_time_is_short(monkeypatch):
     lo, hi = MIXED_BOX
     minimize(_mixed, lo, hi, **{**MIXED, "max_iter": 3})  # compile and cache the kernels
     K = _kernels(_mixed)
+    # lift the dives' share of the wall time (_DIVE_FRAC): with cached kernels this short search
+    # takes so little time that the share alone skips every dive; this test is about time_limit
+    monkeypatch.setattr(bnb, "_DIVE_FRAC", np.inf)
     monkeypatch.setattr(K, "dive", _CountingDive(K.dive))
     minimize(_mixed, lo, hi, **{**MIXED, "max_iter": 12})  # no time limit: root and periodic dives
     assert K.dive.runs >= 2
@@ -173,12 +176,28 @@ def test_dive_budget_skips_when_time_is_short(monkeypatch):
     assert time.perf_counter() - t < 4.0 + 1.5
 
 
+def test_dive_share_of_wall_time(monkeypatch):
+    """With an incumbent, dives get at most _DIVE_FRAC of the elapsed wall time: at 0 none runs,
+    without the cap the same search dives at the root and periodically."""
+    lo, hi = MIXED_BOX
+    minimize(_mixed, lo, hi, **{**MIXED, "max_iter": 3})
+    K = _kernels(_mixed)
+    monkeypatch.setattr(K, "dive", _CountingDive(K.dive))
+    monkeypatch.setattr(bnb, "_DIVE_FRAC", 0.0)
+    r = minimize(_mixed, lo, hi, **{**MIXED, "max_iter": 12})
+    assert np.isfinite(r.fun) and K.dive.runs == 0
+    monkeypatch.setattr(bnb, "_DIVE_FRAC", np.inf)
+    minimize(_mixed, lo, hi, **{**MIXED, "max_iter": 12})
+    assert K.dive.runs >= 2
+
+
 def test_first_dive_estimate_from_bound_kernel(monkeypatch):
     """Before any dive its cost is estimated as (integer variables) x (slowest bound call):
     3 x 0.5 s here, so with less than 2.25 s left the root dive is skipped."""
     lo, hi = MIXED_BOX
     minimize(_mixed, lo, hi, **{**MIXED, "max_iter": 3})
     K = _kernels(_mixed)
+    monkeypatch.setattr(bnb, "_DIVE_FRAC", np.inf)  # skipped by the time limit, not by the share
     monkeypatch.setattr(K, "dive", _CountingDive(K.dive))
     _slow_bound(monkeypatch, 0.5)
     r = minimize(_mixed, lo, hi, time_limit=2.0, **MIXED)

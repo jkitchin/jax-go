@@ -670,10 +670,10 @@ _DIVE_BACKOFF = 80  # most iterations between periodic dives that do not improve
 # cost) would pass this fraction of the elapsed time: on smallinvDAX (1583-row tape, 30 integers)
 # one dive call costs ~9 s, and four of them took 36 s of a 60 s run whose incumbent was already
 # optimal
+_DIVE_FRAC = 0.2
 _POOL_NLP_FRAC = 0.3  # at most this share of the wall time goes to the cut pool's local solves
 _POOL_CHUNK = 16  # points per call of the cut pool's tangent kernel
 _POOL_ADD = 2  # LP points of the lowest-bound boxes of each batch whose tangents join the cut pool
-_DIVE_FRAC = 0.2
 # the per-child local solves of the cut pool are probed (half the children get them) on
 # _POOL_PROBE_N boxes of each kind and kept when they add _POOL_GAIN (of the gap) to the
 # children's mean bound gain; flay04m (whose node LP is already tight) spent 30% of its time
