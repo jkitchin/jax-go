@@ -853,6 +853,14 @@ _Q, _ETA_MS = 2, 0.5  # branch_var="strong": split on up to _Q variables at once
 _PROFILE = None  # benchmarks/profile_root.py: a callable(stage) told when each setup / root stage of ``minimize`` begins
 
 
+def _auto_branch_var(imask):
+    """The rule ``branch_var="auto"`` picks (measured, see ``minimize``'s docstring): pseudocost
+    without integer variables, width with them. (Pseudocost when every nonlinear variable is a
+    general integer helps the hard ones, tln4/5, nvs19/23/24, smallinvDAXr3b010-011, but takes
+    ~1.5x the nodes on small ones: ex1265a 127 -> 701, tloss 31 -> 127, nvs13 107 -> 199.)"""
+    return "width" if np.asarray(imask).any() else "pseudocost"
+
+
 def _mark(stage):
     """Tell ``_PROFILE`` (off by default) that ``minimize`` enters ``stage``."""
     if _PROFILE is not None:
@@ -990,7 +998,8 @@ def minimize(
     pseudocost and strong solves one more than width but loses flay04m or nous1), ``"width"`` (largest
     relative width among nonlinear variables; on the lifted quadratic LP, relative width
     times the McCormick gap of the variable's products at the relaxation point), ``"pseudocost"`` (product score
-    of per-variable bound gains observed so far) or ``"reliability"`` (like
+    of per-variable bound gains observed so far; with integer variables, among the integers
+    fractional at the relaxation point when there are any) or ``"reliability"`` (like
     pseudocost, but variables with fewer than ``_ETA`` observations are
     strong-branched, up to ``_M`` of them per box, within the ``batch`` budget)
     or ``"strong"`` (every parent is split on its best-scored variable, and the
@@ -1063,8 +1072,8 @@ def minimize(
         raise ValueError(
             f"branch_var must be 'auto', 'width', 'pseudocost', 'reliability' or 'strong', not {branch_var!r}"
         )
-    if branch_var == "auto":  # measured choice, see the docstring
-        branch_var = "width" if imask.any() else "pseudocost"
+    if branch_var == "auto":
+        branch_var = _auto_branch_var(imask)
     if obbt not in (False, None, "root", "tree"):
         raise ValueError(f"obbt must be False, 'root' or 'tree', not {obbt!r}")
     if crown not in (False, None, True, "auto"):
@@ -1813,6 +1822,10 @@ def minimize(
         else:
             score, _ = pseudo_scores(relw, phi > plo, pxr)
             if branch_var == "pseudocost":
+                if imask.any():  # as with width, integers fractional at the relaxation point first
+                    # (tloss: 2815 nodes without this, 127 with it, 31 with width)
+                    fcand = imask & free & (np.abs(pxr - np.round(pxr)) > INT_TOL) & (score >= 0)
+                    score = np.where(fcand.any(axis=1, keepdims=True) & ~fcand, -1.0, score)
                 pv = np.argmax(score, axis=1)
                 pp = np.arange(k)
                 groups = [[i] for i in range(k)]
@@ -1927,9 +1940,16 @@ def minimize(
                 big = 1e12 * (1 + np.abs(plb[pp]))
                 gl, gr = np.where(gl <= big, gl, np.inf), np.where(gr <= big, gr, np.inf)
             r2 = relw[pp, pv] ** 2
-            # integer splits: per unit moved, v - p down and p + 1 - v up (p = the split point)
-            dl = np.where(isint, np.maximum(v_split - pt, 1e-6), r2) if imask.any() else r2
-            dr = np.where(isint, np.maximum(pt + 1.0 - v_split, 1e-6), r2) if imask.any() else r2
+            # integer splits: per unit moved, v - p down and p + 1 - v up (p = the split point);
+            # 0.5 each when v is integral (the split is at the midpoint), as pseudo_scores assumes
+            # (dividing by a 1e-6 floor there inflated that variable's pseudocost a millionfold)
+            if imask.any():
+                fs = v_split - pt  # (not ``f``: that is the objective)
+                fr = (fs > INT_TOL) & (fs < 1.0 - INT_TOL)
+                dl = np.where(isint, np.where(fr, fs, 0.5), r2)
+                dr = np.where(isint, np.where(fr, 1.0 - fs, 0.5), r2)
+            else:
+                dl = dr = r2
             good = np.isfinite(gl) & np.isfinite(gr) & (dl > 1e-24) & (dr > 1e-24)
             np.add.at(sumL, pv[good], gl[good] / dl[good])
             np.add.at(sumR, pv[good], gr[good] / dr[good])
