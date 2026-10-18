@@ -1,0 +1,117 @@
+site_name: jaxglobal
+site_description: Deterministic global optimization of plain JAX functions via jaxpr-derived relaxations
+site_author: John Kitchin
+site_url: https://jkitchin.github.io/jax-go/
+repo_url: https://github.com/jkitchin/jax-go
+repo_name: jkitchin/jax-go
+edit_uri: ""
+copyright: Copyright &copy; 2026 John Kitchin
+
+# Only the curated pages in docs-site/ are published. docs/ (planning notes,
+# ROADMAP, bibliography tooling) is not part of the site.
+docs_dir: docs-site
+exclude_docs: |
+  hooks.py
+  requirements.txt
+  __pycache__/
+
+hooks:
+  - docs-site/hooks.py
+
+theme:
+  name: material
+  logo: assets/figures/logo-square.svg
+  favicon: assets/figures/logo-square.svg
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - content.code.copy
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - pymdownx.details
+  - pymdownx.arithmatex:
+      generic: true
+
+extra_javascript:
+  - https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js
+
+plugins:
+  - search
+  - mkdocs-jupyter:
+      execute: false
+      include_source: true
+      ignore_h1_titles: false
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [.]
+          options:
+            docstring_style: sphinx
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: true
+            members_order: source
+            filters: ["!^_"]
+            show_signature_annotations: true
+            separate_signature: true
+            heading_level: 2
+
+nav:
+  - Home: index.md
+  - Installation and quickstart: installation.md
+  - User guide:
+      - Modelling: guide/modelling.md
+      - Solver options: guide/solver-options.md
+      - Export to SCIP and .nl: guide/export.md
+      - Benchmarks and results: guide/benchmarks.md
+      - Correctness and limitations: guide/correctness.md
+  - Examples:
+      - examples/index.md
+      - "01 Relaxations": examples/01-relaxations.ipynb
+      - "02 Branch and bound": examples/02-branch-and-bound.ipynb
+      - "03 Test problems": examples/03-test-problems.ipynb
+      - "04 Equation-based solvers": examples/04-equation-based-solvers.ipynb
+      - "05 Throughput": examples/05-throughput.ipynb
+      - "06 Gaussian processes": examples/06-gaussian-processes.ipynb
+  - Pyomo comparison:
+      - pyomo/index.md
+      - "00 Overview": pyomo/00-index.ipynb
+      - "01 Basics": pyomo/01-basics.ipynb
+      - "02 Control flow": pyomo/02-control-flow.ipynb
+      - "03 ODE models": pyomo/03-ode-models.ipynb
+      - "04 Neural-network surrogates": pyomo/04-neural-network-surrogates.ipynb
+      - "05 Things Pyomo cannot express": pyomo/05-things-pyomo-cannot-express.ipynb
+  - API reference:
+      - api/index.md
+      - jaxglobal: api/jaxglobal.md
+      - jaxglobal.export: api/export.md
+      - jaxglobal.nl: api/nl.md
+      - jaxglobal.kernels: api/kernels.md
+      - jaxglobal.gp: api/gp.md
+      - jaxglobal.problems: api/problems.md
+      - jaxglobal.applications: api/applications.md
+  - References: references.md
