@@ -602,6 +602,122 @@ def _round_bounds(lo, hi, mask):
     return lo, hi
 
 
+_REPAIR_SIZE = 2_000_000  # integer repair: largest rows x variables Jacobian it extracts (else it is off)
+_REPAIR_STEPS = 64  # integer repair: most +-1 moves per rounded point
+_REPAIR_SWAPS = 200  # integer repair: swap moves (one +1, another -1) only with at most this many integers
+_REPAIR_PTS = 4  # integer repair: most rounded relaxation points repaired per batch of local solves
+
+
+def _integer_rows(ineq, eq, lo, hi, imask, jac=None, seed=0):
+    """The linear constraint rows on integer variables only: ``(A, c, is_eq)`` with each row's
+    value ``A @ x[imask] + c`` (an inequality ``<= 0``, an equality ``== 0``), or None.
+
+    Rounding the integers of a relaxation point can violate such a row (a budget), and no
+    solve of the continuous variables can repair that. Read numerically: the constraint
+    Jacobian at two random points of the box; a row qualifies when its Jacobian is the same at
+    both, zero on every continuous variable, and its values agree with that linear form. The
+    rows only guide ``_repair_rounding``; every point it proposes is still screened against
+    all the constraints. None when there are no such rows or the Jacobian would exceed
+    ``_REPAIR_SIZE`` entries. ``jac``: the Jacobian's sparsity ``(rows, cols)``
+    (``Structure.jac``), when known: without a row on integers only, nothing is computed."""
+    g, h = _vec(ineq), _vec(eq)
+    n = lo.size
+    if not imask.any() or (ineq is None and eq is None):
+        return None
+    if jac is not None:
+        r, cl = (np.asarray(a) for a in jac)
+        touched = np.zeros(int(r.max(initial=-1)) + 1, bool)
+        touched[r] = True
+        cont_rows = np.zeros_like(touched)
+        cont_rows[r[~imask[cl]]] = True
+        if not (touched & ~cont_rows).any():
+            return None
+    try:
+        rows = lambda x: jnp.concatenate([g(x), h(x)])  # noqa: E731
+        with jax.ensure_compile_time_eval():
+            m_ineq = int(np.size(jax.eval_shape(g, jax.ShapeDtypeStruct((n,), jnp.float64))))
+            m = m_ineq + int(np.size(jax.eval_shape(h, jax.ShapeDtypeStruct((n,), jnp.float64))))
+        if m == 0 or m * n > _REPAIR_SIZE:
+            return None
+        rng = np.random.default_rng(seed)
+        a = np.where(np.isfinite(lo), lo, np.minimum(hi, 0.0) - 10.0)  # a finite part of the box
+        b = np.where(np.isfinite(hi), hi, a + 20.0)
+        P = a + (b - a) * rng.uniform(0.1, 0.9, size=(2, n))
+        jacobian = jax.jacfwd(rows)  # (eager: tracing and compiling it under jit costs more)
+        V = [np.asarray(rows(jnp.asarray(p)), np.float64) for p in P]
+        J = [np.asarray(jacobian(jnp.asarray(p)), np.float64).reshape(m, n) for p in P]
+    except Exception:  # an optional heuristic: anything the Jacobian cannot follow turns it off
+        return None
+    scale = 1.0 + np.abs(J[0]).max(axis=1)
+    pred = V[0] + J[0] @ (P[1] - P[0])
+    ok = (np.all(np.isfinite(J[0]) & np.isfinite(J[1]), axis=1) & np.isfinite(V[0]) & np.isfinite(V[1])
+          & np.all(J[0][:, ~imask] == 0.0, axis=1) & np.all(J[1][:, ~imask] == 0.0, axis=1)
+          & np.all(np.abs(J[0] - J[1]) <= 1e-9 * scale[:, None], axis=1)
+          & (np.abs(pred - V[1]) <= 1e-8 * (scale + np.abs(V[1])))
+          & np.any(J[0][:, imask] != 0.0, axis=1))  # fmt: skip
+    if not ok.any():
+        return None
+    A = J[0][ok][:, imask]
+    c = V[0][ok] - A @ P[0][imask]
+    return A, c, (np.arange(m) >= m_ineq)[ok]
+
+
+def _repair_rounding(xi, ref, lo, hi, rows, tol, max_steps=_REPAIR_STEPS):
+    """Greedy repair of rounded integer values ``xi`` against linear rows ``rows`` (``_integer_rows``).
+
+    Each step makes the move (one integer +-1, or when none helps and there are few integers
+    a swap: one +1, another -1) that most reduces the rows' scaled violation per unit of
+    added distance from the relaxation values ``ref``; it stops when every row holds to
+    ``tol`` or no move reduces the violation. ``lo``, ``hi`` are the integers' bounds.
+    Returns the repaired integers, or None if the rows are not met. It only proposes a
+    candidate incumbent: no bound depends on it."""
+    A0, c0, is_eq = rows
+    s = 1.0 + np.abs(A0).max(axis=1)
+    A, c = A0 / s[:, None], c0 / s  # rows scaled: the violation sums comparable units
+    x = np.clip(np.round(xi), lo, hi)
+
+    def viol(V):  # (m, k) row values -> (k,) total violation
+        return np.sum(np.where(is_eq[:, None], np.abs(V), np.maximum(V, 0.0)), axis=0)
+
+    def holds(x):
+        r = A0 @ x + c0
+        return bool(np.all(np.where(is_eq, np.abs(r), r) <= tol))
+
+    k = x.size
+    for _ in range(max_steps):
+        if holds(x):
+            return x
+        v = A @ x + c
+        cur = float(viol(v[:, None])[0])
+        best = None
+        jj, dd = np.tile(np.arange(k), 2), np.repeat([1.0, -1.0], k)  # single moves x_j += d
+        okm = (x[jj] + dd >= lo[jj]) & (x[jj] + dd <= hi[jj])
+        red = cur - viol(v[:, None] + A[:, jj] * dd)
+        dist = np.abs(x[jj] + dd - ref[jj]) - np.abs(x[jj] - ref[jj])  # in [-1, 1]
+        score = np.where(okm & (red > 1e-12), red / (1.0 + dist + 1e-3), -np.inf)
+        i = int(np.argmax(score))
+        if np.isfinite(score[i]):
+            best = ((jj[i],), (dd[i],))
+        if best is None and k <= _REPAIR_SWAPS:
+            up, dn = np.meshgrid(np.arange(k), np.arange(k), indexing="ij")
+            up, dn = up.ravel(), dn.ravel()
+            sel = (up != dn) & (x[up] + 1 <= hi[up]) & (x[dn] - 1 >= lo[dn])
+            up, dn = up[sel], dn[sel]
+            if len(up):
+                red = cur - viol(v[:, None] + A[:, up] - A[:, dn])
+                dist = (np.abs(x[up] + 1 - ref[up]) - np.abs(x[up] - ref[up])
+                        + np.abs(x[dn] - 1 - ref[dn]) - np.abs(x[dn] - ref[dn]))
+                score = np.where(red > 1e-12, red / (2.0 + dist + 1e-3), -np.inf)
+                i = int(np.argmax(score))
+                if np.isfinite(score[i]):
+                    best = ((up[i], dn[i]), (1.0, -1.0))
+        if best is None:
+            return None
+        for jj, dd in zip(*best):
+            x[jj] += dd
+    return x if holds(x) else None
+
+
 def _verify(f, ineq, eq, x, fun, lo, hi, feas_tol, integer=None):
     """Re-evaluate ``x`` outside jit in float64: ``(max_violation, ok, reason)``.
 
@@ -1060,23 +1176,65 @@ def minimize(
         With integer variables a start (an LP point, which can violate the nonlinear
         constraints far more than any rounding can repair) is first solved as the
         continuous relaxation; that point is rounded at the ``ROUNDINGS`` thresholds and
-        each rounding is fix-and-solved: integers fixed, continuous variables free."""
+        each rounding is fix-and-solved: integers fixed, continuous variables free. A nearest
+        rounding that gets no feasible point is also repaired (``repaired``) and solved again."""
         S = np.clip(np.asarray(starts, dtype=np.float64), lo, hi)
         if imask.any():
             R = np.clip(np.asarray(solve_local(S, options=options)), lo, hi)  # NLP relaxation
             pool_add(R)
             fl = np.floor(R)
             fixed = np.concatenate([np.clip(fl + (R - fl > t), lo, hi) for t in ROUNDINGS])
-            fixed = np.unique(np.where(imask, fixed, np.concatenate([R] * len(ROUNDINGS))), axis=0)
+            fixed = np.where(imask, fixed, np.concatenate([R] * len(ROUNDINGS)))
+            fixed, inv = np.unique(fixed, axis=0, return_inverse=True)
             L, H = np.where(imask, fixed, lo), np.where(imask, fixed, hi)
             X = np.clip(np.asarray(solve_local(fixed, L, H, options=options)), L, H)
+            F = screen(X)
+            # a nearest rounding (ROUNDINGS[0]) with no feasible completion: repair its integers
+            # against the linear rows on integers only, and fix-and-solve the repaired points too
+            near = np.asarray(inv).reshape(-1)[:len(R)]
+            bad = np.unique(near[~np.isfinite(F[near])])
+            Y = repaired(fixed[bad], R[[int(np.flatnonzero(near == b)[0]) for b in bad]]) if len(bad) else []
+            if len(Y):
+                L, H = np.where(imask, Y, lo), np.where(imask, Y, hi)
+                Y = np.clip(np.asarray(solve_local(Y, L, H, options=options)), L, H)
+                X, F = np.concatenate([X, Y]), np.concatenate([F, screen(Y)])
         else:
             X = np.clip(np.asarray(solve_local(S, options=options)), lo, hi)
-        F = screen(X)
+            F = screen(X)
         i = int(np.argmin(F))
         if np.isfinite(F[i]):
             pool_add(X[i])
         return X[i], float(F[i])
+
+    int_rows = []  # [rows] once read (``_integer_rows``): the linear rows on integers only, or [None]
+
+    def repaired(X, R):
+        """The rounded points ``X`` (k, n) whose integers violate a linear row on integers only,
+        repaired (``_repair_rounding``, towards the relaxation points ``R``): (k', n), the
+        continuous values kept. At most ``_REPAIR_PTS`` repairs per call; they only propose
+        candidate incumbents (fix-and-solved, then screened)."""
+        out = np.zeros((0, lo.size))
+        if _past(deadline):
+            return out
+        if not int_rows:
+            st = K.structure(lo.size)
+            int_rows.append(_integer_rows(ineq, eq, lo, hi, imask, jac=None if st is None else st.jac))
+        rows = int_rows[0]
+        if rows is None:
+            return out
+        A, c, is_eq = rows
+        res = A @ X[:, imask].T + c[:, None]
+        bad = np.flatnonzero(np.any(np.where(is_eq[:, None], np.abs(res), res) > _STRICT_FRAC * feas_tol, axis=0))
+        Y = []
+        for i in bad[:_REPAIR_PTS]:
+            if not (np.all(np.isfinite(X[i])) and np.all(np.isfinite(R[i]))):
+                continue
+            xi = _repair_rounding(X[i, imask], R[i, imask], lo[imask], hi[imask], rows, _STRICT_FRAC * feas_tol)
+            if xi is not None:
+                y = X[i].copy()
+                y[imask] = xi
+                Y.append(y)
+        return np.array(Y) if Y else out
 
     def screen(X):
         """Objective values of candidate incumbents ``X`` (k, n), ``inf`` for any that is not one.
