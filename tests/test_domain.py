@@ -8,7 +8,7 @@ import pytest
 
 import jaxglobal  # noqa: F401  (enables x64)
 from jaxglobal import minimize
-from jaxglobal.domain import bound_domain, monotone_bounds, used_variables
+from jaxglobal.domain import LinearRelaxation, bound_domain, monotone_bounds, used_variables
 from jaxglobal.problems import CONSTRAINED_PROBLEMS
 
 INF = np.inf
@@ -129,3 +129,71 @@ def test_free_slacks_make_instances_supported():
         M = read_nl(DATA / f"{name}.nl", integers="mask")
         lo, hi, infeasible, _, _ = bound_domain(M.f, M.ineq, M.eq, M.lo, M.hi, integer=np.asarray(M.integer))
         assert not infeasible and np.all(np.isfinite(lo)) and np.all(np.isfinite(hi)), name
+
+
+# ---------------------------------------------------------------- LP bounds (domain.LinearRelaxation)
+
+
+def _recycle():
+    """x = (1 - t)(20 + x + y), y <= x / 7, t in [0.2, 0.3]: x <= 0.8 * 20 / (1 - 0.8 * 8 / 7) = 186.67.
+
+    The recycle loop of a staged design (MINLPLib ``launch``): FBBT from x, y in [0, inf)
+    cannot bound x (every sweep sees an infinite sum), a linear relaxation can.
+    Variables (x, y, t, s) with s = 20 + x + y."""
+    eq = lambda v: jnp.stack([v[0] - (1 - v[2]) * v[3], v[3] - 20 - v[0] - v[1]])  # noqa: E731
+    ineq = lambda v: jnp.atleast_1d(7 * v[1] - v[0])  # noqa: E731
+    return eq, ineq, np.array([0.0, 0.0, 0.2, -INF]), np.array([INF, INF, 0.3, INF])
+
+
+def test_lp_bounds_recycle_loop():
+    eq, ineq, lo, hi = _recycle()
+    f = lambda v: -v[0]  # noqa: E731
+    from jaxglobal.fbbt import make_fbbt
+
+    a, b, _ = make_fbbt(f, ineq, eq, rounds=30)(jnp.asarray(lo), jnp.asarray(hi), INF)
+    assert not np.isfinite(b[0])  # FBBT alone cannot
+    R = LinearRelaxation(f, ineq, eq, 4)
+    assert R.ok
+    l2, h2 = R.bounds(np.asarray(a), np.asarray(b))
+    xmax = 0.8 * 20 / (1 - 0.8 * 8 / 7)
+    assert np.isfinite(h2[0]) and xmax - 1e-6 <= h2[0] <= xmax * 1.01
+    assert np.all(np.isfinite(l2)) and np.all(np.isfinite(h2))
+    r = minimize(f, lo, hi, ineq=ineq, eq=eq)
+    assert r.status == "optimal" and abs(r.fun + xmax) <= 1e-3 * xmax
+
+
+def test_lp_bounds_keep_feasible_points():
+    """Every bound from the LP holds at sampled feasible points (here: the whole curve t -> x(t))."""
+    eq, ineq, lo, hi = _recycle()
+    R = LinearRelaxation(lambda v: v[0], ineq, eq, 4)
+    l2, h2 = R.bounds(lo, hi, tighten_all=True)
+    for t in np.linspace(0.2, 0.3, 11):
+        for frac in np.linspace(0.0, 1.0, 5):  # y = frac * x / 7, x = (1 - t) 20 / (1 - (1 - t)(1 + frac / 7))
+            x = (1 - t) * 20 / (1 - (1 - t) * (1 + frac / 7))
+            v = np.array([x, frac * x / 7, t, 20 + x + frac * x / 7])
+            assert np.all(v >= l2 - 1e-9) and np.all(v <= h2 + 1e-9), (t, frac)
+
+
+def test_lp_bounds_objective_cutoff_with_log_terms():
+    """f = x0 log x0 + x1 - log(x1 - x0) grows like x1 - log x1: the cutoff f <= f(x*) bounds x1.
+
+    FBBT cannot (x1 and log(x1 - x0) are two unbounded terms of one sum, and the
+    interval of x0 log x0 on [0, 1] is unbounded below); the LP has the tangents of
+    -log and of the convex x log x."""
+    f = lambda x: x[0] * jnp.log(x[0]) + x[1] - jnp.log(x[1] - x[0])  # noqa: E731
+    lo, hi = np.array([0.0, -INF]), np.array([1.0, INF])
+    lo2, hi2, infeasible, xf, ff = bound_domain(f, None, None, lo, hi)
+    assert not infeasible and np.all(np.isfinite(lo2)) and np.all(np.isfinite(hi2))
+    # optimum: x0 = 1/e... any point within the cutoff must stay: check a fine grid of good points
+    X0, X1 = np.meshgrid(np.linspace(1e-6, 1, 200), np.linspace(1e-3, 20, 400))
+    F = X0 * np.log(X0) + X1 - np.log(np.maximum(X1 - X0, 1e-300))
+    keep = (X1 > X0) & (F <= ff)
+    assert np.all(X1[keep] <= hi2[1] + 1e-9) and np.all(X1[keep] >= lo2[1] - 1e-9)
+
+
+def test_lp_bounds_leave_truly_free_variables_alone():
+    """A variable nothing bounds stays free: no artificial box."""
+    f = lambda x: x[1] ** 2  # noqa: E731
+    R = LinearRelaxation(f, lambda x: jnp.atleast_1d(x[0] - x[1]), None, 2)
+    l2, h2 = R.bounds(np.array([-INF, -1.0]), np.array([INF, 1.0]), cutoff=1.0)
+    assert l2[0] == -INF and h2[0] <= 1.0 + 1e-2  # x0 <= x1 <= 1, x0 unbounded below

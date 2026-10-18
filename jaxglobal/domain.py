@@ -38,6 +38,7 @@ from .fbbt import joint_tape, make_fbbt
 
 _POOL = []  # one compiler thread, created on first use
 _SETTLE_ROUNDS = 5  # rounds of monotone caps + FBBT in bound_domain
+_LP_ROUNDS = 4  # rounds of LP bounds + FBBT in bound_domain
 
 
 class DomainTimeout(Exception):
@@ -330,15 +331,326 @@ def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed
                 lo, hi = keep
                 return
 
+    relax = []
+
+    def linear(cutoff):
+        """LP bounds (``LinearRelaxation``) and FBBT in turn while they tighten the box."""
+        nonlocal lo, hi
+        for _ in range(_LP_ROUNDS):
+            if np.all(np.isfinite(lo)) and np.all(np.isfinite(hi)):
+                return
+            if deadline is not None and time.perf_counter() > deadline:
+                return
+            if not relax:
+                relax.append(LinearRelaxation(f, ineq, eq, lo.size, feas_tol))
+            if not relax[0].ok:
+                return
+            keep = lo.copy(), hi.copy()
+            lo, hi = relax[0].bounds(lo, hi, cutoff, integer=integer)
+            if tighten(cutoff):  # the LP bounds keep every feasible point: be conservative anyway
+                lo, hi = keep
+                return
+            w0, w1 = keep[1] - keep[0], hi - lo
+            if not np.any((w1 < w0) & ~(np.isfinite(w0) & (w1 > 0.9 * w0))):
+                return  # no new finite bound and no finite width cut by 10% or more
+
     settle(np.inf)
     xf, ff = None, np.inf
     if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
+        # a feasible point first (also a good seed for the search), then the LP bounds with its cutoff
         xf, ff = _feasible_points(f, ineq, eq, lo, hi, feas_tol, n_starts, seed, deadline, integer)
+        cutoff = np.inf
         if xf is not None:
             cutoff = ff + 1e-9 * (1 + abs(ff))
             keep = lo.copy(), hi.copy()
             if tighten(cutoff):  # cannot happen for a truly feasible point; be safe
                 lo, hi = keep
             settle(cutoff)
+        linear(cutoff)
+        settle(cutoff)
+        if xf is not None:
             lo, hi = np.minimum(lo, xf), np.maximum(hi, xf)  # keep the incumbent inside
     return lo, hi, False, xf, ff
+
+
+# ---------------------------------------------------------------------------------------------
+# LP bounds on free variables (``LinearRelaxation``)
+# ---------------------------------------------------------------------------------------------
+
+_LP_MAX_ROWS = 20000  # scalar tape rows; larger models are not relaxed here
+_LP_FBBT_ROUNDS = 5  # FBBT rounds for the slot intervals the rows are built from
+_LP_OBBT_MAX_N = 100  # on models this small every bound is tightened, not only the infinite ones
+_LP_MAX_COEF = 1e8  # facets / tangents with larger coefficients are dropped (only loosens the LP)
+_LP_MARGIN = 1e-3  # relative widening of an LP-derived bound (absorbs LP solver tolerances)
+
+
+def _curvature(name, params, const_a, const_b, cval, L, U):
+    """+1 if the univariate row is convex on [L, U], -1 if concave, 0 if unknown.
+
+    ``cval`` is the constant operand of a binary row (``pow``), if any; ``mul`` is ``x * x``.
+    """
+    if name in ("exp", "exp2", "expm1", "square", "cosh", "abs", "mul"):
+        return 1
+    if name in ("log", "log1p", "sqrt"):
+        return -1
+    if name == "rsqrt":
+        return 1 if L > 0 else 0
+    if name == "integer_pow":
+        y = int(params["y"])
+        if y > 0 and y % 2 == 0:
+            return 1
+        if y > 1:
+            return 1 if L >= 0 else (-1 if U <= 0 else 0)
+        if y < 0:
+            return 1 if L > 0 else ((1 if y % 2 == 0 else -1) if U < 0 else 0)
+        return 0
+    if name == "pow":
+        if const_a and not const_b:  # c ** x = exp(x log c)
+            return 1 if cval > 0 else 0
+        if const_b and not const_a and L >= 0:  # x ** e on x >= 0
+            if cval >= 1 or (cval < 0 and L > 0):
+                return 1
+            if 0 < cval < 1:
+                return -1
+    return 0
+
+
+def _tangent_points(L, U):
+    """Points of [L, U] (either end may be infinite) at which tangents are taken."""
+    if np.isfinite(L) and np.isfinite(U):
+        return np.unique(L + (U - L) * np.array([0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0]))
+    if np.isfinite(L):
+        return L + max(1.0, abs(L)) * np.array([1e-3, 0.1, 1.0, 10.0, 100.0, 1e3])
+    if np.isfinite(U):
+        return U - max(1.0, abs(U)) * np.array([1e-3, 0.1, 1.0, 10.0, 100.0, 1e3])
+    return np.array([-100.0, -10.0, -1.0, 0.0, 1.0, 10.0, 100.0])
+
+
+def _tangent_fn(name, eqn, n_in, const_a):
+    """``(x, c) -> (g, g')`` vectorized, for the variable operand ``x`` of a univariate row."""
+    prim, params = (eqn.primitive, eqn.params) if eqn is not None else (None, None)
+    if name == "xlogx":
+        g = lambda x, c: x * jnp.log(x)  # noqa: E731
+    elif name == "mul":
+        g = lambda x, c: x * x  # noqa: E731
+    elif n_in > 1 and const_a:
+        g = lambda x, c: prim.bind(c, x, **params)  # noqa: E731
+    elif n_in > 1:
+        g = lambda x, c: prim.bind(x, c, **params)  # noqa: E731
+    else:
+        g = lambda x, c: prim.bind(x, **params)  # noqa: E731
+    return jax.jit(jax.vmap(jax.value_and_grad(lambda x, c: jnp.reshape(g(x, c), ()))))
+
+
+class LinearRelaxation:
+    """Linear relaxation of ``[f, ineq, eq]`` on the scalar tape, for bounding free variables.
+
+    Every non-constant scalar slot of the tape (``fbbt_interp.scalarize``) is an LP
+    column, bounded by its FBBT interval (infinite ends allowed; the intervals come
+    from the tape interpreter with ``all_slots``). Rows:
+
+    * sums, differences, negations, products with and quotients by constants: exact
+      linear equalities;
+    * ``w = a * b``: the McCormick facets that only use finite bounds, e.g.
+      ``w >= aL b + bL a - aL bL`` (from ``(a - aL)(b - bL) >= 0``) needs ``aL`` and
+      ``bL`` finite, whatever ``aU``, ``bU`` are; ``w = a / b`` the same facets on
+      ``a = w * b``;
+    * univariate rows convex (concave) on their input interval: tangents
+      ``w >= g(p) + g'(p)(v - p) - eps`` (``<= ... + eps``), valid on the whole
+      interval, so also on an unbounded one; e.g. ``-log(t) >= -log(p) - (t - p) / p``;
+    * outputs: ``f <= cutoff``, ``ineq <= feas_tol``, ``|eq| <= feas_tol`` (the
+      relaxation ``make_fbbt`` uses).
+
+    Every row holds at every point of the box that satisfies the (relaxed)
+    constraints and the cutoff, so minimizing / maximizing a variable over the LP
+    bounds it over that set. This sees combinations of rows that FBBT cannot:
+    ``x = (1 - t)(20 + x + y)`` with ``t >= 0.2`` and ``y <= x / 7`` bounds ``x``,
+    while FBBT from ``x in [0, inf)`` does not.
+    """
+
+    def __init__(self, f, ineq, eq, n, feas_tol=1e-6):
+        from .fbbt import _has_tracer
+        from .fbbt_interp import make_propagate
+
+        self.ok = False
+        self.n, self.ineq, self.eq, self.feas_tol = n, ineq, eq, feas_tol
+        with jax.ensure_compile_time_eval():
+            tape = joint_tape(f, ineq, eq, np.zeros(n))
+        if _has_tracer(tape):
+            return
+        run = make_propagate(tape, ineq, eq, n, feas_tol, _LP_FBBT_ROUNDS, scheduled=False)
+        if run is None or len(run.program.op) > _LP_MAX_ROWS:
+            return
+        self.prog = run.program
+        self.sweep = jax.jit(lambda lo, hi, c: run(lo, hi, c, all_slots=True))
+        self.tangent = {}
+        self.ok = True
+
+    def _rows(self, L, H):
+        """``(rows_ub, rows_eq)``: lists of ``({column: coef}, rhs)``, rows ``<= rhs`` / ``== rhs``."""
+        prog = self.prog
+        cval = prog.const_val
+        isc = ~np.isnan(cval)
+        col = np.cumsum(~isc) - 1
+        rows_ub, rows_eq = [], []
+
+        def add(kind, pairs, rhs):
+            """Row ``sum c * slot (kind) rhs``; constant slots move to the rhs."""
+            coefs = {}
+            for c, s in pairs:
+                if not np.isfinite(c) or abs(c) > _LP_MAX_COEF:
+                    return
+                if isc[s]:
+                    rhs -= c * cval[s]
+                elif c != 0:
+                    coefs[int(col[s])] = coefs.get(int(col[s]), 0.0) + c
+            if np.isfinite(rhs) and abs(rhs) <= _LP_MAX_COEF**2 and coefs:
+                (rows_eq if kind == "==" else rows_ub).append((coefs, float(rhs)))
+
+        def mccormick(w, a, b):
+            """Facets of ``w = a * b`` (slots) that use only finite bounds."""
+            aL, aU, bL, bU = L[a], H[a], L[b], H[b]
+            for ab, bb, sgn in ((aL, bL, 1), (aU, bU, 1), (aU, bL, -1), (aL, bU, -1)):
+                if np.isfinite(ab) and np.isfinite(bb):
+                    # sgn=+1: w >= ab*b + bb*a - ab*bb ; sgn=-1: w <= ab*b + bb*a - ab*bb
+                    add("<=", [(-sgn, w), (sgn * ab, b), (sgn * bb, a)], sgn * ab * bb)
+
+        tangents = {}  # opcode (or "xlogx") -> (rows, points, constants, curvatures)
+        logs = {int(out): int(a) for o, a, out in zip(prog.op, prog.a, prog.out) if prog.opcodes[o][0] == "log"}
+        for k, (o, a, b, out) in enumerate(zip(prog.op, prog.a, prog.b, prog.out)):
+            name, _, same, ca, cb, n_in, eqn = prog.opcodes[o]
+            if name == "mul" and not (same or ca or cb) and (logs.get(int(a)) == b or logs.get(int(b)) == a):
+                # v * log(v): convex on v > 0 (FBBT and McCormick see an unbounded product near v = 0)
+                v = b if logs.get(int(a)) == b else a
+                pts = _tangent_points(max(L[v], 0.0), H[v])
+                pts = pts[pts > 0]
+                t = tangents.setdefault("xlogx", ([], [], [], []))
+                t[0].extend([k] * len(pts))
+                t[1].extend(pts)
+                t[2].extend([0.0] * len(pts))
+                t[3].extend([1] * len(pts))
+                add("<=", [(-1.0, out)], np.exp(-1.0) * (1 + 1e-12))  # v log v >= -1/e
+            if name in ("add", "add_any"):
+                add("==", [(1.0, out), (-1.0, a), (-1.0, b)], 0.0)
+            elif name == "sub":
+                add("==", [(1.0, out), (-1.0, a), (1.0, b)], 0.0)
+            elif name == "neg":
+                add("==", [(1.0, out), (1.0, a)], 0.0)
+            elif name == "mul" and (ca or cb):
+                c, v = (cval[a], b) if ca else (cval[b], a)
+                add("==", [(1.0, out), (-c, v)], 0.0)
+            elif name == "div" and cb:
+                if cval[b] != 0:
+                    add("==", [(1.0, out), (-1.0 / cval[b], a)], 0.0)
+            elif name == "div":
+                mccormick(a, out, b)  # a = out * b
+            elif name == "mul" and not same:
+                mccormick(out, a, b)
+            else:
+                v = b if (n_in > 1 and ca) else a  # the variable operand
+                c = float(cval[a] if ca else cval[b]) if (n_in > 1 and name != "mul") else 0.0
+                curv = _curvature(name, eqn.params, ca, cb, c, L[v], H[v])
+                if curv:
+                    pts = _tangent_points(L[v], H[v])
+                    t = tangents.setdefault(o, ([], [], [], []))
+                    t[0].extend([k] * len(pts))
+                    t[1].extend(pts)
+                    t[2].extend([c] * len(pts))
+                    t[3].extend([curv] * len(pts))
+        for o, (ks, ps, cs, curvs) in tangents.items():
+            if o == "xlogx":
+                name, ca, n_in = "xlogx", False, 1
+            else:
+                name, _, same, ca, cb, n_in, eqn = prog.opcodes[o]
+            if o not in self.tangent:
+                self.tangent[o] = _tangent_fn(name, None if o == "xlogx" else eqn, n_in, ca)
+            ps, cs = np.asarray(ps, np.float64), np.asarray(cs, np.float64)
+            with jax.ensure_compile_time_eval():
+                gv, dv = (np.asarray(t, np.float64) for t in self.tangent[o](jnp.asarray(ps), jnp.asarray(cs)))
+            for k, p, gp, dp, curv in zip(ks, ps, gv, dv, curvs):
+                if not (np.isfinite(gp) and np.isfinite(dp)):
+                    continue
+                if o == "xlogx":
+                    v = prog.b[k] if logs.get(int(prog.a[k])) == prog.b[k] else prog.a[k]
+                else:
+                    v = prog.b[k] if (n_in > 1 and ca) else prog.a[k]
+                eps = 1e-9 * (1 + abs(gp) + abs(dp) * (1 + abs(p)))
+                # convex: out >= gp + dp (v - p) - eps ; concave: out <= gp + dp (v - p) + eps
+                add("<=", [(-curv, prog.out[k]), (curv * dp, v)], curv * (dp * p - gp) + eps)
+        return rows_ub, rows_eq
+
+    def bounds(self, lo, hi, cutoff=np.inf, integer=None, tighten_all=None):
+        """New ``(lo, hi)``: each infinite end replaced by its LP bound where the LP is bounded.
+
+        With ``tighten_all`` (default: ``n <= _LP_OBBT_MAX_N``) finite ends are
+        tightened as well (OBBT), which sharpens the intervals the next call
+        builds its rows from. An LP optimum ``v`` gives the bound ``v`` widened
+        by ``_LP_MARGIN * (1 + |v|)``; integer bounds are rounded outward.
+        """
+        from scipy.optimize import linprog
+        from scipy.sparse import coo_matrix
+
+        lo, hi = np.array(lo, np.float64), np.array(hi, np.float64)
+        n = self.n
+        if not self.ok:
+            return lo, hi
+        Ls, Hs, empty = self.sweep(jnp.asarray(lo), jnp.asarray(hi), jnp.asarray(cutoff, jnp.float64))
+        if bool(empty):
+            return lo, hi  # FBBT reports infeasibility itself
+        L, H = np.array(Ls, np.float64), np.array(Hs, np.float64)
+        L, H = np.where(np.isnan(L), -np.inf, L), np.where(np.isnan(H), np.inf, H)
+        prog = self.prog
+        isc = ~np.isnan(prog.const_val)
+        zs = [(-np.inf, cutoff)] + ([(-np.inf, self.feas_tol)] if self.ineq is not None else []) + \
+            ([(-self.feas_tol, self.feas_tol)] if self.eq is not None else [])  # fmt: skip
+        for ids, (zl, zh) in zip(prog.outs, zs):
+            ids = np.asarray(ids).ravel()
+            ids = ids[~isc[ids]]
+            L[ids], H[ids] = np.maximum(L[ids], zl), np.minimum(H[ids], zh)
+        if np.any(L[~isc] > H[~isc]):
+            return lo, hi
+        rows_ub, rows_eq = self._rows(L, H)
+        ncol = int(np.sum(~isc))
+
+        def mat(rows):
+            if not rows:
+                return None, None
+            r, c, v = [], [], []
+            for i, (coefs, _) in enumerate(rows):
+                r += [i] * len(coefs)
+                c += list(coefs)
+                v += list(coefs.values())
+            return coo_matrix((v, (r, c)), shape=(len(rows), ncol)).tocsr(), np.array([b for _, b in rows])
+
+        A_ub, b_ub = mat(rows_ub)
+        A_eq, b_eq = mat(rows_eq)
+        if A_ub is None and A_eq is None:
+            return lo, hi
+        bnds = [(l_ if np.isfinite(l_) else None, h_ if np.isfinite(h_) else None) for l_, h_ in zip(L[~isc], H[~isc])]
+        ints = np.zeros(n, bool) if integer is None else np.asarray(integer, bool)
+        if tighten_all is None:
+            tighten_all = n <= _LP_OBBT_MAX_N
+        new_lo, new_hi = lo.copy(), hi.copy()
+        for j in range(n):
+            for side in (-1, 1):
+                free = not np.isfinite(lo[j] if side < 0 else hi[j])
+                if not (free or (tighten_all and hi[j] > lo[j])):
+                    continue
+                c = np.zeros(ncol)
+                c[j] = -side  # columns 0..n-1 are x (slots 0..n-1 are never constants)
+                try:
+                    res = linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=bnds, method="highs")
+                except Exception:
+                    continue
+                if res.status != 0 or not np.isfinite(res.fun):
+                    continue
+                v = -side * res.fun
+                v += side * _LP_MARGIN * (1 + abs(v))
+                if side > 0:
+                    v = np.ceil(v) if ints[j] else v
+                    new_hi[j] = min(new_hi[j], v)
+                else:
+                    v = np.floor(v) if ints[j] else v
+                    new_lo[j] = max(new_lo[j], v)
+        bad = new_lo > new_hi  # cannot happen for a nonempty feasible set; keep the old bounds then
+        return np.where(bad, lo, new_lo), np.where(bad, hi, new_hi)
