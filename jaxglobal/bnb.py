@@ -258,16 +258,33 @@ class _Precompiled:
     def _key(args):
         return tuple((a.shape, a.dtype, getattr(a, "weak_type", False)) for a in args)
 
-    def start(self, b, n, fingerprint=None):
+    def start(self, b, n, fingerprint=None, args=None):
         """Compile in the background for ``b`` boxes of dimension ``n`` (single device).
 
         ``fingerprint()``, called on the tracer thread, names the problem for
-        the disk cache (None: do not cache)."""
-        args = (jax.ShapeDtypeStruct((b, n), jnp.float64),) * 2 + (jax.ShapeDtypeStruct((), jnp.float64),)
+        the disk cache (None: do not cache). ``args``: the argument shapes, when
+        they are not ``(lo, hi, cutoff)``."""
+        if args is None:
+            args = (jax.ShapeDtypeStruct((b, n), jnp.float64),) * 2 + (jax.ShapeDtypeStruct((), jnp.float64),)
         key = self._key(args)
         if key not in self.ready:
             tracer, compiler = _pools()
             self.ready[key] = tracer.submit(lambda: compiler.submit(self._lower(args, fingerprint).compile))
+
+    def wait(self, *args, deadline=None):
+        """Wait until ``deadline`` for the background executable of ``args``' shapes, if one was
+        started; ``_CompileTimeout`` if it is not ready by then. (A failed compile is left to
+        ``__call__``.)"""
+        fut = self.ready.get(self._key(args))
+        if fut is None:
+            return
+        left = lambda: None if deadline is None or not np.isfinite(deadline) else max(deadline - time.perf_counter(), 0.0)  # noqa: E731
+        try:
+            fut.result(timeout=left()).result(timeout=left())
+        except TimeoutError:
+            raise _CompileTimeout(self.name) from None
+        except Exception:
+            pass
 
     def _lower(self, args, fingerprint):
         """The lowered kernel, loaded from the disk cache when possible (and stored there when not)."""
@@ -475,7 +492,7 @@ class _Kernels:
 
                 return jax.lax.fori_loop(0, idx.size, step, (blo, bhi, jnp.array(False)))
 
-            self.dive = jax.jit(jax.vmap(dive, in_axes=(0, 0, 0, None)))
+            self.dive = _Precompiled(jax.jit(jax.vmap(dive, in_axes=(0, 0, 0, None))), "dive")
         self.fvals = jax.jit(jax.vmap(f))
         self.fns = [fn for fn in (f, ineq, eq) if fn is not None]
         self.hessians = [_hessian(fn) for fn in self.fns]
@@ -869,15 +886,13 @@ def minimize(
         fp = functools.partial(K.fingerprint, lo.size) if kcache.cache_root() else None
         for b in padded.sizes:
             K.bound.start(b, lo.size, fp)
-        if obbt:
-            for b in padded.sizes if obbt == "tree" else [1]:
+        if obbt == "tree":  # obbt="root": started once the root shows OBBT will run (``need_obbt``)
+            for b in padded.sizes:
                 K.obbt.start(b, lo.size, fp)
     _mark("start_dive_compile")
-    dive_exe = None
     if K.dive is not None and padded.mesh is None:  # the dive kernel too, traced after the others
-        tracer, compiler = _pools()
         box, cut = jax.ShapeDtypeStruct((_DIVES, lo.size), jnp.float64), jax.ShapeDtypeStruct((), jnp.float64)
-        dive_exe = tracer.submit(lambda: compiler.submit(K.dive.trace(box, box, box, cut).lower().compile))
+        K.dive.start(_DIVES, lo.size, fp, args=(box, box, box, cut))
     # integer variables are split even where they enter linearly: that is what makes them integral
     _mark("nonlinear")
     nl = K.nonlinear(lo.size)
@@ -1159,21 +1174,21 @@ def minimize(
             return
         k = min(len(points), _DIVES)
         pad = lambda A: np.concatenate([A[:k], np.repeat(A[:1], _DIVES - k, 0)])  # noqa: E731
-        run = K.dive
-        if dive_exe is not None:  # compiled in the background; skipped if not ready by the deadline
-            try:
-                left = lambda: None if deadline is None else max(deadline - time.perf_counter(), 0.0)  # noqa: E731
-                run = dive_exe.result(timeout=left()).result(timeout=left())
-            except TimeoutError:
-                return
+        args = (jnp.asarray(pad(blo)), jnp.asarray(pad(bhi)), jnp.asarray(pad(points)), jnp.asarray(ub, jnp.float64))
+        try:  # compiled in the background; skipped if not ready by the deadline
+            K.dive.wait(*args, deadline=deadline)
+        except _CompileTimeout:
+            return
         est = dive_cost[0]
         if est is None and bound_call[0] > 0:
             est = int(imask.sum()) * bound_call[0]
         if not time_for(est):
             return
         t = time.perf_counter()
-        DL, DH, F = (np.asarray(a) for a in run(jnp.asarray(pad(blo)), jnp.asarray(pad(bhi)),
-                                                jnp.asarray(pad(points)), jnp.asarray(ub, jnp.float64)))  # fmt: skip
+        try:
+            DL, DH, F = (np.asarray(a) for a in K.dive(*args, deadline=deadline))
+        except (_CompileTimeout, _Deadline):
+            return
         ok = ~F[:k] & np.all(DL[:k, imask] == DH[:k, imask], axis=1)
         if ok.any() and not _past(deadline):
             fixed_solve(DL[:k][ok], DH[:k][ok], pad(points)[:k][ok])
@@ -1236,6 +1251,22 @@ def minimize(
                       max_violation=maxv, verified=verified)  # fmt: skip
     _mark("root_incumbent")
     update_incumbent(xc, fc, lb)
+
+    def need_obbt():
+        """Whether the root OBBT pass runs: with an incumbent cutoff known (it is useless without
+        one when there are no constraints), and not when the root bound already closes the gap."""
+        return bool(obbt) and (constrained or np.isfinite(ub)) and not (ub - float(lb.min()) <= tol())
+
+    def start_root_obbt():
+        """Compile the root OBBT kernel in the background (once; ``start`` skips a started shape)."""
+        if obbt == "root" and padded.mesh is None:
+            K.obbt.start(1, lo.size, functools.partial(K.fingerprint, lo.size) if kcache.cache_root() else None)
+
+    if need_obbt():
+        # compile the root OBBT kernel only now, while the root dives run: a problem whose root
+        # bound and first incumbent close the gap (most small ones) never traces or compiles it,
+        # and the bound kernel's compile does not compete with it for the CPU
+        start_root_obbt()
     _mark("root_dives")
     if imask.any() and np.all(np.isfinite(lb)) and np.all(np.isfinite(rxr)):  # root dives: relaxation point, perturbed
         P = np.clip(rxr + rng.normal(size=(_DIVES, lo.size)) * 0.1 * (rhi - rlo) * (np.arange(_DIVES) > 0)[:, None],
@@ -1253,11 +1284,11 @@ def minimize(
             S = np.where((np.arange(len(A)) % 4 == 0)[:, None], rxr, rng.uniform(L, H))
             fixed_solve(L, H, S)
     _mark("root_obbt")
-    if obbt and (constrained or np.isfinite(ub)) and not (ub - float(lb.min()) <= tol()):
-        # root OBBT once an incumbent cutoff is known (it is useless without
-        # one when there are no constraints), and not when the root bound has
-        # already closed the gap (the search ends at once; OBBT would only
-        # cost its own trace and compilation)
+    if need_obbt():  # (the search would end at once on a closed gap: OBBT would only cost its compile)
+        # the dives may have found the first incumbent (no constraints): start the kernel now if
+        # not yet, so that the call below waits for it until the deadline instead of compiling
+        # synchronously through ``jax.jit`` (which has no deadline)
+        start_root_obbt()
         try:
             lb2, xc, fc, rlo2, rhi2, rxr2 = evaluate(rlo, rhi, with_obbt=True)
         except _CompileTimeout:  # the root bound stands; the search loop then stops on the time limit
