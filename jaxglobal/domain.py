@@ -118,12 +118,13 @@ def _row_upper_fn(f, ineq, eq, n):
     """``(lo, hi) ->`` interval upper bound of every output row ``[f, ineq..., eq...]`` over the box.
 
     One FBBT forward sweep; on a small tape (``_JIT_MAX_NODES``) compiled once and reused for every box."""
-    from .fbbt import Const, _forward
+    from .fbbt import Const, _forward, guarded_slots
 
     tape = joint_tape(f, ineq, eq, jnp.zeros(n))
+    guarded = guarded_slots(tape)  # an empty untaken jnp.where arm is unbounded, not crossed
 
     def upper(lo, hi):
-        vals, _ = _forward(tape, (lo, hi), {})
+        vals, _ = _forward(tape, (lo, hi), {}, False, guarded)
         out = []
         for a in tape.outs:
             v = a.val if isinstance(a, Const) else vals[a]
