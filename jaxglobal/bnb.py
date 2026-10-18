@@ -41,7 +41,7 @@ from . import kcache
 from .fbbt import make_fbbt
 from .lifted import make_lifted_bounder
 from .lp import make_constrained_bounder, make_obbt, reduce_ranges
-from .quadratic import make_quadratic_bounder, make_quadratic_obbt, polynomial_form, quadratic_form
+from .quadratic import binary_only, make_quadratic_bounder, make_quadratic_obbt, polynomial_form, quadratic_form
 from .structure import structure
 from .relax import SAFE_K
 from .univariate import make_relaxer
@@ -360,7 +360,7 @@ class _Kernels:
                 with poly_lock:
                     if n not in poly_forms:
                         try:  # an optional faster bounder: any failure falls back to the reduced-space path
-                            poly_forms[n] = polynomial_form(f, ineq, eq, n)
+                            poly_forms[n] = polynomial_form(f, ineq, eq, n, integer=integer)
                         except Exception:
                             poly_forms[n] = None
                     Q = poly_forms[n]
@@ -412,7 +412,7 @@ class _Kernels:
         def node(blo, bhi, cutoff):
             """Tighten, then bound one box. Returns (lb, x, f(x), lo', hi', xr)."""
             empty = jnp.array(False)
-            if tighten is not None:
+            if tighten is not None and not (constrained and not lifted and binary_only(lifted_form(blo.size), blo.size)):
                 blo, bhi, empty = tighten(blo, bhi, cutoff)
             blo, bhi, e = round_box(blo, bhi)
             empty |= e
@@ -903,6 +903,10 @@ def minimize(
     branchable = nl | imask
     _mark("quadratic")
     quad = K.quadratic(lo.size) if constrained else None  # the lifted quadratic LP's form, if used
+    lf = K.lifted_form(lo.size) if constrained and not lifted else None
+    if lf is not None and lf.flip >= 0 and np.all(lo[imask] == 0.0) and np.all(hi[imask] == 1.0):
+        lo = lo.copy()  # complement symmetry (quadratic._flip): x_flip = 1 keeps an optimal point
+        lo[lf.flip] = 1.0
     width0 = np.where(branchable, width0, np.inf)  # never split linear variables
 
     _mark("make_local")
