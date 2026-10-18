@@ -151,3 +151,61 @@ def test_polish_batches_fit_the_budget(monkeypatch):
     assert r.status == "optimal" and abs(r.fun + 3.5) <= 1e-6
     assert calls and calls[0][0] <= bnb._POLISH_FIRST
     assert all(0 < m <= bnb._POLISH_CHUNK and 0 < cap <= bnb._POLISH_MIN + 1.0 for m, cap in calls)
+
+
+def test_integer_rows_read():
+    """``_integer_rows``: the linear rows on integers only, with their coefficients; rows that
+    are nonlinear or touch a continuous variable are left out."""
+    from jaxglobal import bnb
+
+    g = lambda v: jnp.stack([v[0] + 2 * v[1] - 5, v[0] * v[1] - 3, v[0] + v[2] - 1])  # noqa: E731
+    h = lambda v: v[0] - v[1]  # noqa: E731
+    imask = np.array([True, True, False])
+    lo, hi = np.zeros(3), np.full(3, 4.0)
+    A, c, is_eq = bnb._integer_rows(g, h, lo, hi, imask)
+    assert np.allclose(A, [[1, 2], [1, -1]]) and np.allclose(c, [-5, 0]) and list(is_eq) == [False, True]
+    # the structure's sparsity says no row is on integers only: nothing is computed
+    assert bnb._integer_rows(g, None, lo, hi, imask, jac=(np.array([0, 0, 1]), np.array([0, 2, 2]))) is None
+    assert bnb._integer_rows(lambda v: v[0] + v[2] - 1, None, lo, hi, imask) is None
+
+
+def test_repair_rounding_budget():
+    """``_repair_rounding`` moves rounded integers until the linear rows hold, preferring the
+    variables whose relaxation values were nearest to rounding the other way."""
+    from jaxglobal import bnb
+
+    a = np.array([3.0, 5.0, 2.0])
+    rows = (np.stack([-a, a]), np.array([20.0, -22.0]), np.array([False, False]))  # 20 <= a.x <= 22
+    ref = np.array([1.4, 2.45, 0.9])
+    lo, hi = np.zeros(3), np.full(3, 5.0)
+    x = bnb._repair_rounding(np.round(ref), ref, lo, hi, rows, 1e-9)  # a.x = 15 at the rounding
+    assert x is not None and 20 <= a @ x <= 22 and np.all(x == np.round(x))
+    assert np.abs(x - np.round(ref)).sum() <= 2 and x[1] == 3.0  # 2.45 -> 3 first (a.x = 20)
+    assert bnb._repair_rounding(np.round(ref), ref, lo, np.ones(3), rows, 1e-9) is None  # a.x <= 10
+    # an equality reached by a swap: x0 + x1 = 2 and x0 >= 2 from (1, 1)
+    rows = (np.array([[1.0, 1.0], [-1.0, 0.0]]), np.array([-2.0, 2.0]), np.array([True, False]))
+    x = bnb._repair_rounding(np.array([1.0, 1.0]), np.array([1.0, 1.0]), np.zeros(2), np.full(2, 3.0), rows, 1e-9)
+    assert x is not None and list(x) == [2.0, 0.0]
+
+
+@needs_pounce
+def test_rounding_repaired_into_incumbent(monkeypatch):
+    """No rounding of the relaxation point (0.4, ...) meets the budget sum(x) = 1; the repair of
+    the nearest rounding does, and the optimum is found and verified."""
+    from jaxglobal import bnb
+
+    found = []
+    orig = bnb._repair_rounding
+
+    def recording(*a, **k):
+        x = orig(*a, **k)
+        found.append(x is not None)
+        return x
+
+    monkeypatch.setattr(bnb, "_repair_rounding", recording)
+    bnb.clear_cache()
+    f = lambda v: jnp.sum((v[:4] - 0.4) ** 2) + (v[4] - 0.5) ** 2  # noqa: E731
+    g = lambda v: jnp.stack([1.0 - jnp.sum(v[:4]), jnp.sum(v[:4]) - 1.0])  # noqa: E731
+    r = minimize(f, np.zeros(5), np.array([3.0, 3, 3, 3, 1]), ineq=g, integer=[0, 1, 2, 3], max_iter=200)
+    assert any(found)
+    assert r.status == "optimal" and r.verified and abs(r.fun - 0.84) <= 1e-6
