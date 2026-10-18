@@ -197,8 +197,9 @@ The default, `branch_var="auto"`, branches on pseudocosts (the bound gains
 measured on earlier splits of each variable) when there are no integer
 variables, and on `width` (relative width times the relaxation gap, fractional
 integers first) when there are. Those were the best measured choices: on the
-MINLPLib start50 set pseudocost solves 36 instances in 60 s against 34 for width,
-and on the 25 built-in and synthetic problems it takes the least total time. On
+MINLPLib start50 set pseudocost solves 38 instances in 60 s against 36 for
+width and for `strong`, and on the 25 built-in and synthetic problems it takes
+the least total time. On
 int50 pseudocost and `strong` each solve one more instance than width, but each
 loses one that width solves (flay04m and nous1). Override it when:
 

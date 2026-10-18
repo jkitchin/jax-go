@@ -770,8 +770,8 @@ def minimize(
     the relaxation minimizer, pulled toward the midpoint and kept away from the
     faces, see ``_LAM`` and ``_BETA``); ``branch_var`` is ``"auto"`` (the default:
     ``"pseudocost"`` without integer variables, ``"width"`` with them; on start50 at 60 s
-    pseudocost solves 36 against 34 for width and loses none, while on int50 width stays
-    ahead: pseudocost loses flay04m and slows nous1), ``"width"`` (largest
+    pseudocost solves 38, width and strong 36, and pseudocost loses none; on int50 each of
+    pseudocost and strong solves one more than width but loses flay04m or nous1), ``"width"`` (largest
     relative width among nonlinear variables; on the lifted quadratic LP, relative width
     times the McCormick gap of the variable's products at the relaxation point), ``"pseudocost"`` (product score
     of per-variable bound gains observed so far) or ``"reliability"`` (like
