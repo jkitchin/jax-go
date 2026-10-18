@@ -210,8 +210,6 @@ def child(name, nl_dir, tl):
         t = time.time()
         _init(self, *a, **k)
         span("fn", "K.__init__", t, time.time())
-        if self.dive is not None:
-            self.dive = TimedJit(self.dive, "dive[b=16]")
 
     bnb._Kernels.__init__ = init
 
@@ -423,9 +421,9 @@ def buckets(d):
     run_bound = in_stage(["root_bound"], lambda x: x["item"] == "run:bound")
     out["root bound: kernel run (first LP)"] = run_bound
     out["root local solves + incumbent"] = stage("root_incumbent", "root_obbt_incumbent")
-    # the dive kernel (``dive_exe`` in ``minimize``) is waited for inside ``dive``: count the time
+    # the dive kernel (``K.dive.wait``) is waited for inside ``dive``: count the time
     # the root dives stage overlaps its trace / compile as kernel wait
-    dv_tr = [(max(x["t0"], a), min(x["t1"], b)) for x in bg if x["item"].startswith(("trace:dive", "lower:dive"))
+    dv_tr = [(max(x["t0"], a), min(x["t1"], b)) for x in bg if x["item"].startswith(("trace_lower:dive", "trace:dive", "lower:dive"))
              for a, b in stages.get("root_dives", []) if _overlap(x["t0"], x["t1"], a, b) > 0]  # fmt: skip
     dv_co = [(max(x["t0"], a), min(x["t1"], b)) for x in bg if x["item"].startswith("compile:dive")
              for a, b in stages.get("root_dives", []) if _overlap(x["t0"], x["t1"], a, b) > 0]  # fmt: skip

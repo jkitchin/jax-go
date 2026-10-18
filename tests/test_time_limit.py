@@ -133,36 +133,23 @@ def test_deadline_does_not_change_the_search_before_the_limit():
 
 
 class _CountingDive:
-    """Stands in for ``_Kernels.dive`` (a jitted function): counts the runs of its executable,
-    each made ``seconds`` longer."""
+    """Stands in for ``_Kernels.dive`` (a ``_Precompiled``): counts its runs, each made
+    ``seconds`` longer."""
 
     def __init__(self, jitted, seconds=0.0):
         self.jitted, self.seconds, self.runs = jitted, seconds, 0
 
-    def _wrap(self, fn):
-        def run(*args):
-            out = jax.block_until_ready(fn(*args))
-            self.runs += 1
-            time.sleep(self.seconds)
-            return out
+    def start(self, *a, **k):
+        pass
 
-        return run
+    def wait(self, *args, deadline=None):
+        pass
 
-    def __call__(self, *args):
-        return self._wrap(self.jitted)(*args)
-
-    def trace(self, *args):
-        lowered = self.jitted.trace(*args).lower()
-        wrap = self._wrap
-
-        class _Lowered:
-            def lower(self):
-                return self
-
-            def compile(self):
-                return wrap(lowered.compile())
-
-        return _Lowered()
+    def __call__(self, *args, deadline=None):
+        out = jax.block_until_ready(self.jitted(*args))
+        self.runs += 1
+        time.sleep(self.seconds)
+        return out
 
 
 def _kernels(f):
