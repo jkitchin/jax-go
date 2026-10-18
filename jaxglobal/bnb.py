@@ -265,9 +265,7 @@ class _Precompiled:
         the disk cache (None: do not cache). ``extra``: shapes of further
         (unbatched) float64 arguments after the cutoff. ``args``: all the argument
         shapes instead, when they are not ``(lo, hi, cutoff, *extra)``."""
-        if args is None:
-            args = (jax.ShapeDtypeStruct((b, n), jnp.float64),) * 2 + (jax.ShapeDtypeStruct((), jnp.float64),) + \
-                tuple(jax.ShapeDtypeStruct(tuple(sh), jnp.float64) for sh in extra)  # fmt: skip
+        args = self._args(b, n, extra) if args is None else args
         key = self._key(args)
         if key not in self.ready:
             tracer, compiler = _pools()
@@ -287,6 +285,23 @@ class _Precompiled:
             raise _CompileTimeout(self.name) from None
         except Exception:
             pass
+
+    @staticmethod
+    def _args(b, n, extra=()):
+        """``start``'s default argument shapes: ``(lo, hi, cutoff, *extra)``."""
+        return (jax.ShapeDtypeStruct((b, n), jnp.float64),) * 2 + (jax.ShapeDtypeStruct((), jnp.float64),) + \
+            tuple(jax.ShapeDtypeStruct(tuple(sh), jnp.float64) for sh in extra)  # fmt: skip
+
+    def pending(self, b, n, extra=(), args=None):
+        """Whether the background build that ``start(b, n, extra=extra, args=args)`` queues was
+        started and has not finished."""
+        args = self._args(b, n, extra) if args is None else args
+        fut = self.ready.get(self._key(args))
+        if fut is None:
+            return False
+        if not fut.done():
+            return True
+        return fut.exception() is None and not fut.result().done()
 
     def _lower(self, args, fingerprint):
         """The lowered kernel, loaded from the disk cache when possible (and stored there when not)."""
@@ -992,10 +1007,10 @@ def minimize(
                 pool["args"] = None
 
     _mark("start_compile")
+    extra = () if pool is None else (pool["rows"].shape, pool["root"].shape)  # the bound kernel's pool arguments
     padded = _Padder(batch, batch_sizes, jax.devices() if devices is None else list(devices))
     if padded.mesh is None:  # compile the kernels in the background while the setup below runs
         fp = functools.partial(K.fingerprint, lo.size) if kcache.cache_root() else None
-        extra = () if pool is None else (pool["rows"].shape, pool["root"].shape)
         for b in padded.sizes:
             bound_kernel.start(b, lo.size, fp, extra)
         if obbt == "tree":  # obbt="root": started once the root shows OBBT will run (``need_obbt``)
@@ -1433,7 +1448,22 @@ def minimize(
             ub, xbest = float(F[i]), X[i]
         polish()
 
+    def need_obbt():
+        """Whether the root OBBT pass runs: with an incumbent cutoff known (it is useless without
+        one when there are no constraints), and not when the root bound already closes the gap."""
+        return bool(obbt) and (constrained or np.isfinite(ub)) and not (ub - float(lb.min()) <= tol())
+
+    def start_root_obbt():
+        """Compile the root OBBT kernel in the background (once; ``start`` skips a started shape)."""
+        if obbt == "root" and padded.mesh is None:
+            K.obbt.start(1, lo.size, functools.partial(K.fingerprint, lo.size) if kcache.cache_root() else None)
+
     _mark("root_bound")
+    if obbt == "root" and (constrained or np.isfinite(ub)) and any(bound_kernel.pending(b, lo.size, extra) for b in padded.sizes):
+        # the main thread is about to wait for the bound kernel's build: trace the OBBT kernel in that
+        # idle time (queued behind the bound and dive kernels) rather than after the root bound,
+        # when ``need_obbt`` can first tell. A warm cache has the bound kernel ready: no guess then.
+        start_root_obbt()
     try:
         lb, xc, fc, rlo, rhi, rxr = evaluate(lo[None], hi[None])
     except _CompileTimeout as e:  # no bound at all yet: report what is known
@@ -1446,16 +1476,6 @@ def minimize(
                       max_violation=maxv, verified=verified)  # fmt: skip
     _mark("root_incumbent")
     update_incumbent(xc, fc, lb)
-
-    def need_obbt():
-        """Whether the root OBBT pass runs: with an incumbent cutoff known (it is useless without
-        one when there are no constraints), and not when the root bound already closes the gap."""
-        return bool(obbt) and (constrained or np.isfinite(ub)) and not (ub - float(lb.min()) <= tol())
-
-    def start_root_obbt():
-        """Compile the root OBBT kernel in the background (once; ``start`` skips a started shape)."""
-        if obbt == "root" and padded.mesh is None:
-            K.obbt.start(1, lo.size, functools.partial(K.fingerprint, lo.size) if kcache.cache_root() else None)
 
     if need_obbt():
         # compile the root OBBT kernel only now, while the root dives run: a problem whose root
