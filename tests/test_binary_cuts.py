@@ -6,7 +6,9 @@ Tests: every cut holds at every binary point; the cuts are off on boxes where a 
 [0, 1]; the bound (cuts, separation and lattice rounding) is below the enumerated minimum on random
 fixings, plain and safe; the IPM matches HiGHS on boxes with fixed binaries (it stalled there on
 the rows that hold on the whole box); the lattice detection and its box-bound case; the search;
-the symmetry detection (and its refusals) and the search with the fix, plain and safe."""
+the symmetry detection (and its refusals) and the search with the fix, plain and safe; every row
+block at once (binary cuts, tangents, bound-factor RLT rows, pool slots) with the fix x_flip = 1 as
+a fixed bound factor."""
 
 import itertools
 
@@ -18,8 +20,9 @@ from scipy import sparse
 from scipy.optimize import linprog
 
 import jaxglobal
-from jaxglobal.quadratic import (MAX_COLUMNS, _layout, _lp, _snap, binary_only, make_quadratic_bounder,
-                                 polynomial_form, quadratic_form)  # fmt: skip
+from jaxglobal.quadratic import (MAX_COLUMNS, _layout, _lp, _separate, _snap, binary_only, ineq_rlt,
+                                 make_quadratic_bounder, polynomial_form, quadratic_form,
+                                 square_needs_lower)  # fmt: skip
 
 from test_lifted_poly import det3, lifted_point, poly_fn
 
@@ -272,3 +275,80 @@ def test_minimize_with_flip(safe, extra, int_hi):
     assert r.status == "optimal"
     assert r.fun == pytest.approx(best, abs=1e-5)
     assert r.lower_bound <= best + 1e-6
+
+
+def flip_rlt_problem():
+    """Binaries x_0..x_3 and y = (x_4, x_5) in [-1, 2]: f, g and h are complement symmetric
+    (h o sigma = -h) with integer coefficients, x_0 is the flip variable, and the linear row
+    y_4 + y_5 <= 1 times the bound factors of x_0 gives bound-factor RLT rows (``ineq_rlt``)."""
+
+    def f(x):
+        return (4 * x[4] ** 2 - 3 * x[4] + 2 * x[5] ** 2 + x[5] + (x[0] - x[1]) ** 2
+                + (2 * x[0] - 1) * (2 * x[1] - 1) * (2 * x[2] - 1) * (2 * x[3] - 1))  # fmt: skip
+
+    def g(x):
+        return jnp.stack([x[4] + x[5] - 1.0])
+
+    def h(x):
+        return jnp.stack([(2 * x[0] - 1) * (x[4] - x[5])])  # binary x_0: y_4 = y_5
+
+    Q = ineq_rlt(polynomial_form(f, g, h, 6, integer=np.arange(4)), 6)
+    X = binary_points(4)
+    fx = np.array([(x[0] - x[1]) ** 2 + np.prod(2 * x - 1) for x in X])
+
+    def ymin(t):  # min of the y part with |y_4 - y_5| <= t (active), y_4 + y_5 <= 1 + t (slack)
+        b = (2 - 8 * t) / 12
+        return 4 * (b + t) ** 2 - 3 * (b + t) + 2 * b * b + b
+
+    return Q, X, fx, ymin
+
+
+def test_separate_writes_only_pool_slots():
+    """With tangents and bound-factor RLT rows before them, a separation round changes the pattern
+    columns, values and right-hand sides of its own pool slots and nothing else."""
+    Q, _, _, _ = flip_rlt_problem()
+    assert len(Q.qr_g) and Q.cut_rhs.size and Q.pool_rhs.size
+    n, n_tan, n_sep = 6, 3, 2
+    L = _layout(Q, n, n_tan, False, n_sep)
+    P, W, K, T2 = len(Q.pairs), Q.pool_cols.shape[1], L.K, len(Q.qr_g)
+    assert K and L.pattern.m == L.sep_row + n_sep * K
+    assert L.sep_row == 4 * P + Q.n_g + 2 * Q.n_h + 2 * len(Q.rlt_var) + Q.cut_rhs.size + n_tan * P + 2 * T2
+    lo, hi = jnp.asarray(np.r_[np.zeros(4), -1.0, -1.0]), jnp.asarray(np.r_[np.ones(4), 2.0, 2.0])
+    vlo, vhi, vals, b, _ = _lp(Q, L, lo, hi, 0.0, False)
+    cols = jnp.asarray(L.pattern.cols)
+    v = jnp.asarray(np.random.default_rng(0).uniform(0.0, 1.0, vlo.size))
+    for k in range(n_sep):
+        c2, v2, b2, live = _separate(Q, L, cols, vals, b, v, k, vlo, vhi, jnp.array(True), 0.0, False)
+        assert bool(live)
+        at, r0 = L.sep_at + k * K * W, L.sep_row + k * K
+        out = np.ones(cols.size, bool)
+        out[at:at + K * W] = False
+        rout = np.ones(b.size, bool)
+        rout[r0:r0 + K] = False
+        np.testing.assert_array_equal(np.asarray(c2)[out], np.asarray(cols)[out])
+        np.testing.assert_array_equal(np.asarray(v2)[out], np.asarray(vals)[out])
+        np.testing.assert_array_equal(np.asarray(b2)[rout], np.asarray(b)[rout])
+        assert np.all(L.pattern.rows[at:at + K * W] == np.repeat(np.arange(r0, r0 + K), W))
+        assert np.isfinite(np.asarray(b2)[r0:r0 + K]).any()
+
+
+@pytest.mark.parametrize("safe", [False, True])
+@pytest.mark.parametrize("tol", [0.0, 1e-6])
+def test_flip_with_bound_factor_rlt(safe, tol):
+    """The fix x_flip = 1 (``bnb``, complement symmetry) makes x_flip a fixed bound factor of the
+    bound-factor RLT rows (l = u), the case their plain-mode rounding margin guards. With every
+    row block present (binary cuts, Kelley tangents, those rows, two separation rounds), the
+    bound with x_0 = 1, at the root and with x_1..x_3 fixed in every way, is at most the
+    enumerated minimum of the node, and at the root at most the minimum without the fix."""
+    Q, X, fx, ymin = flip_rlt_problem()
+    assert Q.flip == 0 and 0 in Q.qr_var.tolist() and square_needs_lower(Q).any()
+    bound = jax.jit(make_quadratic_bounder(Q, tol=tol, safe=safe, n_sep=2))
+    for fix in itertools.product([None, 0.0, 1.0], repeat=3):
+        lo = np.r_[1.0, [0.0 if v is None else v for v in fix], -1.0, -1.0]
+        hi = np.r_[1.0, [1.0 if v is None else v for v in fix], 2.0, 2.0]
+        inbox = np.all((X >= lo[:4]) & (X <= hi[:4]), axis=1)
+        fm = float(fx[inbox].min()) + ymin(tol)
+        lb = float(bound(jnp.asarray(lo), jnp.asarray(hi), jnp.inf)[0])
+        assert np.isfinite(lb) and lb <= fm + 1e-9, (fix, lb, fm)
+        if fix == (None, None, None):
+            assert lb <= float(fx.min()) + ymin(tol) + 1e-9
