@@ -265,6 +265,7 @@ save_results("05", "parametric family (3 values)", loc(camel_pyomo_param), loc(c
 # * Colebrook: the implicit equation as a constraint (done above).
 # * Library functions: re-express with Pyomo functions, or an `ExternalFunction` (which global solvers cannot bound).
 # * Families: `Param(mutable=True)` and a Python loop (done above), which is as simple as in jaxglobal and does not suffer from the compile cost.
+# * `jaxglobal.export.to_scip` / `to_nl` now write a SCIP or `.nl` model straight from a JAX function (unrolling fixed loops, rewriting `tanh`/`softplus`, reformulating `where`/`max`) and refuse what they cannot represent, such as `erfc` or variable-dependent loops. That removes the hand translation for the supported subset; see `examples/export_scip.py`.
 #
 # **Verdict.** The advantage of the function-based approach is real for models written as numerical code, but this notebook shows that it applies to the subset of JAX that
 # the interpreter supports. For anything with integers, many constraints or large sparse structure, Pyomo remains the better choice.

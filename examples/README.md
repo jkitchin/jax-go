@@ -16,6 +16,7 @@ Executed notebooks with prose, math and figures, showing how jaxglobal works and
 * `src/*.py`: the notebooks as jupytext percent-format scripts (edit these).
 * `*.ipynb`: generated from `src/` and executed, outputs included.
 * `compare.py`: the `jnp`→Pyomo shim, hand reformulations and solver wrappers used by notebook 04. Run as a script (`python examples/compare.py` from the repository root), it fills in `compare_results.json` for problems not yet in it.
+* `export_scip.py`: exports a model with `where`, `maximum`, `tanh`, `relu`, a `fori_loop` and an integer variable to SCIP (`jaxglobal.export.to_scip`) and to a `.nl` file (`to_nl`), solves it with SCIP and compares with `minimize`. No hand reformulation is needed. Run `PYTHONPATH=. python examples/export_scip.py [time_limit]` from the repository root.
 * `compare_results.json`: stored results of all solvers on all problems. Notebook 04 reads it; rerunning the external solvers needs SCIP, Couenne and GAMS with BARON and LindoGlobal (set `RUN_SOLVERS = True`).
 
 ## Re-running

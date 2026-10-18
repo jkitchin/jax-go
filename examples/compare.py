@@ -6,6 +6,11 @@ variables, with ``jnp`` swapped for a shim that maps sin/exp/... to Pyomo.
 Functions the modeling layer cannot express (``where``, ``maximum``, ``tanh``)
 need a hand reformulation -- which is the point of the comparison.
 
+``jaxglobal.export`` (``to_scip`` / ``to_nl``) now builds these models straight
+from the JAX functions, with ``where``/``maximum``/``tanh`` rewritten or
+reformulated automatically; see ``examples/export_scip.py``. This script keeps
+the shim so the stored timings in ``compare_results.json`` stay comparable.
+
 Solvers: SCIP and Couenne (via .nl files), BARON and LindoGlobal (via GAMS).
 Wall time is measured for every solver, including model writing / JIT.
 

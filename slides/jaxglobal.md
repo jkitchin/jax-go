@@ -388,7 +388,7 @@ minimize(f, [0, 0], [3, 4], ineq=ineq)
 | `where` / `max` | ✓ | reformulate | reformulate | reformulate | reformulate |
 | bound tightening, cut generation | ✗ (none yet) | ✓ | ✓ | ✓ | ✓ |
 
-<p class="small">For the benchmark, Pyomo models are built from the <b>same</b> Python functions with a jnp→Pyomo shim; <code>where</code>/<code>max</code>/<code>tanh</code> needed hand reformulation.</p>
+<p class="small">For the benchmark, Pyomo models are built from the <b>same</b> Python functions with a jnp→Pyomo shim; <code>where</code>/<code>max</code>/<code>tanh</code> needed hand reformulation. <code>jaxglobal.export</code> now writes SCIP / <code>.nl</code> models from the JAX function and does these reformulations automatically.</p>
 
 ---
 
