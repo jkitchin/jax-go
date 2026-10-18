@@ -40,6 +40,8 @@ import numpy as np
 from .lp import EPS, reduce_ranges
 from .relax import SAFE_K
 
+MAX_RLT_SUPPORT = 3  # ineq_rlt: linear inequalities with at most this many variables
+RLT_PAIRS = 3.0  # ineq_rlt: at most this many (row, k) pairs per product column (two LP rows each)
 MAX_COLUMNS = 400  # beyond this the IPM's N x N solve per iteration costs more than it gains
 MAX_DEGREE = 6  # polynomial_form: highest monomial degree lifted
 MAX_TERMS = 20000  # polynomial_form: give up when an intermediate polynomial has more terms
@@ -62,6 +64,15 @@ class QuadraticForm(NamedTuple):
     rlt: np.ndarray  # (T, N) RLT rows: a linear equality times x_v, linear in v (= 0)
     rlt_var: np.ndarray  # (T,) the v of each
     level: np.ndarray = np.zeros(0, np.int64)  # (P,) 1 + the larger level of the factors (x: level 0)
+    # bound-factor RLT rows (``ineq_rlt``): a linear inequality g = a.x + c <= 0 times x_k - l_k >= 0
+    # and u_k - x_k >= 0, one entry per nonzero of the product row sum_m a_m w_mk + c x_k
+    qr_g: np.ndarray = np.zeros(0, np.int64)  # (T2,) the g row of each pair
+    qr_var: np.ndarray = np.zeros(0, np.int64)  # (T2,) its k
+    qr_row: np.ndarray = np.zeros(0, np.int64)  # (nnz,) the pair of each entry
+    qr_col: np.ndarray = np.zeros(0, np.int64)  # (nnz,) its column
+    qr_w: np.ndarray = np.zeros(0)  # (nnz,) coefficient of the products sum_m a_m w_mk
+    qr_a: np.ndarray = np.zeros(0)  # (nnz,) coefficient a_m of x_m in g
+    qr_k: np.ndarray = np.zeros(0)  # (nnz,) 1.0 on the column x_k (carries c)
 
 
 def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS):
@@ -194,8 +205,66 @@ def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS):
                 rlt.append(row)
                 rlt_var.append(v)
     rlt = np.asarray(rlt).reshape(-1, n + len(order))
-    return QuadraticForm(E, c, pairs.reshape(-1, 2), n_g, n_h, rlt, np.asarray(rlt_var, np.int64),
-                         level[n:])  # fmt: skip
+    Q = QuadraticForm(E, c, pairs.reshape(-1, 2), n_g, n_h, rlt, np.asarray(rlt_var, np.int64), level[n:])
+    return ineq_rlt(Q, n) if degree == 2 else Q
+
+
+def ineq_rlt(Q, n, max_support=None, max_pairs=None):
+    """``Q`` with bound-factor RLT rows (Sherali & Adams): a linear inequality
+    ``g(x) = a.x + c <= 0`` (with support of 2 to ``max_support`` variables) times a bound factor
+    ``x_k - l_k >= 0`` or ``u_k - x_k >= 0`` gives
+
+        sum_m a_m w_mk + c x_k - l_k a.x <= c l_k,      l_k a.x - ... (the same with u_k, negated),
+
+    linear in ``v`` when every product ``x_m x_k`` is a column already. The bound factors are
+    the node's, so the rows are rebuilt per box like the McCormick facets. They are what links a
+    difference ``d = x_j - x_i`` that a linear row orders (``x_i <= x_j``) to the products in
+    ``d^2 = w_jj - 2 w_ij + w_ii``: their sum over ``k = i, j`` is ``d (u_j - l_i - d) >= 0``,
+    the secant of ``d^2`` over ``[0, u_j - l_i]`` instead of over ``[l_i - u_j, u_j - l_i]``,
+    which the McCormick facets of the three products alone give (circle packing with ordered
+    identical circles, kall_circles_*). At most ``max_pairs`` pairs (default: ``RLT_PAIRS``
+    per product column), those with ``k`` in the row's support first."""
+    P = len(Q.pairs)
+    max_pairs = int(RLT_PAIRS * P) if max_pairs is None else max_pairs
+    max_support = MAX_RLT_SUPPORT if max_support is None else max_support
+    col = {(int(a), int(b)): n + p for p, (a, b) in enumerate(Q.pairs) if a < n and b < n}
+    partners = {}
+    for a, b in col:
+        partners.setdefault(a, set()).add(b)
+        partners.setdefault(b, set()).add(a)
+    cand = []  # (k not in the row's support, row, k): a factor of the row's own variables first
+    for r in range(Q.n_g):
+        row = Q.E[1 + r]
+        if np.any(row[n:] != 0):
+            continue
+        supp = [int(m) for m in np.flatnonzero(row[:n])]
+        if not 2 <= len(supp) <= max_support:
+            continue
+        common = set.intersection(*(partners.get(m, set()) | ({m} if (m, m) in col else set()) for m in supp))
+        cand += [(k not in supp, r, k) for k in sorted(common)]
+    gi, gk, er, ec, ew, ea, ek = [], [], [], [], [], [], []
+    for _, r, k in sorted(cand)[:max_pairs]:
+        row = Q.E[1 + r]
+        ent = {}
+        for m in np.flatnonzero(row[:n]):
+            m = int(m)
+            ent.setdefault(col[tuple(sorted((m, k)))], [0.0, 0.0, 0.0])[0] += row[m]
+            ent.setdefault(m, [0.0, 0.0, 0.0])[1] += row[m]
+        ent.setdefault(k, [0.0, 0.0, 0.0])[2] = 1.0
+        t = len(gi)
+        gi.append(r)
+        gk.append(k)
+        for cc, (w, a, kk) in sorted(ent.items()):
+            er.append(t)
+            ec.append(cc)
+            ew.append(w)
+            ea.append(a)
+            ek.append(kk)
+    if not gi:
+        return Q
+    i64 = lambda v: np.asarray(v, np.int64)  # noqa: E731
+    return Q._replace(qr_g=i64(gi), qr_var=i64(gk), qr_row=i64(er), qr_col=i64(ec), qr_w=np.asarray(ew),
+                      qr_a=np.asarray(ea), qr_k=np.asarray(ek))  # fmt: skip
 
 
 def polynomial_form(f, ineq, eq, n, degree=MAX_DEGREE, max_columns=MAX_COLUMNS):
@@ -301,6 +370,12 @@ def _layout(Q, n, n_tan, cutoff_row):
             rows += [m + ar] * 2
             cols += [n + ar, I]
             m += P
+    T2 = len(Q.qr_g)
+    if T2:  # bound-factor RLT rows: lower factors, then upper factors (values per box)
+        for s in range(2):
+            rows.append(m + s * T2 + Q.qr_row)
+            cols.append(Q.qr_col)
+        m += 2 * T2
     if cutoff_row:
         r, c = np.nonzero(Q.E[:1])
         rows.append(m + r)
@@ -363,6 +438,16 @@ def _lp(Q, L, lo, hi, tol, safe, cutoff=None):
     b = [rhs.reshape(-1), jnp.asarray(tol - g), jnp.asarray(tol - h), jnp.asarray(tol + h), rt, rt]
     if L.n_tan:
         b.append(jnp.full(L.n_tan * P, jnp.inf))
+    T2 = len(Q.qr_g)
+    if T2:  # (a.x + c')(x_k - l_k) <= 0 and (a.x + c')(u_k - x_k) <= 0 with c' = c - tol (g <= tol)
+        cq = jnp.asarray(c[1 + Q.qr_g]) - tol
+        kq = jnp.asarray(Q.qr_var)
+        rq = jnp.asarray(Q.qr_row)
+        base = jnp.asarray(Q.qr_w) + cq[rq] * jnp.asarray(Q.qr_k)
+        qa = jnp.asarray(Q.qr_a)
+        ql, qu = lo[kq], hi[kq]
+        qr_vals = jnp.concatenate([base - ql[rq] * qa, -base + qu[rq] * qa])
+        b += [cq * ql, -cq * qu]
     if L.cutoff_row:
         b.append(jnp.atleast_1d(cutoff - c[0]))
     b = jnp.concatenate(b)
@@ -371,6 +456,8 @@ def _lp(Q, L, lo, hi, tol, safe, cutoff=None):
     pieces = [mc_vals, jnp.asarray(L.static_vals[:n_static])]
     if L.n_tan:
         pieces.append(jnp.zeros(L.n_tan * 2 * P))
+    if T2:
+        pieces.append(qr_vals)
     if L.cutoff_row:
         pieces.append(jnp.asarray(L.static_vals[n_static:]))
     vals = jnp.concatenate(pieces)
@@ -382,6 +469,15 @@ def _lp(Q, L, lo, hi, tol, safe, cutoff=None):
 
     b = margin(b, absAv)
     t0 = 4 * P + Q.n_g + 2 * Q.n_h + 2 * len(Q.rlt_var)  # first tangent row
+    if T2 and not safe:
+        # The bound-factor rows need a rounding margin in plain mode too. When x_k is fixed
+        # (l_k = u_k, e.g. an integer at a node), both rows of a pair reduce to the equality
+        # a.(w_k - l_k x) = 0, which McCormick also implies. Rounded, these equalities can be
+        # inconsistent by a few ulps. The weak-duality certificate of that empty LP then
+        # diverges and prunes a box that holds feasible points.
+        q0 = t0 + L.n_tan * P
+        qm = EPS * (N + 3) * (jnp.abs(b[q0:q0 + 2 * T2]) + abs(tol) + absAv[q0:q0 + 2 * T2])
+        b = b.at[q0:q0 + 2 * T2].add(qm)
 
     def tangents(vals, b, x, k):
         """Tangents ``-w + 2 p x_i <= p^2`` at ``p = x_i`` for the squares, as round ``k``'s rows."""
@@ -504,11 +600,46 @@ def _ipm(c, pat, vals, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10, target=j
     return z, yb, best
 
 
+def squares_bounded_below(Q):
+    """Whether a tangent (a lower bound ``w_p >= 2 p x - p^2``) on some square column can change
+    the lifted LP's value; see ``square_needs_lower``."""
+    return bool(square_needs_lower(Q).any())
+
+
+def square_needs_lower(Q):
+    """``(P,)`` mask of the square columns that get Kelley tangents (lower bounds on ``w``).
+
+    A square column ``w`` does not need them when it enters the objective with coefficient
+    <= 0 and every inequality row ``g <= 0`` with coefficient <= 0, appears in no equality or
+    equality-RLT row and is no factor of another column. Then raising ``w`` to its secant (the
+    one row that bounds it above, ``w <= (l + u) x - l u``) keeps those rows feasible and does
+    not raise the objective, and the secant is above ``x^2`` and so above every tangent: some
+    LP optimum has all of that column's tangent rows slack, and Kelley rounds only re-solve the
+    same LP. This is the case of reverse-convex distance constraints
+    ``(x_i - x_j)^2 + (y_i - y_j)^2 >= d^2`` (circle packing), where only the secants of the
+    squares bind, and of concave quadratic objectives (st_*).
+
+    The bound-factor rows of ``ineq_rlt`` are not counted, although they hold squares with
+    both signs: on the circle models they come from (kall_circles_c6b, c7a, diffcircles_8)
+    Kelley rounds for them cost a third of the node rate and did not raise the bound at equal
+    node counts. Leaving a tangent out only loosens the LP, so either choice is sound."""
+    P = len(Q.pairs)
+    n = Q.E.shape[1] - P
+    sq = Q.pairs[:, 0] == Q.pairs[:, 1]
+    cols = n + np.arange(P)
+    g = Q.E[1:1 + Q.n_g][:, cols]
+    h = Q.E[1 + Q.n_g:1 + Q.n_g + Q.n_h][:, cols]
+    used = (Q.E[0, cols] > 0) | (g > 0).any(0) | (h != 0).any(0) | np.isin(cols, Q.pairs)
+    if Q.rlt.size:
+        used |= (Q.rlt[:, cols] != 0).any(0)
+    return sq & used
+
+
 def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False):
     """Return ``bound(lo, hi, cutoff) -> (lb, x_lp, infeasible, lo', hi')`` for one box
     (the contract of ``lp.make_constrained_bounder``) from the lifted LP of ``Q``."""
-    squares = bool(np.any(Q.pairs[:, 0] == Q.pairs[:, 1]))
-    n_kelley = n_kelley if squares else 0  # the bilinear facets are already the envelopes
+    need = square_needs_lower(Q)
+    n_kelley = n_kelley if need.any() else 0  # else the tangents are redundant
     layouts = {}
 
     def bound(lo, hi, cutoff=jnp.inf):
@@ -536,25 +667,35 @@ def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False):
                 lbv = lbv - SAFE_K * EPS * (N + 3) * (fmag + jnp.abs(f0) + cn * jnp.abs(val))
             return lbv
 
+        I, J = jnp.asarray(Q.pairs[:, 0]), jnp.asarray(Q.pairs[:, 1])
+        needj = jnp.asarray(need)
+
         def round_(carry, k):
-            vals, b, best, rlo, rhi, _ = carry
+            """One LP. A Kelley round runs only while the previous LP point violates a tangent
+            of a square that needs one (``need``) and the box is not pruned: otherwise that
+            point stays feasible, hence optimal, with the new tangents (no IPM iterations)."""
+            vals, b, best, rlo, rhi, vprev, active = carry
             A, bu = _unit(pat, vals, b, vlo, scale, safe)
             target = (cutoff - f0) / cn + 1e-9 * (1 + jnp.abs(cutoff) / cn)  # unit-space value that prunes
-            z, y, val = _ipm(chat, pat, A, bu, ipm_iters, target=target,
+            z, y, val = _ipm(chat, pat, A, bu, jnp.where(active, ipm_iters, 0), target=target,
                              cert=lambda y: _certificate(pat, A, bu, y, chat, safe)[0])  # fmt: skip
-            lb = jnp.where(jnp.isnan(val) | ~finite, -jnp.inf, lower(val))
+            lb = jnp.where(jnp.isnan(val) | ~finite | ~active, -jnp.inf, lower(val))
             best = jnp.maximum(best, lb)
             _, r = _certificate(pat, A, bu, y, chat, safe)
             klo, khi = reduce_ranges(vlo[:n], vlo[:n] + scale[:n], lb, cn * r[:n] / scale[:n], cutoff)
-            rlo, rhi = jnp.maximum(rlo, klo), jnp.minimum(rhi, khi)
-            v = vlo + scale * jnp.clip(z, 0.0, 1.0)
+            rlo = jnp.where(active, jnp.maximum(rlo, klo), rlo)
+            rhi = jnp.where(active, jnp.minimum(rhi, khi), rhi)
+            v = jnp.where(active, vlo + scale * jnp.clip(z, 0.0, 1.0), vprev)
             if n_kelley:  # Kelley: tangents of the squares at the LP solution (not after the last round)
+                gap = jnp.where(needj, v[I] * v[J] - v[n:], -jnp.inf)  # x^2 - w: > 0 cuts the point off
+                active = active & (best < cutoff) & jnp.any(gap > 1e-9 * (1.0 + scale[n:]))
                 vals, b = jax.lax.cond(k < n_kelley, lambda: tangents(vals, b, v, jnp.minimum(k, n_kelley - 1)),
                                        lambda: (vals, b))  # fmt: skip
-            return (vals, b, best, rlo, rhi, v[:n]), None
+            return (vals, b, best, rlo, rhi, v, active), None
 
-        init = (vals0, b0, jnp.array(-jnp.inf, lo.dtype), lo, hi, 0.5 * (lo + hi))
-        (_, _, best, rlo, rhi, x), _ = jax.lax.scan(round_, init, jnp.arange(n_kelley + 1))
+        init = (vals0, b0, jnp.array(-jnp.inf, lo.dtype), lo, hi, vlo + 0.5 * scale, jnp.array(True))
+        (_, _, best, rlo, rhi, x, _), _ = jax.lax.scan(round_, init, jnp.arange(n_kelley + 1))
+        x = x[:n]
         infeasible = best == jnp.inf
         rlo, rhi = jnp.where(finite, rlo, lo), jnp.where(finite, rhi, hi)
         return best, jnp.clip(x, lo, hi), infeasible, rlo, rhi

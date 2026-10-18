@@ -118,3 +118,159 @@ def test_minimize_haverly_quadratic():
     assert r.lower_bound <= -400.0 + 1e-6
     r0 = jaxglobal.minimize(f, lo, hi, ineq=g, eq=h, rel_tol=1e-4, abs_tol=1e-6, time_limit=120, quadratic=False)
     assert r0.status == "optimal" and r.nodes <= r0.nodes
+
+
+def _three_circles():
+    """Three unit-diameter circles in a W x H rectangle, minimize W H: v = (x1, y1, ..., W, H, a)."""
+    n = 9
+
+    def f(v):
+        return v[8]
+
+    def g(v):
+        c = [(v[0], v[1]), (v[2], v[3]), (v[4], v[5])]
+        d = [1.0 - (c[i][0] - c[j][0]) ** 2 - (c[i][1] - c[j][1]) ** 2 for i in range(3) for j in range(i + 1, 3)]
+        box = [v[2 * i + k] + 0.5 - v[6 + k] for i in range(3) for k in range(2)]
+        return jnp.stack(d + box)
+
+    def h(v):
+        return jnp.atleast_1d(v[6] * v[7] - v[8])
+
+    lo = np.array([0.5] * 6 + [1.0, 1.0, 1.0])
+    hi = np.array([3.5] * 6 + [4.0, 4.0, 16.0])
+    return f, g, h, lo, hi, n
+
+
+def test_squares_bounded_below():
+    """Kelley tangents on the squares are skipped only where no row needs a square bounded below."""
+    from jaxglobal.quadratic import squares_bounded_below
+
+    f, g, h, lo, hi, n = _three_circles()
+    assert not squares_bounded_below(quadratic_form(f, g, h, n))  # reverse-convex: only secants bind
+    assert squares_bounded_below(quadratic_form(lambda x: x[0] ** 2 + x[1], None, None, 2))  # convex objective
+    assert squares_bounded_below(quadratic_form(lambda x: x[1], lambda x: x[0] ** 2 - x[1], None, 2))  # convex row
+    assert squares_bounded_below(quadratic_form(lambda x: x[1], None, lambda x: x[0] ** 2 - x[1], 2))  # equality
+    assert not squares_bounded_below(quadratic_form(lambda x: -x[0] ** 2 + x[1], None, None, 2))  # concave
+    assert not squares_bounded_below(quadratic_form(lambda x: x[0] * x[1], None, None, 2))  # no square
+
+
+def test_skipped_tangents_do_not_change_the_bound(monkeypatch):
+    """On boxes of the circle model the bound without Kelley rounds equals the bound with them."""
+    import jaxglobal.quadratic as qd
+
+    f, g, h, lo, hi, n = _three_circles()
+    Q = quadratic_form(f, g, h, n)
+    rng = np.random.default_rng(3)
+    boxes = []
+    for _ in range(16):
+        c = rng.uniform(lo, hi)
+        w = rng.uniform(0.3, 1.0) * (hi - lo)
+        boxes.append((np.clip(c - w, lo, hi), np.clip(c + w, lo, hi)))
+    skip = make_quadratic_bounder(Q, n_kelley=4, tol=1e-6)
+    monkeypatch.setattr(qd, "squares_bounded_below", lambda Q: True)
+    full = make_quadratic_bounder(Q, n_kelley=4, tol=1e-6)
+    checked = 0
+    for blo, bhi in boxes:
+        a, b = skip(jnp.asarray(blo), jnp.asarray(bhi))[0], full(jnp.asarray(blo), jnp.asarray(bhi))[0]
+        if b > 1e3 or a > 1e3:  # an infeasible box: both certificates diverge and prune it
+            assert a > 1e3 and b > 1e3
+        else:
+            assert abs(a - b) <= 1e-6 * (1 + abs(b))
+            checked += 1
+    assert checked >= 3
+
+
+def test_circle_packing_solves():
+    """Three unit circles: the optimal rectangle is 1 x 3 (area 3) or the triangle packing area."""
+    f, g, h, lo, hi, n = _three_circles()
+    r = jaxglobal.minimize(f, lo, hi, ineq=g, eq=h, time_limit=60)
+    assert r.status == "optimal"
+    assert r.lower_bound <= r.fun + 1e-6
+    # stacked triangle: W = 1 + sqrt(3)/2... the solver's answer must be at most the 1 x 3 strip
+    assert r.fun <= 3.0 + 1e-6
+
+
+def _ordered_circles():
+    """Three unit circles ordered by x (x1 <= x2 <= x3), in a W x H rectangle: v = (x1, y1, ..., W, H, a)."""
+    f, g0, h, lo, hi, n = _three_circles()
+
+    def g(v):
+        return jnp.concatenate([g0(v), jnp.stack([v[0] - v[2], v[2] - v[4]])])
+
+    return f, g, h, lo, hi, n
+
+
+def test_ineq_rlt_rows():
+    """Bound-factor RLT rows: generated for the ordering rows and the products they need, and
+    satisfied by every point of the box that satisfies the inequality, for any box."""
+    f, g, h, lo, hi, n = _ordered_circles()
+    Q = quadratic_form(f, g, h, n)
+    rows = Q.n_g - 2 + np.arange(2)
+    assert set(Q.qr_g.tolist()) <= set(rows.tolist()) and len(Q.qr_g) > 0
+    assert {0, 2} <= set(Q.qr_var[Q.qr_g == rows[0]].tolist())  # x1 <= x2 times bound factors of x1, x2
+    assert len(quadratic_form(*_three_circles()[:3], n).qr_g) == 0  # no linear inequality of 2-3 variables
+    L = _layout(Q, n, 0, False)
+    rng = np.random.default_rng(1)
+    T2 = len(Q.qr_g)
+    for _ in range(20):
+        a, b = rng.uniform(lo, hi), rng.uniform(lo, hi)
+        blo, bhi = np.minimum(a, b), np.maximum(a, b)
+        _, _, vals, bb, _ = _lp(Q, L, jnp.asarray(blo), jnp.asarray(bhi), 1e-6, False)
+        A = sparse.coo_matrix((np.asarray(vals), (L.pattern.rows, L.pattern.cols)), shape=(L.pattern.m, len(Q.E[0])))
+        A = A.tocsr()
+        sel = np.arange(L.pattern.m - 2 * T2, L.pattern.m)  # the RLT block is last (no tangents, no cutoff)
+        for _ in range(20):
+            x = rng.uniform(blo, bhi)
+            if np.max(np.asarray(g(x))[rows]) > 0:
+                x[2] = min(max(x[0], x[2]), bhi[2])
+                x[4] = min(max(x[2], x[4]), bhi[4])
+            if np.max(np.asarray(g(x))[rows]) > 1e-6:
+                continue
+            v = lifted_point(Q, x)
+            assert np.all(A[sel] @ v <= np.asarray(bb)[sel] + 1e-9)
+
+
+def test_ineq_rlt_tightens_ordered_circles():
+    """With x1 <= x2 the RLT rows give (x2 - x1)^2 <= U (x2 - x1): on a box where the circles'
+    x-ranges coincide (width 1.2 > 1) the McCormick facets alone allow every circle on one
+    vertical line, so the bound with the RLT rows is higher."""
+    f, g, h, lo, hi, n = _ordered_circles()
+    Q = quadratic_form(f, g, h, n)
+    blo = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0])
+    bhi = np.array([1.7, 1.2, 1.7, 1.2, 1.7, 1.2, 2.2, 1.7, 16.0])
+    with_rlt = make_quadratic_bounder(Q, tol=1e-6)(jnp.asarray(blo), jnp.asarray(bhi))[0]
+    plain = make_quadratic_bounder(Q._replace(qr_g=np.zeros(0, np.int64)), tol=1e-6)  # no RLT block
+    without = plain(jnp.asarray(blo), jnp.asarray(bhi))[0]
+    assert with_rlt > without + 1e-3
+    r = jaxglobal.minimize(f, lo, hi, ineq=g, eq=h, time_limit=60)
+    assert r.status == "optimal"
+
+
+def test_ineq_rlt_fixed_factor_does_not_prune():
+    """With x_0 and x_2 fixed (l = u, as an integer at a node), both bound-factor rows of each
+    pair reduce to an equality that McCormick also implies. Rounded without a margin, these
+    equalities were inconsistent, and the plain-mode bound came out near 1e262 on a box full of
+    feasible points."""
+    Qm = np.array([[0.28281908172344156, 0.2596506987470373, -3.6431196440771165],
+                   [0.2596506987470373, 2.715464715007119, 1.6820062383392957],
+                   [-3.6431196440771165, 1.6820062383392957, -0.8238176752930403]])  # fmt: skip
+    q = np.array([-1.2703317571778174, 0.16215033395753317, 1.2702236737716768])
+    a, c = np.array([0.6992995640278481, 0.0, 1.472172139560809]), 0.04733789657258362
+
+    def f(x):
+        return sum(Qm[i, j] * x[i] * x[j] for i in range(3) for j in range(3)) + sum(q[i] * x[i] for i in range(3))
+
+    def g(x):
+        return jnp.atleast_1d(a[0] * x[0] + a[2] * x[2] + c)
+
+    Q = quadratic_form(f, g, None, 3)
+    assert len(Q.qr_g) > 0
+    lo = np.array([-2.9989852470807135, -0.3965467285767672, -1.9431734172297537])
+    hi = np.array([-2.9989852470807135, 1.9556236877657316, -1.9431734172297537])
+    xs = np.stack([np.full(41, lo[0]), np.linspace(lo[1], hi[1], 41), np.full(41, lo[2])], axis=1)
+    assert np.all(xs @ a + c <= 0)  # every point of the box is feasible
+    fmin = min(float(f(x)) for x in xs)
+    for tol in (0.0, 1e-6):
+        for safe in (False, True):
+            lb = float(make_quadratic_bounder(Q, tol=tol, safe=safe)(jnp.asarray(lo), jnp.asarray(hi))[0])
+            assert lb <= fmin + 1e-9 * (1 + abs(fmin)), (tol, safe, lb, fmin)
