@@ -288,6 +288,17 @@ class _Precompiled:
         except Exception:
             pass
 
+    def pending(self, b, n):
+        """Whether the background build for ``b`` boxes of dimension ``n`` (``start``'s default
+        arguments) was started and has not finished."""
+        args = (jax.ShapeDtypeStruct((b, n), jnp.float64),) * 2 + (jax.ShapeDtypeStruct((), jnp.float64),)
+        fut = self.ready.get(self._key(args))
+        if fut is None:
+            return False
+        if not fut.done():
+            return True
+        return fut.exception() is None and not fut.result().done()
+
     def _lower(self, args, fingerprint):
         """The lowered kernel, loaded from the disk cache when possible (and stored there when not)."""
         fp = fingerprint() if fingerprint is not None else None
@@ -1433,7 +1444,22 @@ def minimize(
             ub, xbest = float(F[i]), X[i]
         polish()
 
+    def need_obbt():
+        """Whether the root OBBT pass runs: with an incumbent cutoff known (it is useless without
+        one when there are no constraints), and not when the root bound already closes the gap."""
+        return bool(obbt) and (constrained or np.isfinite(ub)) and not (ub - float(lb.min()) <= tol())
+
+    def start_root_obbt():
+        """Compile the root OBBT kernel in the background (once; ``start`` skips a started shape)."""
+        if obbt == "root" and padded.mesh is None:
+            K.obbt.start(1, lo.size, functools.partial(K.fingerprint, lo.size) if kcache.cache_root() else None)
+
     _mark("root_bound")
+    if obbt == "root" and (constrained or np.isfinite(ub)) and any(K.bound.pending(b, lo.size) for b in padded.sizes):
+        # the main thread is about to wait for the bound kernel's build: trace the OBBT kernel in that
+        # idle time (queued behind the bound and dive kernels) rather than after the root bound,
+        # when ``need_obbt`` can first tell. A warm cache has the bound kernel ready: no guess then.
+        start_root_obbt()
     try:
         lb, xc, fc, rlo, rhi, rxr = evaluate(lo[None], hi[None])
     except _CompileTimeout as e:  # no bound at all yet: report what is known
@@ -1446,16 +1472,6 @@ def minimize(
                       max_violation=maxv, verified=verified)  # fmt: skip
     _mark("root_incumbent")
     update_incumbent(xc, fc, lb)
-
-    def need_obbt():
-        """Whether the root OBBT pass runs: with an incumbent cutoff known (it is useless without
-        one when there are no constraints), and not when the root bound already closes the gap."""
-        return bool(obbt) and (constrained or np.isfinite(ub)) and not (ub - float(lb.min()) <= tol())
-
-    def start_root_obbt():
-        """Compile the root OBBT kernel in the background (once; ``start`` skips a started shape)."""
-        if obbt == "root" and padded.mesh is None:
-            K.obbt.start(1, lo.size, functools.partial(K.fingerprint, lo.size) if kcache.cache_root() else None)
 
     if need_obbt():
         # compile the root OBBT kernel only now, while the root dives run: a problem whose root
