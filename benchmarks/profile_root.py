@@ -29,7 +29,16 @@ Usage:
 
 Diagnostic variants (the mode is recorded as ``<mode><label>``):
   --opts '{"alphabb": false}' --label +noalphabb        extra ``minimize`` options
-  --set '{"relax_interp.MIN_ROWS": 0}' --label +interp  module constants
+  --set '{"relax_interp.RULE": "rows", "relax_interp.MIN_ROWS": 0}' --label +interp  module constants
+
+Per-node kernel ablation (plan A3): ``--ablate`` runs the fixed variant list ``ABLATE`` cold and
+prints a table of compile s (node bound kernel), kernel run s per call, nodes/s and the bound at the
+limit, medians over ``--repeats``. Each run holds the shared benchmark lock and waits for a 1-min
+load below ``--max-load`` (10); the load is recorded, and a run started after ``--max-wait`` s of
+waiting is flagged ``timeout`` (``rose``: the load passed the gate but was above it again once the
+lock was taken; the lock is never held while waiting for the load):
+  python benchmarks/profile_root.py --ablate --names hadamard_5,ex6_2_6 --time-limit 60 --repeats 3 \\
+      --out benchmarks/results/scipgap_a3.csv [--variants base,+opsrule,+interp]
 
 A background compile still running when ``minimize`` returns is recorded up to
 the return and marked unfinished.
@@ -43,11 +52,15 @@ import importlib
 import json
 import os
 import pathlib
+import shutil
+import signal
+import statistics
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import uuid
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -203,26 +216,34 @@ def child(name, nl_dir, tl):
     bnb._Kernels.__init__ = init
 
     # which paths were taken
-    from jaxglobal.fbbt_interp import STRUCTURAL
-
     def decision(mod):
         orig = mod.use_interpreter
 
-        def use_interpreter(tape, n, min_rows=50, max_expansion=1.5):
-            r = orig(tape, n, min_rows=min_rows, max_expansion=max_expansion)
-            rows = sum(int(np.prod(tape.shapes[s][0])) for node in tape.nodes for s in node.outs
-                       if node.eqn.primitive.name not in STRUCTURAL)  # fmt: skip
+        def use_interpreter(tape, n, *a, **k):
+            r = orig(tape, n, *a, **k)
+            rows, _ = fbbt_interp.tape_size(tape)
             f1, f2 = sys._getframe(1), sys._getframe(2)
             who = f"{f2.f_code.co_name}>{f1.f_code.co_name}" if f1.f_code.co_name == "use_relax_interpreter" else \
                 f"{f1.f_globals.get('__name__', '').split('.')[-1]}.{f1.f_code.co_name}"  # fmt: skip
             with lock:
-                paths.append(dict(what="use_interpreter", who=who, min_rows=min_rows, rows=rows, result=bool(r)))
+                paths.append(dict(what="use_interpreter", who=who, args=list(a) + sorted(k.items()), rows=rows,
+                                  result=bool(r)))  # fmt: skip
             return r
 
         mod.use_interpreter = use_interpreter
 
     decision(fbbt_interp)
     decision(relax_interp)
+    _relax_rule = relax_interp.use_relax_interpreter
+
+    def use_relax_interpreter(tape, n):
+        r = _relax_rule(tape, n)
+        with lock:
+            paths.append(dict(what="use_relax_interpreter", rule=relax_interp.RULE, n=n,
+                              rows=fbbt_interp.tape_size(tape)[0], ops=relax_interp.kernel_ops(tape, n), result=bool(r)))
+        return r
+
+    relax_interp.use_relax_interpreter = use_relax_interpreter
     _taylor2 = relax_interp.make_taylor2
 
     def make_taylor2(tape, n, ictx, d):
@@ -427,7 +448,48 @@ def buckets(d):
     return rows, wall, out
 
 
+def ablation(d):
+    """The numbers of the ``--ablate`` table for one run.
+
+    compile_s: trace + lowering + XLA compile of the node bound kernel (16 boxes), as run on the
+    background threads; run_s: seconds per call of that kernel during the search; nodes_s: nodes per
+    second of the search stage; bound: the lower bound when ``minimize`` returned.
+    """
+    _, wall, stages = analyse(d)
+    bg = [x for x in d["spans"] if x["thread"] != "MainThread"]
+    main = [x for x in d["spans"] if x["thread"] == "MainThread"]
+    comp = sum(x["t1"] - x["t0"] for x in bg if x["item"] in ("trace_lower:bound[b=16]", "compile:bound[b=16]"))
+    unfinished = any(x.get("note") == "unfinished at return" for x in bg if x["item"].endswith("bound[b=16]"))
+    search = stages.get("search", [])
+    runs = [x["t1"] - x["t0"] for x in main if x["item"] == "run:bound"
+            and any(_overlap(x["t0"], x["t1"], a, b) > 0 for a, b in search)]  # fmt: skip
+    t_search = sum(b - a for a, b in search)
+    interp = sorted({p["rows"] for p in d["paths"] if p["what"] == "use_relax_interpreter" and p["result"]})
+    info = d["info"]
+    return dict(wall=wall, compile_s=comp, compile_unfinished=unfinished,
+                run_s=sum(runs) / len(runs) if runs else float("nan"), calls=len(runs),
+                nodes_s=info["nodes"] / t_search if t_search > 0 else float("nan"), nodes=info["nodes"],
+                bound=info["lower_bound"], status=info["status"], interp_rows=interp)  # fmt: skip
+
+
 # ---------------------------------------------------------------- driver
+
+LOCK = pathlib.Path("/private/tmp/claude-501/jaxglobal-bench.lock")
+
+# the fixed variant list of ``--ablate`` (plan A3): (label, minimize options, module constants)
+ABLATE = [
+    ("", {}, {}),
+    ("+opsrule", {}, {"relax_interp.RULE": "ops"}),  # the candidate op-count rule (relax_interp.MIN_OPS)
+    ("+noalphabb", {"alphabb": False}, {}),
+    ("+nounivariate", {"univariate": False}, {}),
+    ("+nokelley", {"n_kelley": 0}, {}),
+    ("+fbbt1", {"fbbt_rounds": 1}, {}),
+    ("+noobbt", {"obbt": False}, {}),
+    ("+interp", {}, {"relax_interp.RULE": "rows", "relax_interp.MIN_ROWS": 0}),
+    ("+straight", {}, {"relax_interp.RULE": "rows", "relax_interp.MIN_ROWS": 10**9}),
+    ("+fbbtrows", {}, {"fbbt_interp.SCHEDULE_MIN_ROWS": 0}),
+    ("+fbbtsteps", {}, {"fbbt_interp.SCHEDULE_MIN_ROWS": 10**9}),
+]
 
 
 def _load():
@@ -436,6 +498,137 @@ def _load():
         return out.strip().split("load average")[-1].lstrip("s:").strip()
     except Exception:
         return ""
+
+
+def gate(max_load, max_wait, poll=20.0):
+    """Wait until the 1-min load is below ``max_load``, at most ``max_wait`` s: (load, "ok" | "timeout")."""
+    t = time.time()
+    while (ld := os.getloadavg()[0]) >= max_load:
+        if time.time() - t >= max_wait:
+            return ld, "timeout"
+        time.sleep(poll)
+    return ld, "ok"
+
+
+class Lock:
+    """The shared benchmark lock of plan §3 (atomic ``mkdir``), held for one run; no-op without a path.
+
+    The owner file carries the pid and a random token; ``__exit__`` removes the lock only if the owner
+    file still names this holder, so a lock another process took after a stale-lock cleanup survives.
+    """
+
+    def __init__(self, path, what, poll=15.0):
+        self.path, self.what, self.poll = pathlib.Path(path) if path else None, what, poll
+        self.token = f"pid {os.getpid()} token {uuid.uuid4().hex}"
+
+    def __enter__(self):
+        i = 0
+        while self.path is not None:
+            try:
+                self.path.mkdir()
+            except FileExistsError:
+                if i % 40 == 0:
+                    owner = (self.path / "owner").read_text().strip() if (self.path / "owner").exists() else "?"
+                    print(f"    waiting for {self.path} ({owner})", flush=True)
+                i += 1
+                time.sleep(self.poll)
+                continue
+            try:
+                (self.path / "owner").write_text(f"profile_root.py {self.token} {self.what} since {time.ctime()}\n")
+            except BaseException:
+                shutil.rmtree(self.path, ignore_errors=True)  # never leave an ownerless lock behind
+                raise
+            break
+        return self
+
+    def __exit__(self, *exc):
+        if self.path is None:
+            return
+        try:
+            mine = self.token in (self.path / "owner").read_text()
+        except OSError:
+            mine = False
+        if mine:
+            shutil.rmtree(self.path, ignore_errors=True)
+        else:
+            print(f"    {self.path} is no longer ours; left in place", flush=True)
+
+
+def _exit_on_signal(signum, frame):
+    """SIGTERM/SIGHUP -> SystemExit, so ``with Lock(...)`` unwinds and releases the lock."""
+    raise SystemExit(128 + signum)
+
+
+def run_one(a, w, jdir, cache, name, mode, label, opts, sets):
+    """One child run: rows into the CSV writer ``w``, the raw JSON into ``jdir``. Returns (d, load, gate) or None."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("JAXGLOBAL_CACHE", "JAX_COMPILATION_CACHE"))}
+    env["PYTHONWARNINGS"] = "ignore"
+    env["JAXGLOBAL_PROFILE_OPTS"] = json.dumps(opts)
+    env["JAXGLOBAL_PROFILE_SET"] = json.dumps(sets)
+    if mode == "cold":
+        env["JAXGLOBAL_CACHE"] = "0"
+    else:
+        env["JAXGLOBAL_CACHE_DIR"] = str(cache / name)
+    tag = mode + label
+    # wait for the load before taking the lock (never hold it while waiting), then record the load
+    # under the lock: "rose" if it went back above the gate in between
+    outcome = gate(a.max_load, a.max_wait)[1] if a.max_load > 0 else "off"
+    with Lock(a.lock, f"{name} {tag}, one run of <= {a.time_limit * 3 + 120:.0f} s"):
+        ld = os.getloadavg()[0]
+        if outcome == "ok" and ld >= a.max_load:
+            outcome = "rose"
+        load = _load()
+        t = time.time()
+        try:
+            p = subprocess.run([sys.executable, __file__, "--child", name, a.nl_dir, str(a.time_limit)],
+                               capture_output=True, text=True, env=env, timeout=a.time_limit * 3 + 120)  # fmt: skip
+            line = next((ln for ln in p.stdout.splitlines() if ln.startswith(TAG)), None)
+            err = (p.stderr or p.stdout)[-200:]
+        except subprocess.TimeoutExpired:
+            line, err = None, "child timed out"
+    gnote = f"gate={outcome} load1={ld:.2f}"
+    if line is None:
+        print(f"{name} {tag}: no result ({err})", flush=True)
+        w.writerow(dict(instance=name, mode=tag, load_1_5_15=load, category="error", item="", seconds="",
+                        note=f"{gnote} {err}"))  # fmt: skip
+        return None
+    d = json.loads(line[len(TAG):])
+    (jdir / f"{name}-{tag}.json").write_text(line[len(TAG):])
+    rows, wall, bk = buckets(d)
+    rows.append(("info", "load_gate", "", gnote))
+    for cat, item, sec, note in rows:
+        w.writerow(dict(instance=name, mode=tag, load_1_5_15=load, category=cat, item=item,
+                        seconds=f"{sec:.3f}" if isinstance(sec, float) else sec, note=note))  # fmt: skip
+    for item, sec in bk.items():
+        w.writerow(dict(instance=name, mode=tag, load_1_5_15=load, category="bucket", item=item,
+                        seconds=f"{sec:.3f}", note=""))  # fmt: skip
+    print(f"{name:24s} {tag:5s} load {load:18s} ({outcome}) wall {wall:7.1f}s (process {time.time() - t:.0f}s) "
+          f"buckets sum {sum(bk.values()):7.1f}s  nodes {d['info']['nodes']} {d['info']['status']}", flush=True)  # fmt: skip
+    if not a.ablate:
+        for item, sec in sorted(bk.items(), key=lambda kv: -kv[1]):
+            if sec >= 0.05:
+                print(f"    {item:55s} {sec:7.2f}")
+    return d, ld, outcome
+
+
+def _med(xs):
+    xs = [x for x in xs if x == x]
+    return statistics.median(xs) if xs else float("nan")
+
+
+def ablation_table(results):
+    """Markdown table of ``--ablate`` results: medians over the repeats of each (instance, variant)."""
+    lines = ["| instance | variant | compile s | run s/call | nodes/s | bound at limit | status | relax interp rows | "
+             "load (1 min) | gate |", "|---|---|---|---|---|---|---|---|---|---|"]  # fmt: skip
+    for (name, tag), reps in results.items():
+        ab = [ablation(d) for d, _, _ in reps]
+        unf = "+" if any(x["compile_unfinished"] for x in ab) else ""
+        lines.append(
+            f"| {name} | {tag} | {_med([x['compile_s'] for x in ab]):.1f}{unf} | {_med([x['run_s'] for x in ab]):.4f} | "
+            f"{_med([x['nodes_s'] for x in ab]):.0f} | {_med([x['bound'] for x in ab]):.6g} | "
+            f"{'/'.join(sorted({x['status'] for x in ab}))} | {ab[0]['interp_rows'] or '-'} | "
+            f"{', '.join(f'{ld:.1f}' for _, ld, _ in reps)} | {'/'.join(sorted({g for _, _, g in reps}))} |")  # fmt: skip
+    return "\n".join(lines)
 
 
 def main():
@@ -449,8 +642,21 @@ def main():
     ap.add_argument("--opts", default="", help='extra minimize options as JSON, e.g. \'{"alphabb": false}\'')
     ap.add_argument("--set", default="", help='module constants as JSON, e.g. \'{"relax_interp.MIN_ROWS": 0}\'')
     ap.add_argument("--label", default="", help="appended to the mode in the CSV (diagnostic variants)")
+    ap.add_argument("--ablate", action="store_true",
+                    help="run the fixed variant list ABLATE (cold) and print the ablation table")  # fmt: skip
+    ap.add_argument("--variants", default="", help="--ablate: only these labels (comma-separated, 'base' for '')")
+    ap.add_argument("--repeats", type=int, default=1, help="runs per (instance, variant); the table shows medians")
+    ap.add_argument("--max-load", type=float, default=None,
+                    help="wait for a 1-min load below this before each run (default 10 with --ablate, else 0: no gate)")
+    ap.add_argument("--max-wait", type=float, default=7200.0, help="s to wait for the load gate, then run flagged")
+    ap.add_argument("--lock", default=None, help=f"benchmark lock directory held during each run (default {LOCK} "
+                    "with --ablate, else none; a caller that holds the lock itself must not pass it)")
     ap.add_argument("--child", nargs=3, metavar=("NAME", "NL_DIR", "TL"), help=argparse.SUPPRESS)
     a = ap.parse_args()
+    if a.max_load is None:
+        a.max_load = 10.0 if a.ablate else 0.0
+    if a.lock is None:
+        a.lock = str(LOCK) if a.ablate else ""
     if a.child:
         print(TAG + json.dumps(child(a.child[0], a.child[1], float(a.child[2])), default=str), flush=True)
         sys.stdout.flush()
@@ -459,48 +665,30 @@ def main():
     jdir = pathlib.Path(a.json_dir or tempfile.mkdtemp(prefix="jaxglobal-profile-"))
     jdir.mkdir(parents=True, exist_ok=True)
     cache = pathlib.Path(tempfile.mkdtemp(prefix="jaxglobal-profile-cache-"))
+    if a.ablate:
+        keep = {"" if v == "base" else v for v in a.variants.split(",")} if a.variants else None
+        plan = [("cold", label, opts, sets) for label, opts, sets in ABLATE if keep is None or label in keep]
+    else:
+        plan = [(mode, a.label, json.loads(a.opts or "{}"), json.loads(a.set or "{}")) for mode in a.modes.split(",")]
+    if a.lock:
+        for sig in (signal.SIGTERM, signal.SIGHUP):
+            signal.signal(sig, _exit_on_signal)
+    results = {}
     new = not pathlib.Path(a.out).exists()
     with open(a.out, "a", newline="") as fh:
         w = csv.DictWriter(fh, FIELDS)
         if new:
             w.writeheader()
-        for name in a.names.split(","):
-            for mode in a.modes.split(","):
-                env = {k: v for k, v in os.environ.items() if not k.startswith(("JAXGLOBAL_CACHE", "JAX_COMPILATION_CACHE"))}
-                env["PYTHONWARNINGS"] = "ignore"
-                env["JAXGLOBAL_PROFILE_OPTS"] = a.opts or "{}"
-                env["JAXGLOBAL_PROFILE_SET"] = a.set or "{}"
-                if mode == "cold":
-                    env["JAXGLOBAL_CACHE"] = "0"
-                else:
-                    env["JAXGLOBAL_CACHE_DIR"] = str(cache / name)
-                load = _load()
-                t = time.time()
-                tag = mode + a.label
-                p = subprocess.run([sys.executable, __file__, "--child", name, a.nl_dir, str(a.time_limit)],
-                                   capture_output=True, text=True, env=env, timeout=a.time_limit * 3 + 120)  # fmt: skip
-                line = next((ln for ln in p.stdout.splitlines() if ln.startswith(TAG)), None)
-                if line is None:
-                    print(f"{name} {tag}: no result\n{p.stdout[-2000:]}\n{p.stderr[-3000:]}", flush=True)
-                    w.writerow(dict(instance=name, mode=tag, load_1_5_15=load, category="error", item="",
-                                    seconds="", note=(p.stderr or p.stdout)[-200:]))  # fmt: skip
-                    continue
-                d = json.loads(line[len(TAG):])
-                (jdir / f"{name}-{tag}.json").write_text(line[len(TAG):])
-                rows, wall, bk = buckets(d)
-                for cat, item, sec, note in rows:
-                    w.writerow(dict(instance=name, mode=tag, load_1_5_15=load, category=cat, item=item,
-                                    seconds=f"{sec:.3f}" if isinstance(sec, float) else sec, note=note))  # fmt: skip
-                for item, sec in bk.items():
-                    w.writerow(dict(instance=name, mode=tag, load_1_5_15=load, category="bucket", item=item,
-                                    seconds=f"{sec:.3f}", note=""))  # fmt: skip
-                fh.flush()
-                s = sum(bk.values())
-                print(f"{name:24s} {tag:5s} load {load:18s} wall {wall:7.1f}s (process {time.time() - t:.0f}s) "
-                      f"buckets sum {s:7.1f}s  nodes {d['info']['nodes']} {d['info']['status']}", flush=True)  # fmt: skip
-                for item, sec in sorted(bk.items(), key=lambda kv: -kv[1]):
-                    if sec >= 0.05:
-                        print(f"    {item:55s} {sec:7.2f}")
+        runs = [(name, *step) for name in a.names.split(",") for step in plan for _ in range(a.repeats)]
+        for k, (name, mode, label, opts, sets) in enumerate(runs):
+            r = run_one(a, w, jdir, cache, name, mode, label, opts, sets)
+            fh.flush()
+            if a.lock and k + 1 < len(runs):
+                time.sleep(45)  # let others waiting for the lock through between runs
+            if r is not None:
+                results.setdefault((name, mode + label), []).append(r)
+    if a.ablate or a.repeats > 1:
+        print(ablation_table(results))
     print(f"raw JSON in {jdir}")
 
 

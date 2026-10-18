@@ -795,6 +795,66 @@ instances (start50: 44 solved, 1 wrong, SGM 1.9 s from `baseline.csv`; int50:
 run the medians of wall time, overrun past the limit, nodes, primal, dual and
 first-bound time, with the load of each repeat.
 
+#### A3 per-node kernel ablation and interpreter thresholds
+
+**Status: tooling and rule in place; thresholds not changed** (no valid timing:
+1-min load 10-77 and the shared lock busy for the 2 h measurement window).
+
+- `benchmarks/profile_root.py --ablate` runs the fixed variant list `ABLATE`,
+  cold, and prints per (instance, variant) the median over `--repeats` of: node
+  bound compile s, kernel run s per call, nodes/s, bound at the limit, status
+  and the interpreted relaxer rows, with the 1-min load of each run and its
+  gate (`ok`, `timeout` after `--max-wait`, `rose`). Variants: base,
+  `+opsrule`, `+noalphabb`, `+nounivariate`, `+nokelley`, `+fbbt1`, `+noobbt`
+  (`obbt=False`; the plan's `"none"` is not an accepted value), `+interp` /
+  `+straight` (relaxer always / never interpreted), `+fbbtrows` / `+fbbtsteps`
+  (`SCHEDULE_MIN_ROWS` 0 / 1e9). It waits for the load without holding the lock,
+  then holds the lock for one run at a time.
+- `relax_interp.kernel_ops(tape, n) = rows (n + 1) (2n + 1 + n_kelley)`: scalar
+  McCormick rules per box of the straight-line node bound (each row with its
+  `jacfwd` tangents at each cut point). `fbbt_interp.fbbt_ops(rows, rounds) =
+  rows (2 rounds + 1)`.
+- `relax_interp.RULE = "ops"` (opt-in) interprets when `rows >= MIN_ROWS` (600)
+  **or** `kernel_ops >= MIN_OPS` (candidate 600,000). The rows term stays because
+  compile time of the straight-line kernel grows with rows even at small n
+  (kriging_peaks-red030: 1,162 rows at n = 2 is only 31k ops). The default
+  `RULE = "rows"` is the former rule. `fbbt_interp`'s default op rule makes the
+  same choice as the former `rows >= 50` at the default 5 rounds.
+- Tests: `tests/test_interp_rule.py`.
+
+Which tapes the candidate flips to the interpreter (from the tape statistics; no
+timing needed). Among the 7 W0 instances: hadamard_5 g (503 rows, n 26, 774k)
+and batch g (261 rows, n 46, 1.19M). Among 20 sampled start50/int50 instances
+(seed 1): tloss g (514 rows, n 48, 2.54M). Elsewhere: st_rv7 g (967k),
+pooling_rt2tp g (1.11M), clay0203m, tln5, flay04m, pooling_adhya1stp,
+kall_circlespolygons_c1p12, wastewater15m1, nous1. Only the joint
+(objective + constraints) tape flips on cvxnonsep_pcon40, launch, meanvarx and
+pooling_foulds2tp. Their per-function tapes keep their previous choice, so the
+effect is limited to the paths that relax the joint tape. Only these need
+node-rate measurement. No tape changes from interpreted to straight-line.
+
+Partial data (cold, one run, `a3_kbench`: `bnb._Kernels` node bound for 16 boxes):
+
+| instance | relaxer | lower s | compile s | run s/call | load before / after |
+|---|---|---|---|---|---|
+| hadamard_5 | straight-line | 10.5 | 80.5 | 0.134 | 9.6 / 15.4 |
+
+To finish (each run takes the lock; about 1.5 h at load < 10):
+
+```
+python benchmarks/profile_root.py --ablate --repeats 3 --time-limit 60 \
+    --names cvxnonsep_nsig30,smallinvDAXr3b010-011,ex6_2_6,hadamard_5 \
+    --out benchmarks/results/scipgap_a3.csv
+python benchmarks/profile_root.py --ablate --variants base,+opsrule --repeats 3 --time-limit 60 \
+    --names batch,tloss,st_rv7,pooling_rt2tp,clay0203m,tln5 \
+    --out benchmarks/results/scipgap_a3_flips.csv
+```
+
+Make `RULE = "ops"` the default only if hadamard_5's McCormick-only kernel
+compiles in < 15 s, no flipped instance loses > 10 % node rate or gains > 10 %
+cold wall, and bounds at the limit agree within 1e-6; otherwise raise `MIN_OPS`
+above the losing instances.
+
 ### Phase 3 — search (4 weeks)
 
 - **Branching.** Choose the variable by violation-weighted or pseudocost
