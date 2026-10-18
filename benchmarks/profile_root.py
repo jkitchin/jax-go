@@ -53,12 +53,14 @@ import json
 import os
 import pathlib
 import shutil
+import signal
 import statistics
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import uuid
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -509,29 +511,52 @@ def gate(max_load, max_wait, poll=20.0):
 
 
 class Lock:
-    """The shared benchmark lock of plan §3 (atomic ``mkdir``), held for one run; no-op without a path."""
+    """The shared benchmark lock of plan §3 (atomic ``mkdir``), held for one run; no-op without a path.
+
+    The owner file carries the pid and a random token; ``__exit__`` removes the lock only if the owner
+    file still names this holder, so a lock another process took after a stale-lock cleanup survives.
+    """
 
     def __init__(self, path, what, poll=15.0):
         self.path, self.what, self.poll = pathlib.Path(path) if path else None, what, poll
+        self.token = f"pid {os.getpid()} token {uuid.uuid4().hex}"
 
     def __enter__(self):
         i = 0
         while self.path is not None:
             try:
                 self.path.mkdir()
-                (self.path / "owner").write_text(f"profile_root.py pid {os.getpid()} {self.what} since {time.ctime()}\n")
-                break
             except FileExistsError:
                 if i % 40 == 0:
                     owner = (self.path / "owner").read_text().strip() if (self.path / "owner").exists() else "?"
                     print(f"    waiting for {self.path} ({owner})", flush=True)
                 i += 1
                 time.sleep(self.poll)
+                continue
+            try:
+                (self.path / "owner").write_text(f"profile_root.py {self.token} {self.what} since {time.ctime()}\n")
+            except BaseException:
+                shutil.rmtree(self.path, ignore_errors=True)  # never leave an ownerless lock behind
+                raise
+            break
         return self
 
     def __exit__(self, *exc):
-        if self.path is not None:
+        if self.path is None:
+            return
+        try:
+            mine = self.token in (self.path / "owner").read_text()
+        except OSError:
+            mine = False
+        if mine:
             shutil.rmtree(self.path, ignore_errors=True)
+        else:
+            print(f"    {self.path} is no longer ours; left in place", flush=True)
+
+
+def _exit_on_signal(signum, frame):
+    """SIGTERM/SIGHUP -> SystemExit, so ``with Lock(...)`` unwinds and releases the lock."""
+    raise SystemExit(128 + signum)
 
 
 def run_one(a, w, jdir, cache, name, mode, label, opts, sets):
@@ -645,21 +670,23 @@ def main():
         plan = [("cold", label, opts, sets) for label, opts, sets in ABLATE if keep is None or label in keep]
     else:
         plan = [(mode, a.label, json.loads(a.opts or "{}"), json.loads(a.set or "{}")) for mode in a.modes.split(",")]
+    if a.lock:
+        for sig in (signal.SIGTERM, signal.SIGHUP):
+            signal.signal(sig, _exit_on_signal)
     results = {}
     new = not pathlib.Path(a.out).exists()
     with open(a.out, "a", newline="") as fh:
         w = csv.DictWriter(fh, FIELDS)
         if new:
             w.writeheader()
-        for name in a.names.split(","):
-            for mode, label, opts, sets in plan:
-                for _ in range(a.repeats):
-                    r = run_one(a, w, jdir, cache, name, mode, label, opts, sets)
-                    fh.flush()
-                    if a.lock:
-                        time.sleep(45)  # let others waiting for the lock through between runs
-                    if r is not None:
-                        results.setdefault((name, mode + label), []).append(r)
+        runs = [(name, *step) for name in a.names.split(",") for step in plan for _ in range(a.repeats)]
+        for k, (name, mode, label, opts, sets) in enumerate(runs):
+            r = run_one(a, w, jdir, cache, name, mode, label, opts, sets)
+            fh.flush()
+            if a.lock and k + 1 < len(runs):
+                time.sleep(45)  # let others waiting for the lock through between runs
+            if r is not None:
+                results.setdefault((name, mode + label), []).append(r)
     if a.ablate or a.repeats > 1:
         print(ablation_table(results))
     print(f"raw JSON in {jdir}")

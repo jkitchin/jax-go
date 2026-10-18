@@ -823,8 +823,11 @@ timing needed). Among the 7 W0 instances: hadamard_5 g (503 rows, n 26, 774k)
 and batch g (261 rows, n 46, 1.19M). Among 20 sampled start50/int50 instances
 (seed 1): tloss g (514 rows, n 48, 2.54M). Elsewhere: st_rv7 g (967k),
 pooling_rt2tp g (1.11M), clay0203m, tln5, flay04m, pooling_adhya1stp,
-kall_circlespolygons_c1p12, wastewater15m1, nous1. Only these need node-rate
-measurement. No tape changes from interpreted to straight-line.
+kall_circlespolygons_c1p12, wastewater15m1, nous1. Only the joint
+(objective + constraints) tape flips on cvxnonsep_pcon40, launch, meanvarx and
+pooling_foulds2tp. Their per-function tapes keep their previous choice, so the
+effect is limited to the paths that relax the joint tape. Only these need
+node-rate measurement. No tape changes from interpreted to straight-line.
 
 Partial data (cold, one run, `a3_kbench`: `bnb._Kernels` node bound for 16 boxes):
 
