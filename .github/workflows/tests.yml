@@ -1,0 +1,46 @@
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: pip install -e ".[dev]"
+      # The MINLPLib instances are gitignored (fetch.py downloads them); cache them so
+      # minlplib.org is hit only when the selection changes. Without them ~20 tests skip.
+      - name: Cache MINLPLib instances
+        id: minlplib
+        uses: actions/cache@v4
+        with:
+          path: |
+            benchmarks/minlplib/nl
+            benchmarks/minlplib/gms
+            benchmarks/minlplib/instancedata.csv
+          key: minlplib-${{ hashFiles('benchmarks/minlplib/fetch.py', 'benchmarks/minlplib/instances*.csv') }}
+      - name: Fetch MINLPLib instances
+        if: steps.minlplib.outputs.cache-hit != 'true'
+        run: |
+          python benchmarks/minlplib/fetch.py
+          python benchmarks/minlplib/fetch.py --integer
+      - name: Run tests
+        run: python -m pytest -q -ra tests

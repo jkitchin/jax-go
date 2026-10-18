@@ -1,6 +1,6 @@
 <p align="center"><img src="figures/logo.svg" alt="jaxglobal" width="560"></p>
 
-<p align="center"><a href="https://kitchingroup.cheme.cmu.edu/jax-go/"><img src="https://github.com/jkitchin/jax-go/actions/workflows/docs.yml/badge.svg" alt="docs"></a></p>
+<p align="center"><a href="https://kitchingroup.cheme.cmu.edu/jax-go/"><img src="https://github.com/jkitchin/jax-go/actions/workflows/docs.yml/badge.svg" alt="docs"></a> <a href="https://github.com/jkitchin/jax-go/actions/workflows/tests.yml"><img src="https://github.com/jkitchin/jax-go/actions/workflows/tests.yml/badge.svg" alt="tests"></a></p>
 
 # jaxglobal — global optimization of plain JAX functions
 
