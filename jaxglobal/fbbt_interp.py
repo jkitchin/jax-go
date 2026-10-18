@@ -33,7 +33,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import lax
 
-from .fbbt import BACK, CTX, INF, SAFE_CTX, Const, _clean, _empty, _meet2, _pad, round_integers
+from .fbbt import BACK, CTX, DOMAIN_FLOOR, INF, SAFE_CTX, Const, _clean, _empty, _meet2, _pad, round_integers
 from .relax import MC, RULES, apply_rule, is_mc
 
 # equations that only move elements: the interpreter renumbers slots, no row
@@ -213,6 +213,7 @@ def _propagate_steps(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds, integer=()):
     A, B, OUT = (jnp.asarray(v) for v in (prog.a, prog.b, prog.out))
     R = [jnp.asarray(r) for r in lay.rows]
     VALID = [jnp.asarray(r >= 0) for r in lay.rows]
+    FLOOR = [DOMAIN_FLOOR.get(oc[0]) for oc in prog.opcodes]
     START = jnp.asarray(lay.start[0])  # a step's blocks are adjacent, opcode 0's first
     T = lay.steps
     cval = jnp.asarray(np.nan_to_num(prog.const_val, nan=0.0))
@@ -260,6 +261,8 @@ def _propagate_steps(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds, integer=()):
                 idx, cl, ch, use = [], [], [], []
                 for s, l_, h_, u_ in ((a, al, ah, ua), (b, bl, bh, ub)):
                     pl, ph = _pad(l_, h_)
+                    if s is a and FLOOR[o] is not None:  # the operand of log / log1p: see fbbt.DOMAIN_FLOOR
+                        pl = jnp.maximum(pl, FLOOR[o])
                     u_ = u_ & VALID[o][t] & ~is_c[s]
                     idx.append(s)
                     cl.append(jnp.where(u_, pl, -INF))
@@ -332,6 +335,7 @@ def _propagate_rows(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds, integer=()):
     cval = jnp.asarray(np.nan_to_num(prog.const_val, nan=0.0))
     is_c = jnp.asarray(~np.isnan(prog.const_val))
     out_ids = [jnp.asarray(o) for o in prog.outs]
+    FLOOR = jnp.asarray([DOMAIN_FLOOR.get(oc[0], -np.inf) for oc in prog.opcodes], jnp.float64)
 
     def forward(P):
         """One forward sweep from the prior bounds P = (lo, hi)."""
@@ -354,8 +358,9 @@ def _propagate_rows(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds, integer=()):
             empty |= jnp.any(jnp.where(keep, (cval[ids] < zl) | (cval[ids] > zh), bad))
             lo, hi = lo.at[ids].set(jnp.where(keep, lo[ids], ml)), hi.at[ids].set(jnp.where(keep, hi[ids], mh))
 
-        def update(lo, hi, s, cl, ch, use):
+        def update(lo, hi, s, cl, ch, use, floor=-INF):
             pl, ph = _pad(cl, ch)
+            pl = jnp.maximum(pl, floor)  # the operand of log / log1p: see fbbt.DOMAIN_FLOOR
             ml, mh, bad = _meet2((lo[s], hi[s]), (pl, ph))
             use = use & ~is_c[s]
             return lo.at[s].set(jnp.where(use, ml, lo[s])), hi.at[s].set(jnp.where(use, mh, hi[s])), use & bad
@@ -365,7 +370,7 @@ def _propagate_rows(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds, integer=()):
             k = K - 1 - j
             a, b, o = A[k], B[k], OUT[k]
             al, ah, ua, bl, bh, ub = lax.switch(op[k], bwd, lo[o], hi[o], lo[a], hi[a], lo[b], hi[b])
-            lo, hi, e1 = update(lo, hi, a, al, ah, ua)
+            lo, hi, e1 = update(lo, hi, a, al, ah, ua, FLOOR[op[k]])
             lo, hi, e2 = update(lo, hi, b, bl, bh, ub)
             return lo, hi, empty | e1 | e2
 

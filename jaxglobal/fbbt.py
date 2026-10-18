@@ -172,6 +172,25 @@ def _clean(lo, hi):
     return jnp.where(jnp.isnan(lo), -INF, lo), jnp.where(jnp.isnan(hi), INF, hi)
 
 
+# Lower end of a primitive's domain (its operand): ``log(x)`` is only defined for ``x > 0``, so no
+# point of the problem has ``x`` below it. The outward padding of a backward result must not cross it:
+# ``x >= exp(-inf) = 0`` padded to ``x >= -1e-10`` put boxes partly outside log's domain, where the
+# relaxations of ``log(x)`` and ``x * log(x)`` were unbounded.
+DOMAIN_FLOOR = {"log": 0.0, "log1p": -1.0}
+
+
+# Backward rules that only move elements: their results are exact, so they are not padded (padding
+# them would also undo a domain floor on the way from a log's scalar operand back to ``x``).
+EXACT_BACK = {"slice", "squeeze", "reshape", "broadcast_in_dim", "transpose", "rev", "concatenate", "stack",
+              "expand_dims", "convert_element_type", "copy", "copy_p"}  # fmt: skip
+
+
+def _floor(name, lo):
+    """``lo`` raised to the domain floor of primitive ``name``'s operand (unchanged if it has none)."""
+    f = DOMAIN_FLOOR.get(name)
+    return lo if f is None else jnp.maximum(lo, f)
+
+
 def _pad(lo, hi):
     lo = jnp.where(jnp.isfinite(lo), lo - PAD * (1 + jnp.abs(lo)), lo)
     return lo, jnp.where(jnp.isfinite(hi), hi + PAD * (1 + jnp.abs(hi)), hi)
@@ -656,7 +675,9 @@ def _backward(tape, vals, out_bounds):
                 continue
             c = _unbcast(_clean(*c), jnp.shape(b[a][0]))
             if c is not None:
-                lo, hi, bad = _meet2(b[a], _pad(*c))
+                name = node.eqn.primitive.name
+                pl, ph = c if name in EXACT_BACK else _pad(*c)
+                lo, hi, bad = _meet2(b[a], (_floor(name, pl), ph))
                 b[a], empty = (lo, hi), empty | jnp.any(bad)
     return b, empty
 

@@ -34,7 +34,7 @@ from jax import lax
 from jax.custom_derivatives import SymbolicZero
 
 from .fbbt_interp import layout, scalarize, tape_size, use_interpreter
-from .relax import MC, apply_rule, is_mc
+from .relax import MC, apply_rule, apply_xlogx, is_mc
 
 F64 = jnp.float64
 
@@ -94,16 +94,42 @@ def _stand(name, same, n_in, eqn):
     return SimpleNamespace(primitive=eqn.primitive, params=eqn.params, invars=[v, v if same else object()][:n_in])
 
 
+def fuse_xlogx(prog):
+    """``prog`` with every row ``v * log(v)`` turned into a unary ``"xlogx"`` row on ``v``
+    (``relax.mc_xlogx``, as ``eval_jaxpr_mc`` relaxes it); the same program if there is none."""
+    names = [oc[0] for oc in prog.opcodes]
+    logs = {int(o): int(a) for op, a, o in zip(prog.op, prog.a, prog.out) if names[op] == "log"}
+    if not logs:
+        return prog
+    op, a, b = prog.op.copy(), prog.a.copy(), prog.b.copy()
+    opcodes, new = list(prog.opcodes), {}
+    for k in range(len(op)):
+        name, _, same, ca, cb, n_in, eqn = prog.opcodes[op[k]]
+        if name != "mul" or same or ca or cb:
+            continue
+        sa, sb = int(a[k]), int(b[k])
+        v = sb if logs.get(sa) == sb else sa if logs.get(sb) == sa else None
+        if v is None:
+            continue
+        if op[k] not in new:
+            new[op[k]] = len(opcodes)
+            opcodes.append(("xlogx", (), False, False, False, 1, eqn))
+        op[k], a[k], b[k] = new[op[k]], v, v
+    if not new:
+        return prog
+    return prog._replace(op=op, a=a, b=b, opcodes=opcodes)
+
+
 def _branches(prog, ctx, grads):
     out = []
     for name, _, same, ca, cb, n_in, eqn in prog.opcodes:
         stand = _stand(name, same, n_in, eqn)
 
-        def rule(u, la, ha, lb, hb, stand=stand, ca=ca, cb=cb, n_in=n_in):
+        def rule(u, la, ha, lb, hb, stand=stand, ca=ca, cb=cb, n_in=n_in, xlogx=name == "xlogx"):
             args = [la if ca else MC(la, ha, u[0], u[1])]
             if n_in > 1:
                 args.append(lb if cb else MC(lb, hb, u[2], u[3]))
-            o = apply_rule(ctx, stand, args)
+            o = apply_xlogx(ctx, stand, args[0]) if xlogx else apply_rule(ctx, stand, args)
             o = o if is_mc(o) else MC(o, o, o, o)
             return jnp.stack([jnp.reshape(jnp.asarray(c, F64), ()) for c in o])
 
@@ -166,6 +192,7 @@ def make_mc(tape, n, ctx, blocks=()):
     prog = scalarize(tape, n)
     if prog is None or len(prog.op) == 0 or len(tape.outs) != 1:
         return None
+    prog = fuse_xlogx(prog)
     lay = layout(prog)
     prog = lay.prog
     try:
