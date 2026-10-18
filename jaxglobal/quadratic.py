@@ -279,8 +279,9 @@ def ineq_rlt(Q, n, max_support=None, max_pairs=None):
     the secant of ``d^2`` over ``[0, u_j - l_i]`` instead of over ``[l_i - u_j, u_j - l_i]``,
     which the McCormick facets of the three products alone give (circle packing with ordered
     identical circles, kall_circles_*). At most ``max_pairs`` pairs (default: ``RLT_PAIRS``
-    per product column), those with ``k`` in the row's support first, then those of rows with at
-    most ``SMALL_RLT_SUPPORT`` variables."""
+    per product column): those of rows with at most ``SMALL_RLT_SUPPORT`` variables first, so a
+    wide row never displaces one of theirs, and within each group those with ``k`` in the row's
+    support first."""
     P = len(Q.pairs)
     max_pairs = int(RLT_PAIRS * P) if max_pairs is None else max_pairs
     max_support = MAX_RLT_SUPPORT if max_support is None else max_support
@@ -289,7 +290,7 @@ def ineq_rlt(Q, n, max_support=None, max_pairs=None):
     for a, b in col:
         partners.setdefault(a, set()).add(b)
         partners.setdefault(b, set()).add(a)
-    cand = []  # (k not in the row's support, wide row, row, k): a factor of the row's own variables first
+    cand = []  # (wide row, k not in the row's support, row, k): short rows, then a factor of the row's own variables
     for r in range(Q.n_g):
         row = Q.E[1 + r]
         if np.any(row[n:] != 0):
@@ -298,7 +299,7 @@ def ineq_rlt(Q, n, max_support=None, max_pairs=None):
         if not 2 <= len(supp) <= max_support:
             continue
         common = set.intersection(*(partners.get(m, set()) | ({m} if (m, m) in col else set()) for m in supp))
-        cand += [(k not in supp, len(supp) > SMALL_RLT_SUPPORT, r, k) for k in sorted(common)]
+        cand += [(len(supp) > SMALL_RLT_SUPPORT, k not in supp, r, k) for k in sorted(common)]
     gi, gk, er, ec, ew, ea, ek = [], [], [], [], [], [], []
     for _, _, r, k in sorted(cand)[:max_pairs]:
         row = Q.E[1 + r]
