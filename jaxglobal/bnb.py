@@ -602,7 +602,7 @@ def _round_bounds(lo, hi, mask):
     return lo, hi
 
 
-_REPAIR_SIZE = 2_000_000  # integer repair: largest rows x variables Jacobian it extracts (else it is off)
+_REPAIR_SIZE = 10_000  # integer repair: largest rows x variables Jacobian it extracts (else it is off; the eager read takes seconds beyond)
 _REPAIR_STEPS = 64  # integer repair: most +-1 moves per rounded point
 _REPAIR_SWAPS = 200  # integer repair: swap moves (one +1, another -1) only with at most this many integers
 _REPAIR_PTS = 4  # integer repair: most rounded relaxation points repaired per batch of local solves
