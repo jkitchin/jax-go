@@ -157,3 +157,17 @@ def test_probing_keeps_the_optimum():
     want = float(ref["primalbound"])
     assert r.lower_bound <= want + 1e-4 * (1 + abs(want))
     assert r.status == "optimal" and abs(r.fun - want) <= 1e-4 * (1 + abs(want))
+
+
+@pytest.mark.parametrize("safe", [False, True])
+@pytest.mark.parametrize("branch_var", ["width", "pseudocost"])
+def test_point_boxes_close(branch_var, safe):
+    """x0^2 + x1^2 = 7 has no integer solution: boxes shrunk to a point are evaluated exactly and
+    closed (they were split into copies of themselves, kept open by a huge finite bound, until
+    max_iter: 24063 nodes). With 13 instead of 7 the point (2, 3) is the optimum."""
+    f = lambda x: x[0] ** 2 * x[1]  # noqa: E731
+    kw = dict(integer=[0, 1], max_iter=500, branch_var=branch_var, safe=safe)
+    r = minimize(f, [0.0, 0.0], [5.0, 5.0], eq=lambda x: jnp.array([x[0] ** 2 + x[1] ** 2 - 7.0]), **kw)
+    assert r.status == "infeasible" and r.nodes < 500
+    r = minimize(f, [0.0, 0.0], [5.0, 5.0], eq=lambda x: jnp.array([x[0] ** 2 + x[1] ** 2 - 13.0]), **kw)
+    assert r.status == "optimal" and r.fun == pytest.approx(12.0) and np.allclose(r.x, [2.0, 3.0])

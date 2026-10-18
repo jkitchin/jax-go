@@ -1590,6 +1590,19 @@ def minimize(
     converged = False
     for it in range(1, max_iter + 1):
         open_lb = np.where(np.isnan(open_lb), -np.inf, open_lb)  # NaN bound = no information
+        point = (open_lo == open_hi).all(axis=1)
+        if point.any():
+            # a box shrunk to one point holds just that point: evaluated exactly (``screen``, the
+            # incumbent check), it becomes the incumbent if it is one, and the box closes either
+            # way. Otherwise splitting copies it, and with no incumbent to prune against a bound
+            # that is huge but finite (x0^2 + x1^2 = 7 over integers: 1.6e266) kept the copies
+            # open until max_iter.
+            Fp = screen(open_lo[point])
+            i = int(np.argmin(Fp))
+            if Fp[i] < ub:
+                ub, xbest = float(Fp[i]), open_lo[point][i].copy()
+            keep_pt = ~point
+            open_lo, open_hi, open_lb, open_xr = open_lo[keep_pt], open_hi[keep_pt], open_lb[keep_pt], open_xr[keep_pt]
         keep = open_lb < ub - tol()
         if not keep.all():
             pruned_lb = min(pruned_lb, float(open_lb[~keep].min()))
