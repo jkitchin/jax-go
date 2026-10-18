@@ -1,7 +1,7 @@
 site_name: jaxglobal
 site_description: Deterministic global optimization of plain JAX functions via jaxpr-derived relaxations
 site_author: John Kitchin
-site_url: https://jkitchin.github.io/jax-go/
+site_url: https://kitchingroup.cheme.cmu.edu/jax-go/
 repo_url: https://github.com/jkitchin/jax-go
 repo_name: jkitchin/jax-go
 edit_uri: ""
