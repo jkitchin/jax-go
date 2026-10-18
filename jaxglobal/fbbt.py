@@ -614,8 +614,14 @@ def _b_select(eqn, Z, pred, *cases):
 # ---------------------------------------------------------------------------
 
 
-def _forward(tape, x_bounds, prior, safe=False):
-    """Interval value of every slot; ``prior`` holds earlier bounds per slot."""
+def _forward(tape, x_bounds, prior, safe=False, guarded=frozenset(), fbad=None):
+    """Interval value of every slot; ``prior`` holds earlier bounds per slot.
+
+    A ``guarded`` slot (see ``guarded_slots``) may only be used in an arm of a ``jnp.where`` that
+    is not taken, where its value is irrelevant (``log(x)`` at ``x < 0``): an empty interval there
+    does not make the box empty. Its empty elements become unbounded and their flags go to
+    ``fbad`` (a dict), which ``_backward`` counts only where the slot is used unconditionally.
+    """
     vals = {0: MC(x_bounds[0], x_bounds[1], x_bounds[0], x_bounds[1])}
     empty = jnp.array(False)
 
@@ -639,15 +645,76 @@ def _forward(tape, x_bounds, prior, safe=False):
                     lo, hi, bad = _meet2((lo, hi), prior[s])  # a met interval is empty iff the meet was
                 else:
                     bad = _empty(lo, hi)
-                empty |= jnp.any(bad)
+                if s in guarded:
+                    lo, hi = jnp.where(bad, -INF, lo), jnp.where(bad, INF, hi)
+                    if fbad is not None:
+                        fbad[s] = bad
+                else:
+                    empty |= jnp.any(bad)
                 vals[s] = MC(lo, hi, lo, hi)
             else:
                 vals[s] = o
     return vals, empty
 
 
-def _backward(tape, vals, out_bounds):
+# Elementwise primitives: output element i depends on input element i only, so the activity of
+# output element i (``_backward``) is that of input element i.
+ELEMENTWISE_BACK = {"add", "add_any", "sub", "mul", "div", "neg", "exp", "exp2", "expm1", "log", "log1p", "sqrt",
+                    "rsqrt", "cbrt", "integer_pow", "square", "abs", "max", "min", "tanh", "logistic", "erf", "erfc",
+                    "sin", "cos", "tan", "atan", "asinh", "sinh", "cosh", "pow", "one_minus_square", "sign",
+                    "select_n", "clamp", "gt", "ge", "lt", "le", "eq", "ne", "and", "or", "not"}  # fmt: skip
+
+
+def guarded_slots(tape):
+    """Slots whose value may be irrelevant at some points: used, directly or through other
+    equations, only as a case of a ``select_n`` (``jnp.where``).
+
+    ``jnp.where(x > 0.5, jnp.log(x), 0.0)`` evaluates ``log(x)`` at every point but uses it only
+    where ``x > 0.5``, so neither its domain (``x > 0``) nor its interval may narrow ``x`` at the
+    other points. Every other slot is used unconditionally: its value enters an output (or a
+    predicate) at every point, so the backward rules may narrow its inputs.
+    """
+    users = {}
+    for node in tape.nodes:
+        for i, a in enumerate(node.ins):
+            if not isinstance(a, Const):
+                users.setdefault(a, []).append((node, i))
+    sure = {a for a in tape.outs if not isinstance(a, Const)}
+    for node in reversed(tape.nodes):
+        if not all(s in sure or s not in users for s in node.outs):
+            continue
+        cases = node.eqn.primitive.name == "select_n"
+        p = node.ins[0] if cases else None
+        for i, a in enumerate(node.ins):
+            if isinstance(a, Const):
+                continue
+            if cases and i > 0:
+                if not (isinstance(p, Const) and np.all(np.asarray(p.val).astype(np.int32) == i - 1)):
+                    continue
+            sure.add(a)
+    return frozenset(s for s in tape.shapes if s != 0 and s not in sure)
+
+
+def _fit(m, shape, elementwise):
+    """Activity mask ``m`` of an equation's output, as a mask for an operand-shaped array.
+
+    Elementwise (same shape): element by element; otherwise an operand element counts as used
+    only if every output element is (always safe: it only withholds narrowing)."""
+    if m is True:
+        return True
+    if elementwise and (jnp.shape(m) == tuple(shape) or jnp.ndim(m) == 0):
+        return jnp.broadcast_to(m, shape)
+    return jnp.broadcast_to(jnp.all(m), shape)
+
+
+def _backward(tape, vals, out_bounds, guarded=frozenset(), fbad=None):
+    """One backward sweep. Narrowing from an equation's output reaches its operands only at the
+    elements where the output is used unconditionally (``act``): a ``select_n`` passes activity to
+    a case only where the predicate is decided for it, so nothing (no domain of ``log``, no
+    interval of an arm) narrows the operands of the arm that is not taken."""
+    fbad = fbad or {}
     b = {s: (v.lo, v.hi) for s, v in vals.items() if is_mc(v)}
+    act = {}  # guarded slot -> bool mask of its elements used unconditionally (OR over its users)
     empty = jnp.array(False)  # a met interval stays crossed (never reordered) iff some meet was empty
     for a, z in zip(tape.outs, out_bounds):
         if not isinstance(a, Const) and a in b and z is not None:
@@ -661,8 +728,42 @@ def _backward(tape, vals, out_bounds):
             return MC(b[a][0], b[a][1], b[a][0], b[a][1])
         return vals[a]
 
+    def shape(a):
+        return jnp.shape(a.val) if isinstance(a, Const) else tape.shapes[a][0]
+
     for node in reversed(tape.nodes):
-        rule = BACK.get(node.eqn.primitive.name)
+        name = node.eqn.primitive.name
+        elementwise = name in ELEMENTWISE_BACK
+        # activity of this equation's output: True (statically) unless it is a guarded slot
+        m = True
+        for s in node.outs:
+            if s in guarded:
+                ms = act.get(s, False)
+                if s in fbad:  # an empty forward interval matters only where the slot is used
+                    empty |= jnp.any(fbad[s] & ms)
+                m = ms if m is True else m & _fit(ms, jnp.shape(m), elementwise)
+        if m is not True:
+            m = jnp.asarray(m)
+        if guarded:
+            sel = None
+            if name == "select_n":
+                pv = cur(node.ins[0])
+                if isinstance(pv, Unknown) and len(node.ins) == 3:
+                    sel = [pv.sure_false, pv.sure_true]
+                elif not is_mc(pv) and not isinstance(pv, Unknown):
+                    sel = [jnp.asarray(pv).astype(jnp.int32) == k for k in range(len(node.ins) - 1)]
+            for i, a in enumerate(node.ins):
+                if isinstance(a, Const) or a not in guarded:
+                    continue
+                if name == "select_n" and i > 0:
+                    mi = False if sel is None else jnp.broadcast_to(sel[i - 1], shape(node.outs[0])) & (
+                        True if m is True else m)
+                    mi = _fit(mi, shape(a), True) if mi is not False else False
+                else:
+                    mi = jnp.ones(shape(a), bool) if m is True else _fit(m, shape(a), elementwise)
+                if mi is not False:
+                    act[a] = mi if a not in act else act[a] | mi
+        rule = BACK.get(name)
         if rule is None or not all(s in b for s in node.outs):
             continue
         ins = [cur(a) for a in node.ins]
@@ -673,12 +774,23 @@ def _backward(tape, vals, out_bounds):
         for a, c in zip(node.ins, cands):
             if c is None or isinstance(a, Const) or a not in b:
                 continue
-            c = _unbcast(_clean(*c), jnp.shape(b[a][0]))
-            if c is not None:
-                name = node.eqn.primitive.name
+            c = _clean(*c)
+            if m is True:
+                c = _unbcast(c, jnp.shape(b[a][0]))
+                if c is None:
+                    continue
                 pl, ph = c if name in EXACT_BACK else _pad(*c)
-                lo, hi, bad = _meet2(b[a], (_floor(name, pl), ph))
-                b[a], empty = (lo, hi), empty | jnp.any(bad)
+                pl = _floor(name, pl)
+            else:  # narrow only the elements used unconditionally, the domain floor included
+                pl, ph = c if name in EXACT_BACK else _pad(*c)
+                pl = _floor(name, pl)
+                mc = _fit(m, jnp.broadcast_shapes(jnp.shape(pl), jnp.shape(ph)), elementwise)
+                c = _unbcast((jnp.where(mc, pl, -INF), jnp.where(mc, ph, INF)), jnp.shape(b[a][0]))
+                if c is None:
+                    continue
+                pl, ph = c
+            lo, hi, bad = _meet2(b[a], (pl, ph))
+            b[a], empty = (lo, hi), empty | jnp.any(bad)
     return b, empty
 
 
@@ -725,7 +837,8 @@ def propagate(tape, lo, hi, out_bounds, rounds, safe=False, integer=()):
     # abstract evaluation instead of tracing a first forward sweep whose
     # result the first round would recompute (a round starts with a sweep
     # against the earlier bounds, here none: the box and unbounded slots).
-    shapes = jax.eval_shape(lambda l, h: _forward(tape, (l, h), {}, safe)[0], lo, hi)
+    guarded = guarded_slots(tape)
+    shapes = jax.eval_shape(lambda l, h: _forward(tape, (l, h), {}, safe, guarded)[0], lo, hi)
     slots = sorted(s for s, v in shapes.items() if is_mc(v))
     empty = jnp.array(False)
     # a constant output that violates its constraint makes every box infeasible
@@ -742,8 +855,9 @@ def propagate(tape, lo, hi, out_bounds, rounds, safe=False, integer=()):
     def body(_, carry):
         bounds, empty = carry
         prior = dict(zip(slots, bounds))
-        vals, e1 = _forward(tape, prior[0], prior, safe)
-        b, e2 = _backward(tape, vals, live)
+        fbad = {}
+        vals, e1 = _forward(tape, prior[0], prior, safe, guarded, fbad)
+        b, e2 = _backward(tape, vals, live, guarded, fbad)
         new = [fix(s, b[s]) for s in slots]
         xl, xh, e3 = round_integers(*new[0], integer)  # slot 0 (x) is first: slots are sorted
         new[0] = (xl, xh)
@@ -752,7 +866,7 @@ def propagate(tape, lo, hi, out_bounds, rounds, safe=False, integer=()):
     init = tuple(fix(s, (lo, hi) if s == 0 else (-INF, INF)) for s in slots)
     bounds, empty = lax.fori_loop(0, rounds, body, (init, empty))
     prior = dict(zip(slots, bounds))
-    vals, e = _forward(tape, prior[0], prior, safe)
+    vals, e = _forward(tape, prior[0], prior, safe, guarded)
     return vals, empty | e
 
 
