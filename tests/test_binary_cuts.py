@@ -1,10 +1,12 @@
 """Cuts on the lifted polynomial LP of binary problems (quadratic._binary_cuts, _separate), the
-objective lattice (_lattice, _snap), rows idle on the box (_unit) and the column cap for degree > 2.
+objective lattice (_lattice, _snap), rows idle on the box (_unit), the column cap for degree > 2 and
+the complement symmetry (_flip and the fix x_flip = 1 in the search).
 
 Tests: every cut holds at every binary point; the cuts are off on boxes where a binary is not in
 [0, 1]; the bound (cuts, separation and lattice rounding) is below the enumerated minimum on random
 fixings, plain and safe; the IPM matches HiGHS on boxes with fixed binaries (it stalled there on
-the rows that hold on the whole box); the lattice detection and its box-bound case; the search."""
+the rows that hold on the whole box); the lattice detection and its box-bound case; the search;
+the symmetry detection (and its refusals) and the search with the fix, plain and safe."""
 
 import itertools
 
@@ -224,3 +226,49 @@ def test_minimize_binary_polynomial(safe):
     assert r.status == "optimal" and r.verified
     assert r.fun == pytest.approx(-best, abs=1e-5)
     assert r.lower_bound <= -best + 1e-6
+
+
+def autocorr(n, K, extra=0.0):
+    """Low-autocorrelation energy sum_k C_k^2, C_k = sum_i s_i s_{i+k}, s = 2 x - 1 (invariant under
+    x -> 1 - x), plus ``extra`` x_0 (which breaks that); as an epigraph min t, t >= E(x)."""
+
+    def E(x):
+        s = 2.0 * x[:n] - 1.0
+        return sum(sum(s[i] * s[i + k] for i in range(n - k)) ** 2 for k in range(1, K + 1)) + extra * x[0]
+
+    return (lambda x: x[n]), (lambda x: jnp.stack([E(x) - x[n]])), E
+
+
+def test_flip_detection():
+    n = 6
+    f, g, _ = autocorr(n, 2)
+    Q = polynomial_form(f, g, None, n + 1, integer=np.arange(n))
+    assert 0 <= Q.flip < n
+    f, g, _ = autocorr(n, 2, extra=1.0)  # not invariant
+    assert polynomial_form(f, g, None, n + 1, integer=np.arange(n)).flip == -1
+    f, g, _ = autocorr(n, 2, extra=0.0)
+    g3 = lambda x: g(x) * 0.1  # noqa: E731  (inexact coefficients: no claim)
+    assert polynomial_form(f, g3, None, n + 1, integer=np.arange(n)).flip == -1
+    assert polynomial_form(f, g, None, n + 1, integer=None).flip == -1  # no integers given
+    # an equality h with h o sigma = -h keeps the feasible set
+    h = lambda x: jnp.stack([x[0] + x[1] - 1.0])  # noqa: E731
+    assert polynomial_form(f, g, h, n + 1, integer=np.arange(n)).flip >= 0
+    h2 = lambda x: jnp.stack([x[0] - 1.0])  # noqa: E731  (x_0 = 1 is not symmetric)
+    assert polynomial_form(f, g, h2, n + 1, integer=np.arange(n)).flip == -1
+
+
+@pytest.mark.parametrize("safe", [False, True])
+@pytest.mark.parametrize("extra,int_hi", [(0.0, 1.0), (0.5, 1.0), (0.0, 2.0)])
+def test_minimize_with_flip(safe, extra, int_hi):
+    """The search (with the fix x_flip = 1 when it applies) proves the enumerated minimum; with a
+    variable allowed up to 2 the fix is not made, and the minimum is over {0, 1, 2} for it."""
+    n = 7
+    f, g, E = autocorr(n, 2, extra)
+    pts = [np.r_[x, v] for x in binary_points(n - 1) for v in ([0.0, 1.0, 2.0] if int_hi == 2.0 else [0.0, 1.0])]
+    best = min(float(E(jnp.asarray(np.r_[x, 0.0]))) for x in pts)
+    lo, hi = np.r_[np.zeros(n), -1e3], np.r_[np.ones(n - 1), int_hi, 1e3]
+    r = jaxglobal.minimize(f, lo, hi, ineq=g, integer=np.arange(n), rel_tol=1e-6, abs_tol=1e-6, safe=safe,
+                           time_limit=120)  # fmt: skip
+    assert r.status == "optimal"
+    assert r.fun == pytest.approx(best, abs=1e-5)
+    assert r.lower_bound <= best + 1e-6

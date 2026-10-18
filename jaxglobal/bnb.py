@@ -881,6 +881,10 @@ def minimize(
     branchable = nl | imask
     _mark("quadratic")
     quad = K.quadratic(lo.size) if constrained else None  # the lifted quadratic LP's form, if used
+    lf = K.lifted_form(lo.size) if constrained and not lifted else None
+    if lf is not None and lf.flip >= 0 and np.all(lo[imask] == 0.0) and np.all(hi[imask] == 1.0):
+        lo = lo.copy()  # complement symmetry (quadratic._flip): x_flip = 1 keeps an optimal point
+        lo[lf.flip] = 1.0
     width0 = np.where(branchable, width0, np.inf)  # never split linear variables
 
     _mark("make_local")

@@ -104,6 +104,9 @@ class QuadraticForm(NamedTuple):
     # objective lattice (``_lattice``): a ``Lattice`` when every value
     # of the objective at an integer feasible point is offset + step * k (k integer), or None
     lattice: tuple = None
+    # complement symmetry (``_flip``): an integer variable that may be fixed to 1 on a root box
+    # where every integer variable is binary, or -1
+    flip: int = -1
 
 
 def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS, integer=None, max_poly_columns=None):
@@ -126,11 +129,16 @@ def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS, integer=No
         return None
     cval = prog.const_val
     polys = {}
+    exact = [True]  # every constant and coefficient so far an integer below 2^50: the dicts are exact
+
+    def small_int(v):
+        return float(v).is_integer() and abs(v) < 2.0**50
 
     def poly(s):  # {(): c, (i,): a, (i, j): q, ...}: monomials as sorted tuples of variables
         if s < n:
             return {(s,): 1.0}
         if not np.isnan(cval[s]):
+            exact[0] = exact[0] and small_int(cval[s])
             return {(): float(cval[s])}
         return polys[s]
 
@@ -138,6 +146,7 @@ def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS, integer=No
         r = dict(p)
         for k, v in q.items():
             r[k] = r.get(k, 0.0) + a * v
+            exact[0] = exact[0] and small_int(r[k])
         return r
 
     def mul(p, q):
@@ -150,6 +159,7 @@ def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS, integer=No
                 if len(k) > degree:
                     return None
                 r[k] = r.get(k, 0.0) + v1 * v2
+                exact[0] = exact[0] and small_int(v1 * v2) and small_int(r[k])
         return r
 
     def power(p, y):
@@ -179,6 +189,7 @@ def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS, integer=No
         elif name == "mul":
             r = mul(pa, pb)
         elif name == "div" and set(pb) == {()}:
+            exact[0] = exact[0] and abs(pb[()]) == 1.0
             r = {k: v / pb[()] for k, v in pa.items()}
         elif name == "square":
             r = mul(pa, pa)
@@ -243,6 +254,9 @@ def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS, integer=No
     if integer is not None and degree > 2:
         ints = set(np.asarray(integer, np.int64).reshape(-1).tolist())
         Q = Q._replace(**_binary_cuts(col, n, ints), lattice=_lattice(Q, col, n, ints))
+        if exact[0]:
+            Q = Q._replace(flip=_flip(rows[0][0], rows[1] if ineq is not None else [],
+                                      rows[-1] if eq is not None else [], ints))
     return ineq_rlt(Q, n) if degree == 2 else Q
 
 
@@ -302,6 +316,50 @@ def ineq_rlt(Q, n, max_support=None, max_pairs=None):
     i64 = lambda v: np.asarray(v, np.int64)  # noqa: E731
     return Q._replace(qr_g=i64(gi), qr_var=i64(gk), qr_row=i64(er), qr_col=i64(ec), qr_w=np.asarray(ew),
                       qr_a=np.asarray(ea), qr_k=np.asarray(ek))  # fmt: skip
+
+
+def _flip(f, gs, hs, ints):
+    """An integer variable ``i`` that may be fixed to 1 by complement symmetry, or -1.
+
+    Let ``sigma`` map ``x_k`` to ``1 - x_k`` for every integer ``k`` and leave the others. When the
+    polynomials (exact: integer coefficients, ``quadratic_form``) satisfy ``f o sigma = f``,
+    ``g o sigma = g`` and ``h o sigma = +-h`` as polynomials, ``sigma`` maps the feasible set of a
+    box whose integer variables are all binary onto itself and keeps ``f``. Of ``x`` and
+    ``sigma(x)`` one has ``x_i = 1``, so fixing ``x_i = 1`` keeps an optimal point and the optimal
+    value: a bound of the restricted problem is a bound of the problem. ``i`` is the integer
+    variable in the most monomials (an epigraph objective ``t`` has its polynomial in a row)."""
+
+    def clean(p):
+        return {k: int(v) for k, v in p.items() if v != 0.0}
+
+    def sigma(p):
+        out = {}
+        for k, v in p.items():
+            keep = [i for i in k if i not in ints]
+            flip = [i for i in k if i in ints]
+            for mask in range(1 << len(flip)):  # prod (1 - x_i): the subsets of flip, signed
+                chosen = [i for b, i in enumerate(flip) if mask >> b & 1]
+                m = tuple(sorted(keep + chosen))
+                out[m] = out.get(m, 0) + (-1) ** len(chosen) * v
+        return {k: v for k, v in out.items() if v != 0}
+
+    count = {}
+    for p in [f, *gs, *hs]:
+        for k in clean(p):
+            for i in set(k) & ints:
+                count[i] = count.get(i, 0) + 1
+    if not count:
+        return -1
+    for p in [f, *gs]:
+        q = clean(p)
+        if sigma(q) != q:
+            return -1
+    for p in hs:
+        q = clean(p)
+        sq = sigma(q)
+        if sq != q and sq != {k: -v for k, v in q.items()}:
+            return -1
+    return max(sorted(count), key=lambda i: count[i])
 
 
 def polynomial_form(f, ineq, eq, n, degree=MAX_DEGREE, max_columns=MAX_COLUMNS, integer=None,
