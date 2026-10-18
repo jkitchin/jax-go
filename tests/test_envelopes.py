@@ -116,6 +116,23 @@ def test_lifted_bound_unconstrained(p):
         assert lb <= fmin + 1e-8 * (1 + abs(fmin))
 
 
+def test_lifted_bound_constant_outputs():
+    """An objective or constraint vector that does not depend on x (fuzz cases 126 and 78) has
+    no MC slot in the lifted LP: it enters as E = 0, c = value instead of raising a KeyError."""
+    lo, hi = jnp.asarray([-1.0, 0.0]), jnp.asarray([1.0, 2.0])
+    lb = jax.jit(make_lifted_bounder(lambda x: jnp.asarray(1.76, x.dtype)))(lo, hi)[0]
+    assert float(lb) <= 1.76 + 1e-9
+    f = lambda x: x[0] * x[1]  # noqa: E731  min -2 on the box
+    g_ok = lambda x: jnp.stack([jnp.asarray(1.77, x.dtype) ** 2 - 4.0])  # noqa: E731  always satisfied
+    lb, _, inf, _, _ = jax.jit(make_lifted_bounder(f, g_ok, tol=1e-6))(lo, hi, jnp.inf)
+    assert not bool(inf) and float(lb) <= -2.0 + 1e-6
+    g_bad = lambda x: jnp.stack([jnp.asarray(1.77, x.dtype) ** 2 - 3.0])  # noqa: E731  never satisfied
+    lb, _, inf, _, _ = jax.jit(make_lifted_bounder(f, g_bad, tol=1e-6))(lo, hi, jnp.inf)
+    # the zero row 0 <= tol - c is dropped by the LP's row scaling (no infeasibility claim:
+    # weaker, never wrong); FBBT on the constraint outputs is what proves such a box empty
+    assert bool(inf) or float(lb) <= -2.0 + 1e-6
+
+
 @pytest.mark.parametrize("name", ["styblinski_tang_3d", "six_hump_camel", "shubert"])
 def test_univariate_reduces_nodes(name):
     p = next(q for q in PROBLEMS if q.name == name)

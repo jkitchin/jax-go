@@ -41,21 +41,35 @@ from .lp import EPS, reduce_ranges
 from .relax import SAFE_K
 
 MAX_COLUMNS = 400  # beyond this the IPM's N x N solve per iteration costs more than it gains
+MAX_DEGREE = 6  # polynomial_form: highest monomial degree lifted
+MAX_TERMS = 20000  # polynomial_form: give up when an intermediate polynomial has more terms
+# polynomial_form: give up when a factor (a.x + b) that gets multiplied out has |b| / max|a| above
+# this. Expanding (x - c)^k around 0 replaces one convex term by monomials whose McCormick gaps
+# grow with c while the function's own variation does not; the reduced-space bounder relaxes
+# the factored term directly. Measured on min (x0-c)^4 + (x1-c-1)^2 (x0-c+2)^2 (offset ~c):
+# 15 / 63 / 255 / 511 / 1023 nodes at c = 0 / 2 / 5 / 10 / 20, time limit from c = 50 (safe) or
+# 100 (plain), where the reduced-space path takes 1 node. start50/int50 offsets: alkyl 8.5,
+# ex1252a 3.5, all other polynomial-path instances 0. Not applied at degree 2.
+OFFSET_LIMIT = 10.0
 
 
 class QuadraticForm(NamedTuple):
     E: np.ndarray  # (R, N) rows [f, g..., h...] linear in v = (x, w)
     c: np.ndarray  # (R,) constants
-    pairs: np.ndarray  # (P, 2) i <= j: the product of column n + p
+    pairs: np.ndarray  # (P, 2) a <= b: column n + p is v_a * v_b (a, b < n + p; both < n when quadratic)
     n_g: int
     n_h: int
     rlt: np.ndarray  # (T, N) RLT rows: a linear equality times x_v, linear in v (= 0)
     rlt_var: np.ndarray  # (T,) the v of each
+    level: np.ndarray = np.zeros(0, np.int64)  # (P,) 1 + the larger level of the factors (x: level 0)
 
 
-def quadratic_form(f, ineq, eq, n):
-    """The problem as ``QuadraticForm``, or None if some function is not quadratic, the tape
-    cannot be scalarized, or the lifted LP would have more than ``MAX_COLUMNS`` columns."""
+def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS):
+    """The problem as ``QuadraticForm``, or None if some function is not a polynomial of degree
+    at most ``degree``, the tape cannot be scalarized, or the lifted LP would have more than
+    ``max_columns`` columns. With ``degree=2`` the columns are the products ``x_i x_j``; above,
+    every monomial of degree >= 2 gets a column that is the product of two earlier columns
+    (``_lift``), so McCormick facets apply recursively."""
     from .fbbt import _has_tracer, joint_tape
     from .fbbt_interp import scalarize
 
@@ -69,7 +83,7 @@ def quadratic_form(f, ineq, eq, n):
     cval = prog.const_val
     polys = {}
 
-    def poly(s):  # {(): c, (i,): a, (i, j): q} with i <= j
+    def poly(s):  # {(): c, (i,): a, (i, j): q, ...}: monomials as sorted tuples of variables
         if s < n:
             return {(s,): 1.0}
         if not np.isnan(cval[s]):
@@ -83,18 +97,35 @@ def quadratic_form(f, ineq, eq, n):
         return r
 
     def mul(p, q):
+        if p is None or q is None or len(p) * len(q) > MAX_TERMS:
+            return None
         r = {}
         for k1, v1 in p.items():
             for k2, v2 in q.items():
                 k = tuple(sorted(k1 + k2))
-                if len(k) > 2:
+                if len(k) > degree:
                     return None
                 r[k] = r.get(k, 0.0) + v1 * v2
         return r
 
+    def power(p, y):
+        r = {(): 1.0}
+        for _ in range(y):
+            r = mul(r, p)
+        return r
+
+    def offset(p):  # |constant term| / largest |coefficient| of a non-constant term (0: no offset)
+        lin = max((abs(v) for k, v in p.items() if k), default=0.0)
+        return abs(p.get((), 0.0)) / lin if lin > 0 else 0.0
+
+    worst_offset = 0.0
     for o, a, b, out in zip(prog.op.tolist(), prog.a.tolist(), prog.b.tolist(), prog.out.tolist()):
         name, eqn = prog.opcodes[o][0], prog.opcodes[o][6]
         pa, pb = poly(a), poly(b)
+        if degree > 2 and name in ("mul", "square", "integer_pow"):
+            for p in (pa, pb) if name == "mul" else (pa,):
+                if any(len(k) >= 1 for k in p):  # a product of a non-constant factor (x - c): expanded
+                    worst_offset = max(worst_offset, offset(p))
         if name in ("add", "add_any"):
             r = axpy(pa, pb)
         elif name == "sub":
@@ -105,29 +136,43 @@ def quadratic_form(f, ineq, eq, n):
             r = mul(pa, pb)
         elif name == "div" and set(pb) == {()}:
             r = {k: v / pb[()] for k, v in pa.items()}
-        elif name == "square" or (name == "integer_pow" and eqn.params["y"] == 2):
+        elif name == "square":
             r = mul(pa, pa)
-        elif name == "integer_pow" and eqn.params["y"] == 1:
-            r = pa
+        elif name == "integer_pow" and 1 <= eqn.params["y"] <= degree:
+            r = power(pa, eqn.params["y"])
         else:
             return None
-        if r is None:
+        if r is None or len(r) > MAX_TERMS:
             return None
         polys[out] = r
 
+    if worst_offset > OFFSET_LIMIT:
+        return None
     rows = [[poly(int(s)) for s in np.asarray(slots).reshape(-1).tolist()] for slots in prog.outs]
     flat = [p for group in rows for p in group]
-    pairs = sorted({k for p in flat for k in p if len(k) == 2 and p[k] != 0.0})
-    if not pairs or n + len(pairs) > MAX_COLUMNS:
+    monos = {k for p in flat for k in p if len(k) >= 2 and p[k] != 0.0}
+    if not monos:
         return None
-    col = {k: n + i for i, k in enumerate(pairs)}
-    E, c = np.zeros((len(flat), n + len(pairs))), np.zeros(len(flat))
+    factors = _lift(monos)
+    if factors is None or n + len(factors) > max_columns:
+        return None
+    order = sorted(factors, key=lambda k: (len(k), k))  # factors before products (degree 2: sorted pairs)
+    col = {k: n + i for i, k in enumerate(order)}
+
+    def column(k):
+        return k[0] if len(k) == 1 else col[k]
+
+    pairs = np.asarray([sorted((column(factors[k][0]), column(factors[k][1]))) for k in order], np.int64)
+    level = np.zeros(n + len(order), np.int64)
+    for p, (a, b) in enumerate(pairs):
+        level[n + p] = 1 + max(level[a], level[b])
+    E, c = np.zeros((len(flat), n + len(order))), np.zeros(len(flat))
     for r, p in enumerate(flat):
         for k, v in p.items():
             if len(k) == 0:
                 c[r] += v
-            else:
-                E[r, k[0] if len(k) == 1 else col[k]] += v
+            elif len(k) == 1 or k in col:  # a product whose coefficient cancelled to 0.0 has no column
+                E[r, column(k)] += v
     n_g = len(rows[1]) if ineq is not None else 0
     n_h = len(rows[-1]) if eq is not None else 0
     # RLT: a linear equality a.x + c = 0 times a variable x_v of some product gives
@@ -135,24 +180,62 @@ def quadratic_form(f, ineq, eq, n):
     # (no new columns: the LP keeps its size, and on pooling models these rows carry
     # the strengthening of the full RLT system).
     rlt, rlt_var = [], []
-    prod_vars = sorted({i for k in pairs for i in k})
+    prod_vars = sorted({i for k in col for i in k})
     for p in (rows[-1] if eq is not None else []):
-        if any(len(k) == 2 for k in p) or not any(len(k) == 1 and v for k, v in p.items()):
+        if any(len(k) >= 2 for k in p) or not any(len(k) == 1 and v for k, v in p.items()):
             continue
         for v in prod_vars:
             terms = [(tuple(sorted((k[0], v))), a) for k, a in p.items() if len(k) == 1 and a != 0.0]
             if all(k in col for k, _ in terms):
-                row = np.zeros(n + len(pairs))
+                row = np.zeros(n + len(order))
                 for k, a in terms:
                     row[col[k]] += a
                 row[v] += p.get((), 0.0)
                 rlt.append(row)
                 rlt_var.append(v)
-    rlt = np.asarray(rlt).reshape(-1, n + len(pairs))
-    return QuadraticForm(E, c, np.asarray(pairs, np.int64).reshape(-1, 2), n_g, n_h, rlt,
-                         np.asarray(rlt_var, np.int64))  # fmt: skip
+    rlt = np.asarray(rlt).reshape(-1, n + len(order))
+    return QuadraticForm(E, c, pairs.reshape(-1, 2), n_g, n_h, rlt, np.asarray(rlt_var, np.int64),
+                         level[n:])  # fmt: skip
 
 
+def polynomial_form(f, ineq, eq, n, degree=MAX_DEGREE, max_columns=MAX_COLUMNS):
+    """``quadratic_form`` of a polynomial problem of degree up to ``degree`` (sparse lifted LP:
+    one column per monomial present and per intermediate product, no other monomials)."""
+    return quadratic_form(f, ineq, eq, n, degree=degree, max_columns=max_columns)
+
+
+def _lift(monos):
+    """``{monomial: (A, B)}`` for every monomial of degree >= 2 in ``monos`` and the
+    intermediate monomials they need: ``A * B`` is the monomial (sorted tuples; a factor of
+    degree 1 is a variable). Each monomial is split into a contiguous prefix and suffix
+    (in sorted order), choosing the split that adds the fewest new columns given the
+    columns made so far (ties: the most balanced). Degree 2: ``(i, j) -> ((i,), (j,))``."""
+    made = {}
+
+    def build(m, memo):  # (number of new columns, best split) for m given ``made``
+        if len(m) == 1 or m in made:
+            return 0, None
+        if m in memo:
+            return memo[m]
+        d, best = len(m), None
+        for k in sorted(range(1, d), key=lambda k: abs(d - 2 * k)):
+            cost = 1 + build(m[:k], memo)[0] + build(m[k:], memo)[0]
+            if best is None or cost < best[0]:
+                best = (cost, (m[:k], m[k:]))
+        memo[m] = best
+        return best
+
+    def add(m, memo):
+        if len(m) == 1 or m in made:
+            return
+        a, b = build(m, memo)[1]
+        add(a, memo)
+        add(b, memo)
+        made[m] = (a, b)
+
+    for m in sorted(monos, key=lambda k: (len(k), k)):
+        add(m, {})
+    return made
 
 
 # --- the LP as fixed sparsity pattern + per-box values --------------------------------------
@@ -240,12 +323,26 @@ def _lp(Q, L, lo, hi, tol, safe, cutoff=None):
     N = n + P
     I, J = jnp.asarray(Q.pairs[:, 0]), jnp.asarray(Q.pairs[:, 1])
     sq = jnp.asarray(Q.pairs[:, 0] == Q.pairs[:, 1])
-    li, ui, lj, uj = lo[I], hi[I], lo[J], hi[J]
-    corners = jnp.stack([li * lj, li * uj, ui * lj, ui * uj])
-    straddle = (li < 0) & (ui > 0)
-    wlo = jnp.where(sq, jnp.where(straddle, 0.0, jnp.minimum(li * li, ui * ui)), corners.min(0))
-    whi = corners.max(0)
-    vlo, vhi = jnp.concatenate([lo, wlo]), jnp.concatenate([hi, whi])
+
+    def product_range(li, ui, lj, uj, sq):  # interval of v_a v_b (of v_a^2 for a square)
+        corners = jnp.stack([li * lj, li * uj, ui * lj, ui * uj])
+        straddle = (li < 0) & (ui > 0)
+        wlo = jnp.where(sq, jnp.where(straddle, 0.0, jnp.minimum(li * li, ui * ui)), corners.min(0))
+        whi = corners.max(0)
+        if safe:  # the products rounded to nearest: widen by a few ulps so the true product is inside
+            ceps = SAFE_K * EPS
+            wlo, whi = wlo - ceps * jnp.abs(wlo), whi + ceps * jnp.abs(whi)
+        return wlo, whi
+
+    # column ranges level by level: a product's factors are x (level 0) or earlier products
+    level = Q.level if Q.level.size == P else np.ones(P, np.int64)
+    vlo, vhi = jnp.concatenate([lo, jnp.zeros(P, lo.dtype)]), jnp.concatenate([hi, jnp.zeros(P, hi.dtype)])
+    for lev in range(1, int(level.max(initial=0)) + 1):
+        at = np.flatnonzero(level == lev)
+        a, bb = Q.pairs[at, 0], Q.pairs[at, 1]
+        wlo, whi = product_range(vlo[a], vhi[a], vlo[bb], vhi[bb], jnp.asarray(a == bb))
+        vlo, vhi = vlo.at[n + at].set(wlo), vhi.at[n + at].set(whi)
+    li, ui, lj, uj = vlo[I], vhi[I], vlo[J], vhi[J]
     vmag = jnp.maximum(jnp.abs(vlo), jnp.abs(vhi))
 
     # McCormick: (w, x_i, x_j) coefficients and rhs, 4 rows per product. For a square
@@ -291,7 +388,7 @@ def _lp(Q, L, lo, hi, tol, safe, cutoff=None):
         p = jnp.clip(x[I], li, ui)
         tv = jnp.stack([jnp.where(sq, -1.0, 0.0), jnp.where(sq, 2 * p, 0.0)]).reshape(-1)
         tb = jnp.where(sq, p * p, 0.0)
-        tb = margin(tb, jnp.where(sq, vmag[n:] + 2 * jnp.abs(p) * vmag[:n][I], 0.0))
+        tb = margin(tb, jnp.where(sq, vmag[n:] + 2 * jnp.abs(p) * vmag[I], 0.0))
         vals = jax.lax.dynamic_update_slice(vals, tv, (tan_at + k * 2 * P,))
         b = jax.lax.dynamic_update_slice(b, jnp.where(sq, tb, jnp.inf), (t0 + k * P,))
         return vals, b
