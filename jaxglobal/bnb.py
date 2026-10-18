@@ -631,6 +631,7 @@ _POLISH_CHUNK = 64  # neighbours per batch of local solves (the time budget is c
 _POLISH_MIN, _POLISH_FRAC = 2.0, 0.1  # polish time budget: _POLISH_MIN s plus this fraction of the elapsed time
 _NEAR_ZERO_STARTS = 4  # extra random starts for the scaled local solves of a near-zero objective
 _STRICT_FRAC = 1e-3  # repair_incumbent: violation (x feas_tol) above which a reported incumbent is repaired
+_REPAIR_SLACK = 100.0  # repair_incumbent: largest accepted rise of f, in units of feas_tol * (1 + |f|)
 _ETA, _M = 2, 4  # branch_var="reliability": observations to trust a pseudocost, strong-branching candidates
 _BAL = 10.0  # branch_var="strong": candidates are at least 1/_BAL as wide as the widest variable
 _Q, _ETA_MS = 2, 0.5  # branch_var="strong": split on up to _Q variables at once, those scoring >= _ETA_MS * best
@@ -948,7 +949,13 @@ def minimize(
             F, vr = screen(X), np.asarray(K.viol(jnp.asarray(X)))
         except Exception:  # an optional improvement: any failure keeps the incumbent
             return x, fx, ""
-        if np.isfinite(F[0]) and vr[0] <= strict:
+        # The status and lower bound stay those of the feas_tol-relaxed problem, so a repaired point
+        # may only cost what a feas_tol perturbation plausibly does (a multiplier up to _REPAIR_SLACK)
+        # or the gap tolerance: a local solve that walks far away to strict feasibility (f rising by
+        # much more) would be reported "optimal" with a gap far beyond the tolerance, possibly with
+        # a much better strictly feasible point elsewhere. Then keep the relaxed-feasible incumbent.
+        rise = max(abs_tol, rel_tol * abs(fx), _REPAIR_SLACK * feas_tol * (1 + abs(fx)))
+        if np.isfinite(F[0]) and vr[0] <= strict and F[0] <= fx + rise:
             return X[0], float(F[0]), (f"incumbent repaired from violation {v:.2g} to {vr[0]:.2g} "
                                        f"(f {fx:.10g} -> {F[0]:.10g})")  # fmt: skip
         return x, fx, ""

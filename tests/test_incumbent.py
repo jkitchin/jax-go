@@ -89,3 +89,16 @@ def test_incumbent_repaired_to_strict_feasibility():
     assert r.fun >= -1e-8  # no objective value below the true optimum 0
     assert r.lower_bound <= r.fun
     assert "repaired" in r.message
+
+
+@needs_pounce
+def test_incumbent_repair_does_not_walk_away():
+    """The feas_tol-feasible minimizer (-5, 0) (f = -5) is strictly feasible only at y = 1 (f = 5),
+    while x ~ 0, y = 0 is strictly feasible with f ~ 0. A repair to (-5, 1) would be reported
+    "optimal" with f = 5 against a lower bound of -5: the relaxed incumbent is kept instead."""
+    f = lambda x: x[0] + 10 * x[1]  # noqa: E731
+    g = lambda x: jnp.atleast_1d(0.9e-6 * (1 - x[1]) - x[0] * (x[0] + 5) ** 2)  # noqa: E731
+    r = minimize(f, np.array([-10.0, 0.0]), np.array([10.0, 2.0]), ineq=g, abs_tol=1e-6, rel_tol=1e-6, feas_tol=1e-6)
+    assert r.verified
+    if r.status == "optimal":
+        assert r.fun - r.lower_bound <= 1e-3 * (1 + abs(r.fun))
