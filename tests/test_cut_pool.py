@@ -137,6 +137,43 @@ def test_minimize_convex_with_pool():
     assert r1.lower_bound <= r0.fun + 1e-5
 
 
+
+@pytest.mark.parametrize("verdict", ["on", "off"])
+def test_pool_probe_verdicts(monkeypatch, verdict):
+    """The probe of the per-child local solves (``bnb.pool_judge``): whichever way it decides
+    the search stays exact, and an "off" verdict moves the bound kernel to its zero-row variant
+    (no pool rows: a weaker but still valid relaxation)."""
+    import jaxglobal.bnb as B
+
+    monkeypatch.setattr(B, "_POOL_PROBE_N", 1)
+    monkeypatch.setattr(B, "_POOL_GAIN", -np.inf if verdict == "on" else np.inf)
+    rows = []
+    call = B._Precompiled.__call__
+
+    def spy(self, *args, **kw):
+        if len(args) > 3:
+            rows.append(args[3].shape[0])
+        return call(self, *args, **kw)
+
+    monkeypatch.setattr(B._Precompiled, "__call__", spy)
+
+    def g(x):
+        return jnp.stack([(x[0] - 1.0) ** 2 + (x[1] - 1.0) ** 2 + x[2] ** 2 - 1.0, -x[0] - x[1] + 1.2])
+
+    def f(x):  # a convex norm plus a nonconvex wave: the search needs a few dozen nodes
+        return norm_obj(x) + 0.3 * jnp.sin(3 * x[0]) * jnp.cos(3 * x[1])
+
+    lo, hi = -3 * np.ones(3), 3 * np.ones(3)
+    r0 = minimize(f, lo, hi, ineq=g, cut_pool=0, max_iter=2000)
+    for _ in range(2):  # the zero-row kernel compiles in the background: certainly ready the second time
+        rows.clear()
+        r = minimize(f, lo, hi, ineq=g, max_iter=2000)
+        assert r.status == "optimal"
+        assert r.fun == pytest.approx(r0.fun, rel=1e-5, abs=1e-6)
+        assert r.lower_bound <= r0.fun + 1e-6
+    assert rows[0] > 0  # the probe runs with the pool's rows
+    assert (0 in rows) == (verdict == "off")
+
 def test_fbbt_rounds_stop_early():
     """``_rounds`` stops when a round moves nothing, and runs all rounds while bounds move."""
     P0 = jnp.array([[0.0, 1.0], [0.0, 8.0]])
