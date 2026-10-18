@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import functools
 import itertools
+import os
 import threading
 import time
 from collections import OrderedDict
@@ -497,11 +498,13 @@ class _Kernels:
             # calling thread while the bound kernel may be traced on the tracer thread
             dive_fbbt = make_fbbt(f, ineq, eq, rounds=fbbt_rounds, feas_tol=feas_tol, safe=safe, integer=integer)
 
-            def dive(blo, bhi, x, cutoff):
+            def dive(blo, bhi, x, cutoff, failed, p0, p1):
                 """Propagation dive from the point ``x`` in a box: fix the integers one at a time
                 (most fractional first) to their rounded value, or the other rounding when FBBT
-                then empties the box. Returns the final box and whether a variable had no
-                value left (the dive failed)."""
+                then empties the box. Runs steps ``p0`` to ``p1`` of the dive (``minimize`` calls
+                it in chunks, checking the time between them; the order depends only on ``x``,
+                so the chunks continue one dive). Returns the box and whether a variable had no
+                value left (the dive failed), given the box and flag after step ``p0``."""
                 frac = jnp.abs(x[idx] - jnp.round(x[idx]))
                 order = jnp.asarray(idx)[jnp.argsort(-frac)]
 
@@ -522,9 +525,9 @@ class _Kernels:
                     lo, hi = jnp.where(skip, lo, L[k]), jnp.where(skip, hi, H[k])
                     return lo, hi, failed | (~skip & E[0] & E[1])
 
-                return jax.lax.fori_loop(0, idx.size, step, (blo, bhi, jnp.array(False)))
+                return jax.lax.fori_loop(p0, p1, step, (blo, bhi, failed))
 
-            self.dive = _Precompiled(jax.jit(jax.vmap(dive, in_axes=(0, 0, 0, None))), "dive")
+            self.dive = _Precompiled(jax.jit(jax.vmap(dive, in_axes=(0, 0, 0, None, 0, None, None))), "dive")
         self.fvals = jax.jit(jax.vmap(f))
         self.fns = [fn for fn in (f, ineq, eq) if fn is not None]
         self.hessians = [_hessian(fn) for fn in self.fns]
@@ -699,7 +702,9 @@ _POOL_REPROBE = 40
 _LOCAL_BACKOFF = 16  # most iterations skipped between local searches that do not improve the incumbent
 _POLISH_ROUNDS = 5  # incumbent polish (``polish`` in ``minimize``): rounds while it keeps improving
 _POLISH_CANDS = 512  # integer neighbours (one step, swaps) tried per polish round
-_POLISH_CHUNK = 64  # neighbours per batch of local solves (the time budget is checked between batches)
+_POLISH_CHUNK = 64  # most neighbours per batch of local solves (the time budget is checked between batches)
+_NCPU = os.cpu_count() or 1  # pounce solves batches in parallel on this many threads (polish time caps)
+_POLISH_FIRST = 8  # neighbours in the first batch, before the cost of a solve is known
 _POLISH_MIN, _POLISH_FRAC = 2.0, 0.1  # polish time budget: _POLISH_MIN s plus this fraction of the elapsed time
 _NEAR_ZERO_STARTS = 4  # extra random starts for the scaled local solves of a near-zero objective
 _STRICT_FRAC = 1e-3  # repair_incumbent: violation (x feas_tol) above which a reported incumbent is repaired
@@ -1023,7 +1028,8 @@ def minimize(
     _mark("start_dive_compile")
     if K.dive is not None and padded.mesh is None:  # the dive kernel too, traced after the others
         box, cut = jax.ShapeDtypeStruct((_DIVES, lo.size), jnp.float64), jax.ShapeDtypeStruct((), jnp.float64)
-        K.dive.start(_DIVES, lo.size, fp, args=(box, box, box, cut))
+        flag, step = jax.ShapeDtypeStruct((_DIVES,), jnp.bool_), jax.ShapeDtypeStruct((), jnp.int32)
+        K.dive.start(_DIVES, lo.size, fp, args=(box, box, box, cut, flag, step, step))
     if pool is not None and padded.mesh is None:  # for the pool kernel without rows (pool_judge)
         pool["fp"] = fp
     # integer variables are split even where they enter linearly: that is what makes them integral
@@ -1280,7 +1286,8 @@ def minimize(
         polish()
 
     prng = np.random.default_rng(1)  # random starts of the incumbent heuristics (``rng`` drives the dives)
-    polished = dict(ub=np.inf, time=0.0)  # incumbent value last polished, total polish time
+    polished = dict(ub=np.inf, time=0.0, per=None)  # incumbent value last polished, total polish time,
+    # wall seconds per local solve in the last polish batch
 
     def polish():
         """Improve a new incumbent locally, within a time budget (``_POLISH_*``).
@@ -1313,13 +1320,25 @@ def minimize(
                 if imask.any():
                     x = np.where(imask, np.round(xbest), xbest)
                     C = neighbours(x)
-                    for c in range(0, len(C), _POLISH_CHUNK):
-                        if time.perf_counter() >= stop:
+                    c = 0
+                    while c < len(C):
+                        left = stop - time.perf_counter()
+                        if left <= 0:
                             break
-                        Y = C[c:c + _POLISH_CHUNK]
+                        # a batch of local solves cannot be interrupted: size it to the time left
+                        # at the measured cost per solve, and cap each solve's wall time at its
+                        # share of the time left with the solves run ``os.cpu_count()`` at a time
+                        # (pounce's ``max_wall_time``). On batch 64 neighbours, most fixing an
+                        # infeasible assignment, took 40 s against a 2 s budget.
+                        per = polished["per"]
+                        m = _POLISH_FIRST if per is None else int(np.clip(left / per, 1, _POLISH_CHUNK))
+                        Y = C[c:c + m]
+                        c += len(Y)
                         if cont.any():
                             L, H = np.where(imask, Y, lo), np.where(imask, Y, hi)
-                            Y = np.clip(np.asarray(solve_local(Y, L, H)), L, H)
+                            t1 = time.perf_counter()
+                            Y = np.clip(np.asarray(solve_local(Y, L, H, options={"max_wall_time": left * min(1.0, _NCPU / len(Y))})), L, H)
+                            polished["per"] = (time.perf_counter() - t1) / len(Y)
                         F = screen(Y)
                         i = int(np.argmin(F))
                         if F[i] < ub:
@@ -1353,7 +1372,8 @@ def minimize(
         return max(abs_tol, rel_tol * abs(ub)) if np.isfinite(ub) else abs_tol
 
     rng = np.random.default_rng(0)
-    dive_cost = [None]  # wall seconds of the last dive (kernel run and fixed solves)
+    dive_cost = [None]  # wall seconds of the last complete dive (kernel runs and fixed solves)
+    step_cost = [None]  # wall seconds per step (integer fixed) of the last dive kernel run
     dive_total = [0.0]  # wall seconds of all dives so far
 
     def time_for(estimate):
@@ -1370,39 +1390,54 @@ def minimize(
         then a local solve of the continuous variables in each box that ends with every
         integer fixed; improves the incumbent.
 
-        Dives only produce incumbents, so skipping or cutting one short is sound. Under a time
-        limit a dive is skipped when 1.5 times its estimated cost no longer fits (``time_for``):
-        the last dive's wall time, or before the first one, the number of integer variables
-        times the slowest bound-kernel call (the dive kernel runs FBBT on both roundings of
-        every integer, and the bound kernel runs FBBT once plus the LP, for as many boxes; on
-        smallinvDAX the ratio was 20-25 for 30 integers)."""
+        Dives only produce incumbents, so skipping or cutting one short is sound. The dive
+        kernel runs in chunks of steps (1, 2, 4, ... integers fixed), and under a time limit
+        the next chunk is dispatched only while 1.5 times its estimated cost fits
+        (``time_for``): the measured cost per step so far, or before the first chunk, the
+        slowest bound-kernel call (a step runs FBBT on both roundings of one integer, the bound
+        kernel FBBT once plus the LP). A dive cut short gives no fixed solve. The per-step cost
+        varies by more than an order of magnitude between problems (smallinvDAX: a step costs
+        about one bound call; batch: 1/24 of one), so no estimate made before running is
+        reliable; chunking bounds the overrun by one chunk instead. Once there is an incumbent,
+        a dive is skipped when the dives' total wall time with its estimated cost (the last
+        dive's, else the steps times the per-step estimate) would pass ``_DIVE_FRAC`` of the
+        elapsed time."""
         nonlocal ub, xbest
         if K.dive is None or not len(points):
             return
         k = min(len(points), _DIVES)
         pad = lambda A: np.concatenate([A[:k], np.repeat(A[:1], _DIVES - k, 0)])  # noqa: E731
-        args = (jnp.asarray(pad(blo)), jnp.asarray(pad(bhi)), jnp.asarray(pad(points)), jnp.asarray(ub, jnp.float64))
+        steps = int(imask.sum())
+        DL, DH, X = jnp.asarray(pad(blo)), jnp.asarray(pad(bhi)), jnp.asarray(pad(points))
+        F, cut = jnp.zeros(_DIVES, jnp.bool_), jnp.asarray(ub, jnp.float64)
+        step = lambda p: jnp.asarray(p, jnp.int32)  # noqa: E731
         try:  # compiled in the background; skipped if not ready by the deadline
-            K.dive.wait(*args, deadline=deadline)
+            K.dive.wait(DL, DH, X, cut, F, step(0), step(0), deadline=deadline)
         except _CompileTimeout:
             return
-        est = dive_cost[0]
-        if est is None and bound_call[0] > 0:
-            est = int(imask.sum()) * bound_call[0]
-        if not time_for(est):
-            return
+        per_step = step_cost[0] or bound_call[0] or None
+        est = dive_cost[0] if dive_cost[0] is not None else (None if per_step is None else per_step * steps)
         t = time.perf_counter()
         if np.isfinite(ub) and est is not None and dive_total[0] + est > _DIVE_FRAC * (t - t0):
             return  # with an incumbent, dives get at most _DIVE_FRAC of the wall time
-        try:
-            DL, DH, F = (np.asarray(a) for a in K.dive(*args, deadline=deadline))
-        except (_CompileTimeout, _Deadline):
-            return
-        ok = ~F[:k] & np.all(DL[:k, imask] == DH[:k, imask], axis=1)
-        if ok.any() and not _past(deadline):
-            fixed_solve(DL[:k][ok], DH[:k][ok], pad(points)[:k][ok])
-        dive_cost[0] = time.perf_counter() - t
-        dive_total[0] += dive_cost[0]
+        p, chunk = 0, 1
+        while p < steps:
+            c = min(chunk, steps - p)
+            if not time_for(None if per_step is None else per_step * c):
+                break
+            try:
+                DL, DH, F = jax.block_until_ready(K.dive(DL, DH, X, cut, F, step(p), step(p + c), deadline=deadline))
+            except (_CompileTimeout, _Deadline):
+                break
+            p, chunk = p + c, 2 * chunk
+            per_step = step_cost[0] = (time.perf_counter() - t) / p
+        if p == steps:  # a dive cut short gives no fixed solve
+            DL, DH, F = np.asarray(DL), np.asarray(DH), np.asarray(F)
+            ok = ~F[:k] & np.all(DL[:k, imask] == DH[:k, imask], axis=1)
+            if ok.any() and not _past(deadline):
+                fixed_solve(DL[:k][ok], DH[:k][ok], pad(points)[:k][ok])
+            dive_cost[0] = time.perf_counter() - t
+        dive_total[0] += time.perf_counter() - t
 
     def probe(rlo, rhi, lb):
         """Root probing on the binary variables: bound the box with each one at 0 and at 1 (one

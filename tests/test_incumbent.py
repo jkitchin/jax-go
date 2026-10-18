@@ -121,3 +121,33 @@ def test_local_solution_feasible_after_clipping():
     X = np.clip(np.asarray(solve(np.array([[0.3, 100.0], [0.9, 1e4]]))), lo, hi)
     assert np.all(np.abs(X[:, 1] - 1e4 * X[:, 0]) <= 1e-6)
     assert np.allclose(X[:, 0], 1.0, atol=1e-6)
+
+
+@needs_pounce
+def test_polish_batches_fit_the_budget(monkeypatch):
+    """Polish batches of local solves are sized to the time left: the first holds at most
+    ``_POLISH_FIRST`` neighbours, and each solve's wall time is capped at its share of the
+    time left (batch: 64 mostly infeasible neighbours took 40 s against a 2 s budget)."""
+    from jaxglobal import bnb
+
+    calls = []
+    orig = bnb.make_local
+
+    def recording(*a, **k):
+        solve = orig(*a, **k)
+
+        def wrapped(X0, LO=None, HI=None, options=None):
+            if options and "max_wall_time" in options:
+                calls.append((len(X0), options["max_wall_time"]))
+            return solve(X0, LO, HI, options=options)
+
+        return wrapped
+
+    monkeypatch.setattr(bnb, "make_local", recording)
+    bnb.clear_cache()
+    f = lambda v: -(v[0] + v[1]) - v[2]  # noqa: E731
+    g = lambda v: jnp.stack([v[0] + v[1] + v[2] - 3.5, v[0] - v[1] - 1.0])  # noqa: E731
+    r = minimize(f, [0, 0, 0], [5, 5, 1], ineq=g, integer=[0, 1], max_iter=500)
+    assert r.status == "optimal" and abs(r.fun + 3.5) <= 1e-6
+    assert calls and calls[0][0] <= bnb._POLISH_FIRST
+    assert all(0 < m <= bnb._POLISH_CHUNK and 0 < cap <= bnb._POLISH_MIN + 1.0 for m, cap in calls)
