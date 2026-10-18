@@ -1,5 +1,7 @@
 <p align="center"><img src="figures/logo.svg" alt="jaxglobal" width="560"></p>
 
+<p align="center"><a href="https://kitchingroup.cheme.cmu.edu/jax-go/"><img src="https://github.com/jkitchin/jax-go/actions/workflows/docs.yml/badge.svg" alt="docs"></a></p>
+
 # jaxglobal — global optimization of plain JAX functions
 
 Write an ordinary Python function with `jax.numpy`, give a box, and get a
