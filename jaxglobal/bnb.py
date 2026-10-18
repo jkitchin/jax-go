@@ -959,12 +959,15 @@ def minimize(
             return
         root = pool["root"]
         X = np.clip(X, root[0], root[1])
-        wait = None if deadline is None else max(deadline - time.perf_counter(), 0.0)
-        try:  # compiled for _POOL_CHUNK points at a time
-            exe = pool["exe"].result(timeout=wait)
-            exe = exe.result(timeout=None if wait is None else max(deadline - time.perf_counter(), 0.0))
-        except TimeoutError:
+        # the tangent kernel (compiled for _POOL_CHUNK points at a time) compiles in the
+        # background after the bound kernels: do not wait for it (flay04m stalled for seconds
+        # at the root); keep the latest points until it is ready
+        if not (pool["exe"].done() and pool["exe"].result().done()):
+            pool["pending"] = np.concatenate([pool.get("pending", X[:0]), X])[-_POOL_CHUNK:]
             return
+        exe = pool["exe"].result().result()
+        if len(pool.get("pending", ())):
+            X, pool["pending"] = np.concatenate([pool["pending"], X]), X[:0]
         a, b = [], []
         for c in range(0, len(X), _POOL_CHUNK):
             Xc = X[c:c + _POOL_CHUNK]
@@ -1006,9 +1009,8 @@ def minimize(
     if K.dive is not None and padded.mesh is None:  # the dive kernel too, traced after the others
         box, cut = jax.ShapeDtypeStruct((_DIVES, lo.size), jnp.float64), jax.ShapeDtypeStruct((), jnp.float64)
         K.dive.start(_DIVES, lo.size, fp, args=(box, box, box, cut))
-    if pool is not None and padded.mesh is None:  # the pool kernel without rows (see pool_judge), last
-        for b in padded.sizes:
-            bound_kernel.start(b, lo.size, fp, ((0, lo.size + 2), pool["root"].shape))
+    if pool is not None and padded.mesh is None:  # for the pool kernel without rows (pool_judge)
+        pool["fp"] = fp
     # integer variables are split even where they enter linearly: that is what makes them integral
     _mark("nonlinear")
     nl = K.nonlinear(lo.size)
@@ -1148,9 +1150,12 @@ def minimize(
             on = np.mean(st["gt"]) >= np.mean(st["gu"]) + _POOL_GAIN
             st.update(mode="on" if on else "off", since=it)
             if not on and padded.mesh is None:
-                # the pool's rows cost the node LP up to 2x (process): back to the plain bound
-                # kernel (compiled in the background at the start) for the rest of the search
+                # the pool's rows cost the node LP up to 2x (process): the pool kernel without
+                # rows for the rest of the search, once it has compiled in the background (not
+                # at the start: that compile competed with the root phase of every solve)
                 pool["plain"] = True
+                for b in padded.sizes:
+                    bound_kernel.start(b, lo.size, pool["fp"], ((0, lo.size + 2), pool["root"].shape))
 
     def plain_kernel():
         """Whether the pool kernel runs without rows (``pool_judge``): once that is compiled."""
