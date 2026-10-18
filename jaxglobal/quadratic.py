@@ -209,7 +209,7 @@ def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS):
     return ineq_rlt(Q, n) if degree == 2 else Q
 
 
-def ineq_rlt(Q, n, max_support=MAX_RLT_SUPPORT, max_pairs=None):
+def ineq_rlt(Q, n, max_support=None, max_pairs=None):
     """``Q`` with bound-factor RLT rows (Sherali & Adams): a linear inequality
     ``g(x) = a.x + c <= 0`` (with support of 2 to ``max_support`` variables) times a bound factor
     ``x_k - l_k >= 0`` or ``u_k - x_k >= 0`` gives
@@ -226,6 +226,7 @@ def ineq_rlt(Q, n, max_support=MAX_RLT_SUPPORT, max_pairs=None):
     per product column), those with ``k`` in the row's support first."""
     P = len(Q.pairs)
     max_pairs = int(RLT_PAIRS * P) if max_pairs is None else max_pairs
+    max_support = MAX_RLT_SUPPORT if max_support is None else max_support
     col = {(int(a), int(b)): n + p for p, (a, b) in enumerate(Q.pairs) if a < n and b < n}
     partners = {}
     for a, b in col:
