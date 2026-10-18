@@ -33,7 +33,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import lax
 
-from .fbbt import BACK, CTX, DOMAIN_FLOOR, INF, SAFE_CTX, Const, _clean, _empty, _meet2, _pad, round_integers
+from .fbbt import BACK, CTX, DOMAIN_FLOOR, INF, SAFE_CTX, Const, _clean, _empty, _meet2, _pad, round_integers, stops_nan
 from .relax import MC, RULES, apply_rule, is_mc
 
 # equations that only move elements: the interpreter renumbers slots, no row
@@ -89,7 +89,7 @@ def _scalarize(tape, n):
     rows, opcodes, opkey = [], [], {}
     for node in tape.nodes:
         eqn, name = node.eqn, node.eqn.primitive.name
-        if len(node.outs) != 1:
+        if len(node.outs) != 1 or stops_nan(node):  # rows would pass NaN through an int cast or x**0
             return None
         shape = tuple(tape.shapes[node.outs[0]][0])
         if name in STRUCTURAL:
