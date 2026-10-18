@@ -1281,6 +1281,11 @@ stage 3 profile set:
   best: 31 solved against 27 (`pseudocost`, 0.94 of the time on the 27
   both solve) and 23 (`reliability`, 3.9 times slower: strong-branching trials
   cost kernel calls). `width`, fractional integers first, remains the default.
+  (Later: the default became `branch_var="auto"`, which keeps `width` for
+  problems with integers and uses `pseudocost` for continuous ones. On
+  start50 at 60 s pseudocost solves 36 against 34 and loses none; ex6_2_6
+  and ex8_4_1 are the gains. On the int50 regression instances it lost
+  flay04m and slowed nous1 three times.)
 * *Plunging* (item 6) is covered by the dives from the best children; it is
   not implemented as a node selection rule.
 * *Coefficient tightening* (item 7) is not done: the model is code, so

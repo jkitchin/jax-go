@@ -698,7 +698,7 @@ def minimize(
     obbt="root",
     obbt_rounds=2,
     branch_point="mid",
-    branch_var="width",
+    branch_var="auto",
     univariate=True,
     alphabb=True,
     multivariate=False,
@@ -768,7 +768,10 @@ def minimize(
 
     Branching: ``branch_point`` is ``"mid"`` (bisect) or ``"relax"`` (split at
     the relaxation minimizer, pulled toward the midpoint and kept away from the
-    faces, see ``_LAM`` and ``_BETA``); ``branch_var`` is ``"width"`` (largest
+    faces, see ``_LAM`` and ``_BETA``); ``branch_var`` is ``"auto"`` (the default:
+    ``"pseudocost"`` without integer variables, ``"width"`` with them; on start50 at 60 s
+    pseudocost solves 38, width and strong 36, and pseudocost loses none; on int50 each of
+    pseudocost and strong solves one more than width but loses flay04m or nous1), ``"width"`` (largest
     relative width among nonlinear variables; on the lifted quadratic LP, relative width
     times the McCormick gap of the variable's products at the relaxation point), ``"pseudocost"`` (product score
     of per-variable bound gains observed so far) or ``"reliability"`` (like
@@ -840,8 +843,12 @@ def minimize(
     constrained = ineq is not None or eq is not None
     if branch_point not in ("mid", "relax"):
         raise ValueError(f"branch_point must be 'mid' or 'relax', not {branch_point!r}")
-    if branch_var not in ("width", "pseudocost", "reliability", "strong"):
-        raise ValueError(f"branch_var must be 'width', 'pseudocost', 'reliability' or 'strong', not {branch_var!r}")
+    if branch_var not in ("auto", "width", "pseudocost", "reliability", "strong"):
+        raise ValueError(
+            f"branch_var must be 'auto', 'width', 'pseudocost', 'reliability' or 'strong', not {branch_var!r}"
+        )
+    if branch_var == "auto":  # measured choice, see the docstring
+        branch_var = "width" if imask.any() else "pseudocost"
     if obbt not in (False, None, "root", "tree"):
         raise ValueError(f"obbt must be False, 'root' or 'tree', not {obbt!r}")
     if crown not in (False, None, True, "auto"):

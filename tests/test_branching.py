@@ -7,6 +7,7 @@ CAMEL = next(p for p in PROBLEMS if p.name == "six_hump_camel")
 G24 = next(p for p in CONSTRAINED_PROBLEMS if p.name == "G24")
 
 OPTIONS = [
+    {"branch_var": "width"},
     {"branch_point": "relax"},
     {"branch_var": "pseudocost"},
     {"branch_var": "reliability"},
@@ -38,8 +39,24 @@ def test_small_batch_keeps_boxes_in_sync(opts):
 
 
 def test_default_evaluations_match_nodes():
-    r = solve(CAMEL)
-    assert r.evaluations in (r.nodes, r.nodes + 1)  # +1: the root is re-bounded after root OBBT
+    """Neither rule the default picks (pseudocost, or width with integers) bounds trial boxes."""
+    for kw in ({}, {"integer": [0]}):
+        r = solve(CAMEL, **kw)
+        assert r.status == "optimal"
+        assert r.evaluations in (r.nodes, r.nodes + 1)  # +1: the root is re-bounded after root OBBT
+
+
+def test_auto_branching_rule():
+    """branch_var="auto" (the default) is pseudocost without integer variables, width with them.
+
+    Both problems are ones where the two rules take different numbers of nodes
+    (hartmann3 157 width / 93 pseudocost; shubert with x0 integer 53 / 77)."""
+    h3 = next(p for p in PROBLEMS if p.name == "hartmann3")
+    sh = next(p for p in PROBLEMS if p.name == "shubert")
+    n = lambda r: (r.status, r.nodes, r.evaluations)  # noqa: E731
+    assert n(solve(h3, branch_var="width")) != n(solve(h3, branch_var="pseudocost")) == n(solve(h3))
+    w, pc = solve(sh, integer=[0], branch_var="width"), solve(sh, integer=[0], branch_var="pseudocost")
+    assert n(pc) != n(w) == n(solve(sh, integer=[0]))
 
 
 def test_invalid_options():

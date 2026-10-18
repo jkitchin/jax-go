@@ -176,8 +176,8 @@ ax2.set_title("Certified gap", loc="left")
 fig.tight_layout()
 
 # %% [markdown]
-# The local solver finds the global minimum after 7 nodes; from then on $U$ does
-# not change, and the remaining 18 nodes go into raising the lower bound $L$
+# The local solver finds the global minimum at the root node; from then on $U$
+# does not change, and the remaining 22 nodes go into raising the lower bound $L$
 # until it meets $U$. That is the price of the certificate, and the reason
 # tight relaxations matter.
 #
