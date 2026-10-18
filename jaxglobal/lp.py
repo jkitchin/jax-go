@@ -259,9 +259,13 @@ def _as_vec(fn):
     return None if fn is None else (lambda x: jnp.atleast_1d(fn(x)))
 
 
-def _parts_fn(f, ineq, eq, univariate, alphabb=False, multivariate=False, safe=False):
-    """``prepare(lo, hi)`` and ``parts(x, lo, hi, data)`` = [cv_f, cv_g..., cv_h..., -cc_h...]."""
-    rs = [make_relaxer(_as_vec(fn), univariate, alphabb, multivariate=multivariate, safe=safe) if fn is not None else None for fn in (f, ineq, eq)]
+def _parts_fn(f, ineq, eq, univariate, alphabb=False, multivariate=False, safe=False, convex=True):
+    """``prepare(lo, hi)`` and ``parts(x, lo, hi, data)`` = [cv_f, cv_g..., cv_h..., -cc_h...].
+
+    With ``convex`` each part is ``max(relaxation, function)`` where the function is
+    certified convex on the box (``convexity``), so its cuts are outer approximation."""
+    rs = [make_relaxer(_as_vec(fn), univariate, alphabb, multivariate=multivariate, safe=safe, convex=convex)
+          if fn is not None else None for fn in (f, ineq, eq)]  # fmt: skip
 
     def prepare(lo, hi):
         return tuple(r.prepare(lo, hi) if r is not None else None for r in rs)
