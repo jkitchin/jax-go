@@ -636,3 +636,31 @@ def test_asinh_label_and_inspect_target():
     assert "-(log(-x)" in r.rewritten["asinh"][1]
     with pytest.raises(ValueError, match="target"):
         export.inspect(lambda x: x[0], [0.0], [1.0], target="baron")
+
+
+@pytest.mark.parametrize(
+    "f",
+    [
+        lambda x: jnp.log(1 + x @ x),
+        lambda x: jnp.log1p(x @ x),
+        lambda x: jnp.log(1 + x[0] * x[0]),
+        lambda x: jnp.log(1.5 + x[0] * x[1] - x[0] * x[1]),
+        lambda x: jnp.sqrt(1 + x @ x) + (1 + x[0] * x[0]) ** 1.5,
+        lambda x: 1.0 / (x[0] - 0.5) ** 2 + x[1],  # a pole (division by an interval containing 0) is not an overflow
+    ],
+)
+def test_overflow_check_ignores_poles_and_domain_edges(tmp_path, f):
+    """Interval bounds of x*x lose the dependency, so log's operand can look negative; that is not an overflow."""
+    lo, hi = [-2.0] * 3, [2.0] * 3
+    for target, kw in (("scip", {}), ("nl", {}), ("nl", {"portable": True}), ("nl", {"nonsmooth": "reformulate"})):
+        assert not export.inspect(f, lo, hi, target=target, **kw).refused
+    export.to_scip(f, lo, hi)
+    export.to_nl(f, lo, hi, tmp_path / "l.nl")
+
+
+def test_division_overflow_refused():
+    # the divisor stays above 0 but gets within 1e-30 of it: -x / (x^2 + 1e-30) reaches -5e14 near x = 1e-15
+    with pytest.raises(ExportError, match="'div' reaches"):
+        export.to_scip(lambda x: -x[0] / (x[0] * x[0] + 1e-30), [0.0], [1.0])
+    _, x, obj = _solve(export.to_scip(lambda x: -1e-12 / (x[0] * x[0] + 1e-24), [0.0], [1.0]))  # 1e12: fine
+    assert abs(obj + 1e12) < 1e-3

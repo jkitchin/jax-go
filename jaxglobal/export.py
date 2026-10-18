@@ -86,6 +86,7 @@ class ExportBigMWarning(UserWarning):
 
 BIGM_WARN = 1e8  # big-M constants above this are reported and warned about
 BIGM_REFUSE = 1e20  # ... and refused from here on (SCIP treats 1e20 as infinity)
+OVERFLOW_OPS = {"exp", "mul", "add", "sub", "sum", "neg", "abs", "sinh", "cosh"}  # finite operands, value can overflow
 EXP_SAFE = 30.0  # rewrites keep exp arguments below this where they can (exp(30) ~ 1e13)
 MAX_TERMS = 1000  # SCIP: lift a product operand to a variable before pyscipopt expands it past this
 
@@ -941,19 +942,26 @@ class _Lowering:
         iv = _intervals(g, order, self.lo, self.hi, fixed={k: (0.0, 1.0) for k in self.unit})
         for i in order:
             op, args, _ = g.nodes[i]
-            if not args or op in ("div", "tan") or op in LOGICAL:
-                continue  # an infinite div/tan bound is a pole, not an overflow (domains are checked elsewhere)
-            if op == "pow" and (not g.is_const(args[1]) or g.value(args[1]) < 0):
-                continue
+            if op not in OVERFLOW_OPS and op not in ("div", "pow"):
+                continue  # log, sqrt, tan, atanh, ...: an infinite bound is a pole or domain edge, not an overflow
             if not all(np.isfinite(iv[k][0]) and np.isfinite(iv[k][1]) for k in args):
                 continue
             m = max(abs(iv[i][0]), abs(iv[i][1]))
-            if not m < BIGM_REFUSE:
-                self.report.refused.append(
-                    f"an exported '{op}' reaches {m:.3g} (>= {BIGM_REFUSE:g}, SCIP's infinity) on the box although "
-                    "its operands are bounded: the solver would cut those points off; tighten the variable bounds"
-                )
-                return
+            if np.isnan(m) or m < BIGM_REFUSE:
+                continue
+            if op == "pow" and g.is_const(args[1]) and g.value(args[1]) >= 0:
+                pass  # x ** k, k >= 0: grows like exp
+            elif op in ("div", "pow"):
+                # 1/d or x ** -k: an infinite bound means d (or x) can be 0, a pole; a finite bound >= 1e20 means it
+                # gets within ~1e-20 of 0 without crossing it, and the value really overflows
+                if not np.isfinite(m) or (op == "pow" and not g.is_const(args[1])):
+                    continue
+            msg = (
+                f"an exported '{op}' reaches {m:.3g} (>= {BIGM_REFUSE:g}, SCIP's infinity) on the box although "
+                "its operands are bounded: the solver would cut those points off; tighten the variable bounds"
+            )
+            self.report.refused.append(msg)
+            return
 
     def defined(self, k, what):
         """Refuse when node ``k`` (a branch or operand the reformulation evaluates everywhere) is undefined somewhere."""
