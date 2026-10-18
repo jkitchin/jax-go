@@ -98,7 +98,8 @@ def test_guarded_slots_and_interpreter():
     tape = joint_tape(lambda x: jnp.log(x[1]) + jnp.where(x[0] > 0.5, jnp.log(x[0]), 0.0), None, None, x)
     names = {s: n.eqn.primitive.name for n in tape.nodes for s in n.outs}
     g = guarded_slots(tape)
-    # log(x[0]) is guarded; x[0] itself also feeds the predicate and log(x[1]) the sum, so they are not
-    assert [names[s] for s in g].count("log") == 1 and not any(names[s] == "squeeze" for s in g)
+    # log(x[0]) is guarded, and so is x[0]: besides the arm it feeds only the predicate, whose value
+    # (``NaN > 0.5`` is False) does not carry it; x[1] and log(x[1]) feed the sum, so they are not
+    assert [names[s] for s in g].count("log") == 1 and [names[s] for s in g].count("squeeze") == 1
     assert make_propagate(tape, None, None, 2, 1e-6, 5) is None
     assert not guarded_slots(joint_tape(lambda x: jnp.log(x[0]) + x[1], None, None, x))
