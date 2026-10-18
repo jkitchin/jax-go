@@ -40,7 +40,7 @@ from .domain import DomainTimeout, bound_domain
 from . import kcache
 from .fbbt import make_fbbt
 from .lifted import make_lifted_bounder
-from .lp import make_constrained_bounder, make_obbt, reduce_ranges
+from .lp import make_constrained_bounder, make_obbt, make_pool_cuts, pool_parts, reduce_ranges
 from .quadratic import binary_only, make_quadratic_bounder, make_quadratic_obbt, polynomial_form, quadratic_form
 from .structure import structure
 from .relax import SAFE_K
@@ -258,14 +258,16 @@ class _Precompiled:
     def _key(args):
         return tuple((a.shape, a.dtype, getattr(a, "weak_type", False)) for a in args)
 
-    def start(self, b, n, fingerprint=None, args=None):
+    def start(self, b, n, fingerprint=None, extra=(), args=None):
         """Compile in the background for ``b`` boxes of dimension ``n`` (single device).
 
         ``fingerprint()``, called on the tracer thread, names the problem for
-        the disk cache (None: do not cache). ``args``: the argument shapes, when
-        they are not ``(lo, hi, cutoff)``."""
+        the disk cache (None: do not cache). ``extra``: shapes of further
+        (unbatched) float64 arguments after the cutoff. ``args``: all the argument
+        shapes instead, when they are not ``(lo, hi, cutoff, *extra)``."""
         if args is None:
-            args = (jax.ShapeDtypeStruct((b, n), jnp.float64),) * 2 + (jax.ShapeDtypeStruct((), jnp.float64),)
+            args = (jax.ShapeDtypeStruct((b, n), jnp.float64),) * 2 + (jax.ShapeDtypeStruct((), jnp.float64),) + \
+                tuple(jax.ShapeDtypeStruct(tuple(sh), jnp.float64) for sh in extra)  # fmt: skip
         key = self._key(args)
         if key not in self.ready:
             tracer, compiler = _pools()
@@ -290,7 +292,7 @@ class _Precompiled:
         """The lowered kernel, loaded from the disk cache when possible (and stored there when not)."""
         fp = fingerprint() if fingerprint is not None else None
         if fp is not None:
-            fp = f"{fp}-{self.name}-{args[0].shape[0]}"
+            fp = f"{fp}-{self.name}-{args[0].shape[0]}" + "".join(f"-{'x'.join(map(str, a.shape))}" for a in args[3:])
             exp = kcache.load(fp)
             if exp is None:
                 try:
@@ -341,7 +343,8 @@ class _Kernels:
     """
 
     def __init__(self, f, ineq, eq, *, n_fw, n_kelley, fbbt, fbbt_rounds, dbbt, obbt, obbt_rounds,
-                 univariate, alphabb, multivariate, lifted, crown, feas_tol, safe, integer=(), quadratic=True):  # fmt: skip
+                 univariate, alphabb, multivariate, lifted, crown, feas_tol, safe, integer=(), quadratic=True,
+                 cut_pool=0, exact=False):  # fmt: skip
         opts = {k: v for k, v in locals().items() if k not in ("self", "f", "ineq", "eq")}
         constrained = ineq is not None or eq is not None
         g, h = _vec(ineq), _vec(eq)
@@ -372,26 +375,31 @@ class _Kernels:
                                             univariate=univariate, alphabb=alphabb,
                                             multivariate=multivariate, safe=safe)
 
-            def raw_bound(blo, bhi, cutoff):
+            def raw_bound(blo, bhi, cutoff, pool=None, root=None):
                 lb, x, _, rlo, rhi = lb_lifted(blo, bhi, cutoff)
                 fx = jnp.where(violation(x) <= feas_tol, f(x), jnp.inf)
                 return lb, x, fx, rlo, rhi, x
         elif constrained:
             cb = make_constrained_bounder(f, ineq, eq, n_kelley=n_kelley, tol=feas_tol, univariate=univariate,
-                                          alphabb=alphabb, multivariate=multivariate, safe=safe)
+                                          alphabb=alphabb, multivariate=multivariate, safe=safe, exact=exact)
 
-            def raw_bound(blo, bhi, cutoff):
+            def raw_bound(blo, bhi, cutoff, pool=None, root=None):
                 Q = lifted_form(blo.size)
-                bounder = cb if Q is None else make_quadratic_bounder(Q, n_kelley=n_kelley, tol=feas_tol, safe=safe)
-                lb, x, _, rlo, rhi = bounder(blo, bhi, cutoff)
+                if Q is None:
+                    lb, x, _, rlo, rhi = cb(blo, bhi, cutoff, pool, root)
+                else:  # (the lifted LP takes no pool)
+                    lb, x, _, rlo, rhi = make_quadratic_bounder(Q, n_kelley=n_kelley, tol=feas_tol, safe=safe)(blo, bhi, cutoff)
                 fx = jnp.where(violation(x) <= feas_tol, f(x), jnp.inf)
                 return lb, x, fx, rlo, rhi, x
         else:
-            raw_bound = make_bounder(f, n_fw, univariate=univariate, alphabb=alphabb, multivariate=multivariate,
+            unc_bound = make_bounder(f, n_fw, univariate=univariate, alphabb=alphabb, multivariate=multivariate,
                                      return_xr=True, safe=safe)
+
+            def raw_bound(blo, bhi, cutoff, pool=None, root=None):
+                return unc_bound(blo, bhi, cutoff)
         tighten = make_fbbt(f, ineq, eq, rounds=fbbt_rounds, feas_tol=feas_tol, safe=safe, integer=integer) if fbbt else None
         cut_obbt = make_obbt(f, ineq, eq, rounds=obbt_rounds, tol=feas_tol, univariate=univariate,
-                             alphabb=alphabb, multivariate=multivariate, safe=safe) if obbt else None
+                             alphabb=alphabb, multivariate=multivariate, safe=safe, exact=exact) if obbt else None
 
         def lp_tighten(blo, bhi, cutoff):
             Q = lifted_form(blo.size) if constrained else None
@@ -409,14 +417,15 @@ class _Kernels:
             il, ih = jnp.ceil(lo[idx] - INT_TOL), jnp.floor(hi[idx] + INT_TOL)
             return lo.at[idx].set(il), hi.at[idx].set(jnp.maximum(il, ih)), jnp.any(il > ih)
 
-        def node(blo, bhi, cutoff):
-            """Tighten, then bound one box. Returns (lb, x, f(x), lo', hi', xr)."""
+        def node(blo, bhi, cutoff, pool=None, root=None):
+            """Tighten, then bound one box (with the cut pool ``pool``, valid on ``root``; see
+            ``make_constrained_bounder``). Returns (lb, x, f(x), lo', hi', xr)."""
             empty = jnp.array(False)
             if tighten is not None and not (constrained and not lifted and binary_only(lifted_form(blo.size), blo.size)):
                 blo, bhi, empty = tighten(blo, bhi, cutoff)
             blo, bhi, e = round_box(blo, bhi)
             empty |= e
-            lb, x, fx, rlo, rhi, xr = raw_bound(blo, bhi, cutoff)
+            lb, x, fx, rlo, rhi, xr = raw_bound(blo, bhi, cutoff, pool, root)
             if crown_lb is not None:  # both bounds are valid on the box: take the larger
                 lb = jnp.maximum(jnp.where(jnp.isnan(lb), -jnp.inf, lb), crown_lb(blo, bhi))
             if not dbbt:
@@ -455,6 +464,14 @@ class _Kernels:
             return blo, bhi, empty | e | e2
 
         self.bound = _Precompiled(jax.jit(jax.vmap(node, in_axes=(0, 0, None))), "bound")
+        # the same kernel with the cut pool (``minimize`` picks one): reduced-space cuts only
+        self.bound_pool = None
+        self.pool_cuts = None
+        if constrained and not lifted and cut_pool:
+            self.bound_pool = _Precompiled(jax.jit(jax.vmap(node, in_axes=(0, 0, None, None, None))), "bound_pool")
+            self.pool_cuts = jax.jit(jax.vmap(make_pool_cuts(f, ineq, eq, univariate=univariate, alphabb=alphabb,
+                                                             multivariate=multivariate, safe=safe, exact=exact),
+                                              in_axes=(0, None, None)))  # fmt: skip
         self.obbt = _Precompiled(jax.jit(jax.vmap(node_obbt, in_axes=(0, 0, None))), "obbt") if obbt else None
         self._problem, self._opts, self._fingerprints, self._nonlinear, self._structure = (f, ineq, eq), opts, {}, {}, {}
         self._quadratic, self._use_quadratic, self._qlock = {}, bool(quadratic) and not lifted, threading.Lock()
@@ -532,6 +549,14 @@ class _Kernels:
         if n not in self._fingerprints:
             self._fingerprints[n] = kcache.fingerprint(self._problem, n, sorted(self._opts.items()))
         return self._fingerprints[n]
+
+
+def _pool_parts(f, ineq, eq, n, safe):
+    """``lp.pool_parts``, or None when the analysis fails."""
+    try:
+        return pool_parts(f, ineq, eq, n, safe=safe)
+    except Exception:
+        return None
 
 
 def _vec(fn):
@@ -641,6 +666,21 @@ _PROBE = True  # integer variables: root probing on binaries (``probe`` in ``min
 _ENUM = 32  # integer variables: at the root, fix-and-solve every assignment when there are at most this many
 _FLOOR = 0.05  # pseudocosts are floored at this fraction of the mean over observed variables
 _DIVE_BACKOFF = 80  # most iterations between periodic dives that do not improve the incumbent
+# once there is an incumbent, a dive is skipped when the dives' total wall time (with its estimated
+# cost) would pass this fraction of the elapsed time: on smallinvDAX (1583-row tape, 30 integers)
+# one dive call costs ~9 s, and four of them took 36 s of a 60 s run whose incumbent was already
+# optimal
+_DIVE_FRAC = 0.2
+_POOL_NLP_FRAC = 0.3  # at most this share of the wall time goes to the cut pool's local solves
+_POOL_CHUNK = 16  # points per call of the cut pool's tangent kernel
+_POOL_ADD = 2  # LP points of the lowest-bound boxes of each batch whose tangents join the cut pool
+# the per-child local solves of the cut pool are probed (half the children get them) on
+# _POOL_PROBE_N boxes of each kind and kept when they add _POOL_GAIN (of the gap) to the
+# children's mean bound gain; flay04m (whose node LP is already tight) spent 30% of its time
+# on them for nothing. The verdict is revisited after _POOL_REPROBE iterations.
+_POOL_PROBE_N = 24
+_POOL_GAIN = 0.02
+_POOL_REPROBE = 40
 _LOCAL_BACKOFF = 16  # most iterations skipped between local searches that do not improve the incumbent
 _POLISH_ROUNDS = 5  # incumbent polish (``polish`` in ``minimize``): rounds while it keeps improving
 _POLISH_CANDS = 512  # integer neighbours (one step, swaps) tried per polish round
@@ -722,6 +762,7 @@ def minimize(
     lifted=False,
     quadratic=True,
     crown=False,
+    cut_pool=128,
     safe=SAFE_DEFAULT,
     time_limit=np.inf,
     verbose=False,
@@ -874,25 +915,102 @@ def minimize(
         crown = crown_auto(f, lo)
     elif crown:
         crown = crown_supported(f, lo)  # an unsupported f gets no CROWN kernel
+    _mark("cut_pool")
+    # convexity certificates on the root box: which parts get a cut pool (reduced-space LP only),
+    # and whether every certified verdict holds on the whole box (then on every node box too,
+    # so a certified function needs no base relaxation: ``exact``)
+    pmask, exact = None, False
+    if constrained and not lifted and cut_pool:
+        parts_ok = _cached(("pool_parts", f, ineq, eq, lo.size, bool(safe)),
+                           lambda: _pool_parts(f, ineq, eq, lo.size, bool(safe)))  # fmt: skip
+        if parts_ok is not None:
+            pmask, exact = parts_ok(lo, hi)
     _mark("kernels")
     opts = dict(n_fw=n_fw, n_kelley=n_kelley, fbbt=bool(fbbt), fbbt_rounds=fbbt_rounds, dbbt=bool(dbbt),
                 obbt=obbt or False, obbt_rounds=obbt_rounds, univariate=univariate, alphabb=alphabb,
                 multivariate=multivariate, lifted=lifted, crown=bool(crown), feas_tol=feas_tol, safe=bool(safe),
-                integer=tuple(int(i) for i in np.flatnonzero(imask)), quadratic=bool(quadratic))  # fmt: skip
+                integer=tuple(int(i) for i in np.flatnonzero(imask)), quadratic=bool(quadratic),
+                cut_pool=int(cut_pool) if pmask is not None and pmask.any() else 0, exact=bool(exact))  # fmt: skip
     K = _cached(("kernels", f, ineq, eq, tuple(sorted(opts.items()))), lambda: _Kernels(f, ineq, eq, **opts))
+    # the cut pool: tangents of the root box's relaxation at good points, added to every node LP
+    pool = None
+    if K.bound_pool is not None and K.lifted_form(lo.size) is None:
+        rows0 = np.zeros((int(cut_pool), lo.size + 2))
+        rows0[:, lo.size] = -np.inf
+        pool = dict(rows=rows0, root=np.stack([lo, hi]), mask=pmask, next=0, args=None)
+    bound_kernel = K.bound if pool is None else K.bound_pool
+
+    def pool_args():
+        """The pool's kernel arguments (none without a pool)."""
+        if pool is None:
+            return ()
+        if pool["args"] is None:
+            pool["args"] = (jnp.asarray(pool["rows"]), jnp.asarray(pool["root"]))
+        return pool["args"]
+
+    def pool_add(X):
+        """Add the root-box tangents of the pooled parts at the points ``X`` (k, n) to the pool
+        (a ring: the oldest rows go first; rows already in it are skipped)."""
+        if pool is None or pool.get("plain"):
+            return
+        X = np.atleast_2d(np.asarray(X, dtype=np.float64))
+        X = X[np.all(np.isfinite(X), axis=1)]
+        if not len(X):
+            return
+        root = pool["root"]
+        X = np.clip(X, root[0], root[1])
+        # the tangent kernel (compiled for _POOL_CHUNK points at a time) compiles in the
+        # background after the bound kernels: do not wait for it (flay04m stalled for seconds
+        # at the root); keep the latest points until it is ready
+        if not (pool["exe"].done() and pool["exe"].result().done()):
+            pool["pending"] = np.concatenate([pool.get("pending", X[:0]), X])[-_POOL_CHUNK:]
+            return
+        exe = pool["exe"].result().result()
+        if len(pool.get("pending", ())):
+            X, pool["pending"] = np.concatenate([pool["pending"], X]), X[:0]
+        a, b = [], []
+        for c in range(0, len(X), _POOL_CHUNK):
+            Xc = X[c:c + _POOL_CHUNK]
+            Xc = np.concatenate([Xc, np.repeat(Xc[:1], _POOL_CHUNK - len(Xc), 0)])
+            ac, bc = exe(jnp.asarray(Xc), jnp.asarray(root[0]), jnp.asarray(root[1]))
+            a.append(np.asarray(ac))
+            b.append(np.asarray(bc))
+        a, b = np.concatenate(a)[:len(X)], np.concatenate(b)[:len(X)]
+        rows, n_ = pool["rows"], lo.size
+        for i in range(len(X)):
+            for k in np.flatnonzero(pool["mask"]):
+                if not np.isfinite(b[i, k]):
+                    continue
+                r = np.concatenate([a[i, k], [b[i, k], 1.0 if k == 0 else 0.0]])
+                scale = 1.0 + np.abs(r[:n_ + 1]).max()
+                live = np.isfinite(rows[:, n_])
+                if np.any(live & (rows[:, n_ + 1] == r[n_ + 1]) &
+                          np.all(np.abs(rows[:, :n_ + 1] - r[:n_ + 1]) <= 1e-9 * scale, axis=1)):  # fmt: skip
+                    continue
+                rows[pool["next"]] = r
+                pool["next"] = (pool["next"] + 1) % len(rows)
+                pool["args"] = None
+
     _mark("start_compile")
     padded = _Padder(batch, batch_sizes, jax.devices() if devices is None else list(devices))
     if padded.mesh is None:  # compile the kernels in the background while the setup below runs
         fp = functools.partial(K.fingerprint, lo.size) if kcache.cache_root() else None
+        extra = () if pool is None else (pool["rows"].shape, pool["root"].shape)
         for b in padded.sizes:
-            K.bound.start(b, lo.size, fp)
+            bound_kernel.start(b, lo.size, fp, extra)
         if obbt == "tree":  # obbt="root": started once the root shows OBBT will run (``need_obbt``)
             for b in padded.sizes:
                 K.obbt.start(b, lo.size, fp)
+    if pool is not None:  # the pool's tangent kernel, traced after the bound kernels
+        tracer, compiler = _pools()
+        pts, vec = jax.ShapeDtypeStruct((_POOL_CHUNK, lo.size), jnp.float64), jax.ShapeDtypeStruct((lo.size,), jnp.float64)
+        pool["exe"] = tracer.submit(lambda: compiler.submit(K.pool_cuts.trace(pts, vec, vec).lower().compile))
     _mark("start_dive_compile")
     if K.dive is not None and padded.mesh is None:  # the dive kernel too, traced after the others
         box, cut = jax.ShapeDtypeStruct((_DIVES, lo.size), jnp.float64), jax.ShapeDtypeStruct((), jnp.float64)
         K.dive.start(_DIVES, lo.size, fp, args=(box, box, box, cut))
+    if pool is not None and padded.mesh is None:  # for the pool kernel without rows (pool_judge)
+        pool["fp"] = fp
     # integer variables are split even where they enter linearly: that is what makes them integral
     _mark("nonlinear")
     nl = K.nonlinear(lo.size)
@@ -925,6 +1043,7 @@ def minimize(
         S = np.clip(np.asarray(starts, dtype=np.float64), lo, hi)
         if imask.any():
             R = np.clip(np.asarray(solve_local(S, options=options)), lo, hi)  # NLP relaxation
+            pool_add(R)
             fl = np.floor(R)
             fixed = np.concatenate([np.clip(fl + (R - fl > t), lo, hi) for t in ROUNDINGS])
             fixed = np.unique(np.where(imask, fixed, np.concatenate([R] * len(ROUNDINGS))), axis=0)
@@ -934,6 +1053,8 @@ def minimize(
             X = np.clip(np.asarray(solve_local(S, options=options)), lo, hi)
         F = screen(X)
         i = int(np.argmin(F))
+        if np.isfinite(F[i]):
+            pool_add(X[i])
         return X[i], float(F[i])
 
     def screen(X):
@@ -987,9 +1108,65 @@ def minimize(
         return x, fx, ""
 
     deadline = t0 + time_limit if np.isfinite(time_limit) else None
+
+    def pool_nlp(blo, bhi, starts, pair):
+        """Pool the tangents at local solutions of the continuous problem in each box (from
+        ``starts``): on a convex part those are the cuts that close the box's LP bound to its
+        NLP bound. Within ``_POOL_NLP_FRAC`` of the wall time, and only while it pays off: in a
+        probe phase only the children of every other parent (``pair``: the parent of each
+        child) get the solves, and ``pool_judge`` compares their bound gains with the others'.
+        Returns the mask of the boxes that got them, or None."""
+        if pool is None or not local_solve or _past(deadline):
+            return None
+        t = time.perf_counter()
+        if pool.setdefault("nlp_time", 0.0) > _POOL_NLP_FRAC * (t - t0):
+            return None
+        st = pool.setdefault("nlp", dict(mode="probe", since=it, gt=[], gu=[]))
+        if st["mode"] == "on" and it - st["since"] >= _POOL_REPROBE:
+            st.update(mode="probe", since=it, gt=[], gu=[])
+        if st["mode"] == "off":
+            return None
+        do = (pair % 2 == 0) if st["mode"] == "probe" else np.ones(len(blo), bool)
+        if do.any():
+            X = np.clip(np.asarray(solve_local(np.clip(starts[do], blo[do], bhi[do]), blo[do], bhi[do])),
+                        blo[do], bhi[do])  # fmt: skip
+            pool_add(X)
+        pool["nlp_time"] += time.perf_counter() - t
+        return do
+
+    def pool_judge(do, clb, plb_c):
+        """Probe phase of ``pool_nlp``: the gains ``clb - plb`` (relative to the gap) of the
+        boxes with and without the local solves; once there are enough of both, keep the solves
+        on when they at least add ``_POOL_GAIN`` to the mean gain (else switch them off) until
+        the next probe ``_POOL_REPROBE`` iterations later."""
+        st = pool.get("nlp") if pool is not None else None
+        if do is None or st is None or st["mode"] != "probe" or not np.isfinite(ub):
+            return
+        cap = np.maximum(ub - plb_c, 1e-12)
+        g = np.clip(np.where(np.isfinite(clb), clb - plb_c, cap), 0.0, cap) / cap
+        st["gt"] += g[do].tolist()
+        st["gu"] += g[~do].tolist()
+        if min(len(st["gt"]), len(st["gu"])) >= _POOL_PROBE_N:
+            on = np.mean(st["gt"]) >= np.mean(st["gu"]) + _POOL_GAIN
+            st.update(mode="on" if on else "off", since=it)
+            if not on and padded.mesh is None:
+                # the pool's rows cost the node LP up to 2x (process): the pool kernel without
+                # rows for the rest of the search, once it has compiled in the background (not
+                # at the start: that compile competed with the root phase of every solve)
+                pool["plain"] = True
+                for b in padded.sizes:
+                    bound_kernel.start(b, lo.size, pool["fp"], ((0, lo.size + 2), pool["root"].shape))
+
+    def plain_kernel():
+        """Whether the pool kernel runs without rows (``pool_judge``): once that is compiled."""
+        if pool is None or not pool.get("plain"):
+            return False
+        futs = [f for k, f in bound_kernel.ready.items() if len(k) > 3 and k[3][0][0] == 0]
+        return bool(futs) and all(f.done() and f.result().done() for f in futs)
+
     bound_call = [0.0]  # seconds of the slowest bound-kernel call so far (first-dive cost estimate)
 
-    def run(kernel, calls, cutoff, k):
+    def run(kernel, calls, cutoff, k, extra=()):
         """Apply ``kernel`` to each padded call; first ``k`` rows.
 
         Once the time limit has passed no further call is dispatched: ``_Deadline`` (or
@@ -1003,11 +1180,11 @@ def minimize(
             if padded.mesh is not None:  # sharded calls compile through jit (synchronously)
                 if _past(deadline):
                     raise _Deadline(kernel.name)
-                outs.append(jax.block_until_ready(kernel.jitted(*c, cutoff)))
+                outs.append(jax.block_until_ready(kernel.jitted(*c, cutoff, *extra)))
                 continue  # (a call that compiled is no estimate of a call's cost)
-            o = kernel(*c, cutoff, deadline=deadline)
+            o = kernel(*c, cutoff, *extra, deadline=deadline)
             outs.append(jax.block_until_ready(o))
-            if kernel is K.bound:  # not counting the wait for the executable
+            if kernel is bound_kernel:  # not counting the wait for the executable
                 bound_call[0] = max(bound_call[0], time.perf_counter() - kernel.dispatched)
         return [np.concatenate([np.asarray(o[i]) for o in outs])[:k] for i in range(len(outs[0]))]
 
@@ -1024,7 +1201,13 @@ def minimize(
             calls = padded(blo, bhi) if obbt == "tree" else [[jnp.asarray(blo), jnp.asarray(bhi)]]
             olo, ohi, oe = run(K.obbt, calls, cutoff, k)
             blo, bhi, empty = np.where(oe[:, None], blo, olo), np.where(oe[:, None], bhi, ohi), oe
-        lb, x, fx, rlo, rhi, xr = run(K.bound, padded(blo, bhi), cutoff, k)
+        # a pool switched off by the probe: the zero-row variant skips the rows' LP cost
+        args = (jnp.zeros((0, lo.size + 2)), pool_args()[1]) if plain_kernel() else pool_args()
+        lb, x, fx, rlo, rhi, xr = run(bound_kernel, padded(blo, bhi), cutoff, k, args)
+        if pool is not None:  # the LP points of the lowest bounds: where the pool's cuts are needed next
+            live = np.isfinite(lb) & (lb < ub)
+            if live.any():
+                pool_add(xr[np.flatnonzero(live)[np.argsort(lb[live])[:_POOL_ADD]]])
         # an empty box holds no feasible point with f <= cutoff
         return (np.where(empty, ub, lb), x, np.where(empty, np.inf, fx),
                 np.where(empty[:, None], blo, rlo), np.where(empty[:, None], bhi, rhi),
@@ -1152,6 +1335,7 @@ def minimize(
 
     rng = np.random.default_rng(0)
     dive_cost = [None]  # wall seconds of the last dive (kernel run and fixed solves)
+    dive_total = [0.0]  # wall seconds of all dives so far
 
     def time_for(estimate):
         """Whether ``1.5 * estimate`` seconds of incumbent-only work (dives, root enumeration)
@@ -1189,6 +1373,8 @@ def minimize(
         if not time_for(est):
             return
         t = time.perf_counter()
+        if np.isfinite(ub) and est is not None and dive_total[0] + est > _DIVE_FRAC * (t - t0):
+            return  # with an incumbent, dives get at most _DIVE_FRAC of the wall time
         try:
             DL, DH, F = (np.asarray(a) for a in K.dive(*args, deadline=deadline))
         except (_CompileTimeout, _Deadline):
@@ -1197,6 +1383,7 @@ def minimize(
         if ok.any() and not _past(deadline):
             fixed_solve(DL[:k][ok], DH[:k][ok], pad(points)[:k][ok])
         dive_cost[0] = time.perf_counter() - t
+        dive_total[0] += dive_cost[0]
 
     def probe(rlo, rhi, lb):
         """Root probing on the binary variables: bound the box with each one at 0 and at 1 (one
@@ -1465,10 +1652,12 @@ def minimize(
         clo = np.concatenate([plo[pp], right_lo])
         chi = np.concatenate([left_hi, phi[pp]])
 
+        nlp_do = pool_nlp(clo, chi, np.concatenate([pxr[pp], pxr[pp]]), np.concatenate([ar, ar]))
         try:
             clb, cx, cf, clo, chi, cxr = evaluate(clo, chi, with_obbt=obbt == "tree")
         except _CompileTimeout:  # out of time while a kernel compiles; the open boxes are unchanged
             break
+        pool_judge(nlp_do, clb, np.concatenate([plb[pp], plb[pp]]))
         update_incumbent(cx, cf, clb)
         if imask.any() and it >= next_dive:  # dives from the most promising children
             o = np.argsort(clb)[:_DIVES]

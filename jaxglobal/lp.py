@@ -259,13 +259,17 @@ def _as_vec(fn):
     return None if fn is None else (lambda x: jnp.atleast_1d(fn(x)))
 
 
-def _parts_fn(f, ineq, eq, univariate, alphabb=False, multivariate=False, safe=False, convex=True):
+def _parts_fn(f, ineq, eq, univariate, alphabb=False, multivariate=False, safe=False, convex=True, exact=False):
     """``prepare(lo, hi)`` and ``parts(x, lo, hi, data)`` = [cv_f, cv_g..., cv_h..., -cc_h...].
 
     With ``convex`` each part is ``max(relaxation, function)`` where the function is
-    certified convex on the box (``convexity``), so its cuts are outer approximation."""
-    rs = [make_relaxer(_as_vec(fn), univariate, alphabb, multivariate=multivariate, safe=safe, convex=convex)
-          if fn is not None else None for fn in (f, ineq, eq)]  # fmt: skip
+    certified convex on the box (``convexity``), so its cuts are outer approximation.
+    ``exact``: the boxes lie where the certificates' conditions hold, so a function that is
+    certified throughout is relaxed by itself alone (``convexity.exact_certificate``)."""
+    # f and g only enter through their convex side (and interval bounds, which may be infinite)
+    rs = [make_relaxer(_as_vec(fn), univariate, alphabb, multivariate=multivariate, safe=safe, convex=convex,
+                       sides=sides, conditional=exact) if fn is not None else None
+          for fn, sides in ((f, ("cv",)), (ineq, ("cv",)), (eq, ("cv", "cc")))]  # fmt: skip
 
     def prepare(lo, hi):
         return tuple(r.prepare(lo, hi) if r is not None else None for r in rs)
@@ -294,17 +298,23 @@ def _parts_fn(f, ineq, eq, univariate, alphabb=False, multivariate=False, safe=F
 
 
 def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, tol=0.0, univariate=False,
-                             alphabb=False, multivariate=False, safe=False):
-    """Return ``bound(lo, hi, cutoff) -> (lb, x_lp, infeasible, lo', hi')`` for one box.
+                             alphabb=False, multivariate=False, safe=False, exact=False):
+    """Return ``bound(lo, hi, cutoff, pool=None, root=None) -> (lb, x_lp, infeasible, lo', hi')`` for one box.
 
     ``[lo', hi']`` is the box after duality-based range reduction against
     ``f <= cutoff`` (the incumbent value); it is the input box when
     ``cutoff`` is infinite.
+
+    ``pool`` ``(R, n + 2)``: extra cuts ``a . x + b <= t`` (objective, last
+    column > 0) or ``a . x + b <= tol`` (constraint), rows ``[a, b, obj]``,
+    valid on the box ``root`` ``(2, n)`` (``make_pool_cuts``: tangents of the
+    root box's relaxation). They are added to every LP when ``[lo, hi]`` lies in
+    ``root``; ``b = -inf`` marks an empty slot. ``exact``: see ``_parts_fn``.
     """
-    prepare, parts, _ = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate, safe)
+    prepare, parts, _ = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate, safe, exact=exact)
     nonlinear = _nonlinear_of(f, ineq, eq)
 
-    def bound(lo, hi, cutoff=jnp.inf):
+    def bound(lo, hi, cutoff=jnp.inf, pool=None, root=None):
         n = lo.size
         nl = nonlinear(n)
         w = hi - lo
@@ -342,25 +352,45 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
         bad_t = ~jnp.isfinite(tlo)
         tlo_s = jnp.where(bad_t, 0.0, tlo)
 
+        if pool is not None:
+            # pool cuts in unit-box coordinates; valid only where the box lies in their root box
+            pa, pb0, pobj = pool[:, :n], pool[:, n], pool[:, n + 1] > 0
+            inside = jnp.all(lo >= root[0]) & jnp.all(hi <= root[1])
+            pcoef = pa * w
+            pconst = _cut_const(pb0, pa, lo, jnp.zeros(n), pcoef, safe)  # a . lo + b
+            pok = inside & jnp.isfinite(pconst) & jnp.all(jnp.isfinite(pcoef), axis=1)
+            pconst = jnp.where(pok, pconst, -jnp.inf)
+            pcoef = jnp.where(pok[:, None], pcoef, 0.0)
+            pool_A = jnp.concatenate([pcoef, jnp.where(pobj, -T, 0.0)[:, None]], axis=1)
+            pool_b = jnp.where(pobj, tlo_s, tol) - pconst
+            pool_mag = jnp.where(pobj, jnp.abs(tlo_s), abs(tol)) + jnp.abs(pconst)
+
         def rows(const, coef):
             """LP rows over z = (u, tau) with t = tlo + T tau.
 
             objective cut:  const0 + coef0.u <= t   -> coef0.u - T tau <= tlo - const0
             constraint cut: const_i + coef_i.u <= tol -> coef_i.u        <= tol - const_i
+
+            followed by the pool's rows (the same two forms).
             """
             tcol = jnp.zeros(const.shape + (1,)).at[..., 0, 0].set(-T)
             A = jnp.concatenate([coef, tcol], axis=-1).reshape(-1, n + 1)
             bvec = jnp.concatenate([tlo_s - const[..., :1], tol - const[..., 1:]], axis=-1).reshape(-1)
+            mag = jnp.concatenate([jnp.abs(tlo_s) + jnp.abs(const[..., :1]), abs(tol) + jnp.abs(const[..., 1:])], axis=-1).reshape(-1)
+            keep = _cut_rows(const.shape, nl)
+            if keep is not None:
+                A, bvec, mag = A[keep], bvec[keep], mag[keep]
+            if pool is not None:
+                A, bvec, mag = (jnp.concatenate([A, pool_A]), jnp.concatenate([bvec, pool_b]),
+                                jnp.concatenate([mag, pool_mag]))  # fmt: skip
             live = jnp.isfinite(bvec)
             nrm = jnp.linalg.norm(A, axis=1)
             live &= nrm > 0
             nrm = jnp.where(live, nrm, 1.0)
-            mag = jnp.concatenate([jnp.abs(tlo_s) + jnp.abs(const[..., :1]), abs(tol) + jnp.abs(const[..., 1:])], axis=-1).reshape(-1)
             A = jnp.where(live[:, None], A / nrm[:, None], 0.0)
             bvec = jnp.where(live, bvec / nrm, 1.0)  # dead rows: 0 <= 1
             bvec = _row_margin(A, bvec, jnp.where(live, mag / nrm, 0.0), live, safe)
-            keep = _cut_rows(const.shape, nl)
-            return (A, bvec) if keep is None else (A[keep], bvec[keep])
+            return A, bvec
 
         box_A = jnp.concatenate([jnp.eye(n + 1), -jnp.eye(n + 1)])
         box_b = jnp.concatenate([jnp.ones(n + 1), jnp.zeros(n + 1)])
@@ -423,8 +453,89 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
     return bound
 
 
+def make_pool_cuts(f, ineq=None, eq=None, univariate=False, alphabb=False, multivariate=False, safe=False,
+                   exact=False):
+    """Return ``cuts(p, lo, hi) -> (a, b)``: the cuts ``a[k] . x + b[k]`` of each convex part
+    [cv_f, cv_g..., cv_h..., -cc_h...] of the relaxation on the box ``[lo, hi]``, taken at ``p``
+    (``a`` ``(K, n)``, ``b`` ``(K,)``; ``b = -inf`` where not finite).
+
+    A tangent of a convex minorant on ``[lo, hi]`` minorizes the part on every sub-box, so
+    these cuts, taken once on the root box, are valid at every node of the tree (the cut
+    pool of ``make_constrained_bounder``). With ``safe``, ``b`` is lowered by the rounding of
+    ``v - a . p``. ``exact``: see ``_parts_fn``.
+    """
+    prepare, parts, _ = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate, safe, exact=exact)
+
+    def cuts(p, lo, hi):
+        data = prepare(lo, hi)
+
+        def fn(x):
+            v = parts(x, lo, hi, data)
+            return v, v
+
+        J, v = jax.jacfwd(fn, has_aux=True)(p)
+        b = v - J @ p
+        if safe:
+            b = b - SAFE_K * (p.size + 3) * EPS * (jnp.abs(v) + jnp.abs(J) @ jnp.abs(p))
+        ok = jnp.isfinite(b) & jnp.all(jnp.isfinite(J), axis=1)
+        return jnp.where(ok[:, None], J, 0.0), jnp.where(ok, b, -jnp.inf)
+
+    return cuts
+
+
+def pool_parts(f, ineq, eq, n, safe=False):
+    """Return ``parts_ok(lo, hi) -> (mask, exact)`` from the convexity certificates of
+    ``f``, ``ineq``, ``eq`` (``convexity``), or None when no nonlinear part is ever certified.
+
+    ``mask`` ``(K,)``: the convex parts [cv_f, cv_g..., cv_h..., -cc_h...] that are nonlinear
+    and certified convex on the box, for which the root box's tangents are worth pooling (on
+    them the relaxation is the function itself, so a tangent at a point near the optimum is
+    as tight as a cut can be there; elsewhere a root-box tangent is a weak cut, valid but
+    rarely useful). ``exact``: every certified verdict's conditions hold on the box, so
+    on its sub-boxes a certified function can be relaxed by itself alone (``_parts_fn``).
+    """
+    from . import convexity
+
+    if not convexity.ENABLED:
+        return None
+    x = jnp.zeros(n)
+    certs = []  # (cert, side, outputs) per block of parts
+    for fn, sides in ((f, ("cv",)), (ineq, ("cv",)), (eq, ("cv", "cc"))):
+        if fn is None:
+            continue
+        flat = lambda x, fn=fn: jnp.reshape(fn(x), (-1,))  # noqa: E731
+        try:
+            cert = convexity.certificate_of(flat, x)
+        except Exception:
+            cert = None
+        if cert is not None and safe and cert.size > convexity.SAFE_MAX_NODES:
+            cert = None
+        m = int(np.prod(jax.eval_shape(flat, x).shape))
+        for side in sides:
+            certs.append((cert, side, m))
+    if not any(c is not None and (np.asarray(getattr(c, side + "_mask")) & ~np.asarray(c.affine)).any()
+               for c, side, _ in certs):  # fmt: skip
+        return None
+
+    def parts_ok(lo, hi):
+        lo, hi = jnp.asarray(lo, jnp.float64), jnp.asarray(hi, jnp.float64)
+        out, exact = [], True
+        for cert, side, m in certs:
+            if cert is None:
+                out.append(np.zeros(m, bool))
+                continue
+            ok_cv, ok_cc = convexity.prepare(cert, lo, hi)
+            ok = np.asarray(ok_cv if side == "cv" else ok_cc, bool)
+            static = np.asarray(getattr(cert, side + "_mask"), bool)
+            exact &= bool(np.all(ok | ~static))
+            out.append(ok & ~np.asarray(cert.affine, bool))
+        return np.concatenate(out), exact
+
+    return parts_ok
+
+
 def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate=False, alphabb=False,
-              multivariate=False, safe=False, own_cuts=True):
+              multivariate=False, safe=False, own_cuts=True, exact=False):
     """Return ``obbt(lo, hi, cutoff) -> (lo', hi', infeasible)`` for one box.
 
     Optimality-based bound tightening: each variable is minimized and
@@ -438,9 +549,9 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
     every LP gets the cuts at all 2n of them (2n times the rows, for about the
     same tightening). The 2n LPs are one ``vmap``. As in the
     node bound, the new variable bounds are weak-duality certificates, so an
-    inexact LP solve can only make them looser, never invalid.
+    inexact LP solve can only make them looser, never invalid. ``exact``: see ``_parts_fn``.
     """
-    prepare, parts, _ = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate, safe)
+    prepare, parts, _ = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate, safe, exact=exact)
     nonlinear = _nonlinear_of(f, ineq, eq)
 
     def obbt(lo, hi, cutoff=jnp.inf):

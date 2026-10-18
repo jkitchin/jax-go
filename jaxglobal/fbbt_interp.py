@@ -179,6 +179,10 @@ def _branches(prog, safe):
 # the steps were 1.2-4x faster (kriging_peaks, 1,162 rows: 561 -> 126 ms for 16 boxes), under
 # ~120 rows (a handful of rows per step, padded to twice as many) up to 2x slower for 256 boxes.
 SCHEDULE_MIN_ROWS = 300
+# scheduled sweeps stop before ``rounds`` once a round moves no slot by more than this fraction of
+# its width (``_rounds``): on smallinvDAX (1583 rows) the later rounds of the default 5 changed
+# nothing and FBBT was 15x the cost of the node LP
+STALL = 1e-3
 
 
 def make_propagate(tape, ineq, eq, n, feas_tol, rounds, safe=False, scheduled=None, integer=()):
@@ -285,12 +289,40 @@ def _propagate_steps(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds, integer=()):
             V = V.at[:n, 0].set(xl).at[:n, 1].set(xh)
             return jnp.where(is_c[:, None], cval[:, None], V), empty | e1 | e2 | e3
 
-        P, empty = lax.fori_loop(0, rounds, round_, (P0, jnp.array(False)))
+        P, empty = _rounds(round_, rounds, P0)
         V, e = forward(P)
         xl, xh = V[:n, 0], V[:n, 1]
         return jnp.minimum(xl, xh), jnp.maximum(xl, xh), empty | e
 
     return fbbt
+
+
+def _progress(P, Q):
+    """Whether a round moved any slot's bounds ``P -> Q`` (``(S, 2)``) by more than ``STALL`` of
+    its width (or of 1 for a point or an unbounded slot): an infinite bound becoming finite counts."""
+    w = jnp.where(jnp.isfinite(P[:, 1] - P[:, 0]), jnp.maximum(P[:, 1] - P[:, 0], 0.0), jnp.inf)
+    tol = STALL * jnp.where(jnp.isfinite(w) & (w > 0), w, 1.0)
+    d = jnp.abs(jnp.where(jnp.isfinite(Q), Q, 0.0) - jnp.where(jnp.isfinite(P), P, 0.0))
+    newly = jnp.isfinite(Q) & ~jnp.isfinite(P)
+    return jnp.any(newly) | jnp.any(d > tol[:, None])
+
+
+def _rounds(round_, rounds, P0):
+    """Up to ``rounds`` FBBT rounds ``round_(k, (P, empty))``; stops early once a round no longer
+    makes progress (``_progress``) or finds the box empty. Fewer rounds only leave a box larger,
+    so stopping is always sound."""
+
+    def cond(c):
+        k, _, empty, moved = c
+        return (k < rounds) & moved & ~empty
+
+    def body(c):
+        k, P, empty, _ = c
+        Q, e = round_(k, (P, empty))
+        return k + 1, Q, e, _progress(P, Q)
+
+    _, P, empty, _ = lax.while_loop(cond, body, (jnp.array(0), P0, jnp.array(False), jnp.array(True)))
+    return P, empty
 
 
 def _propagate_rows(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds, integer=()):
