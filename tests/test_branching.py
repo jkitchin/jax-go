@@ -18,7 +18,9 @@ IDS = [",".join(f"{k}={v}" for k, v in o.items()) for o in OPTIONS]
 
 
 def solve(p, **kw):
-    return minimize(p.f, p.lo, p.hi, ineq=getattr(p, "ineq", None), eq=getattr(p, "eq", None), **kw)
+    return minimize(
+        p.f, p.lo, p.hi, ineq=getattr(p, "ineq", None), eq=getattr(p, "eq", None), **kw
+    )
 
 
 @pytest.mark.parametrize("opts", OPTIONS, ids=IDS)
@@ -43,7 +45,10 @@ def test_default_evaluations_match_nodes():
     for kw in ({}, {"integer": [0]}):
         r = solve(CAMEL, **kw)
         assert r.status == "optimal"
-        assert r.evaluations in (r.nodes, r.nodes + 1)  # +1: the root is re-bounded after root OBBT
+        assert r.evaluations in (
+            r.nodes,
+            r.nodes + 1,
+        )  # +1: the root is re-bounded after root OBBT
 
 
 def test_auto_branching_rule():
@@ -54,8 +59,15 @@ def test_auto_branching_rule():
     h3 = next(p for p in PROBLEMS if p.name == "hartmann3")
     sh = next(p for p in PROBLEMS if p.name == "shubert")
     n = lambda r: (r.status, r.nodes, r.evaluations)  # noqa: E731
-    assert n(solve(h3, branch_var="width")) != n(solve(h3, branch_var="pseudocost")) == n(solve(h3))
-    w, pc = solve(sh, integer=[0], branch_var="width"), solve(sh, integer=[0], branch_var="pseudocost")
+    assert (
+        n(solve(h3, branch_var="width"))
+        != n(solve(h3, branch_var="pseudocost"))
+        == n(solve(h3))
+    )
+    w, pc = (
+        solve(sh, integer=[0], branch_var="width"),
+        solve(sh, integer=[0], branch_var="pseudocost"),
+    )
     assert n(pc) != n(w) == n(solve(sh, integer=[0]))
 
 
@@ -77,3 +89,60 @@ def test_orthant_multisection_reaches_optimum(p, q, monkeypatch):
     assert r.status == "optimal"
     assert abs(r.fun - p.fstar) < 1e-4 * (1 + abs(p.fstar))
     assert r.lower_bound <= p.fstar + 1e-6 * (1 + abs(p.fstar))
+
+
+def test_failed_local_solves_on_a_convex_problem_keep_finite_branch_points(monkeypatch):
+    """On convex problems children branch at the local solutions; a solve that returns NaN keeps
+    the LP point (NaN branch points made NaN boxes that were never pruned: max_iter at 13823 nodes)."""
+    import jax.numpy as jnp
+    import numpy as np
+
+    from jaxglobal import bnb
+
+    make_local = bnb.make_local
+
+    def nan_local(*a, **k):
+        solve = make_local(*a, **k)
+
+        def failing(S, lo=None, hi=None, **kw):
+            X = np.array(
+                solve(S, lo, hi, **kw) if lo is not None else solve(S, **kw),
+                dtype=float,
+            )
+            if X.ndim == 2 and lo is not None:
+                X[:] = np.nan  # the per-child solves fail
+            return X
+
+        return failing
+
+    monkeypatch.setattr(bnb, "make_local", nan_local)
+    monkeypatch.setattr(bnb, "_cached", lambda key, build: build())
+    n = 4
+
+    def f(z):
+        return (
+            sum(jnp.exp(1.5 * z[j]) + (z[j] - 0.3 * j) ** 4 for j in range(n))
+            + (z[0] + z[1] - z[2] + 0.5 * z[3]) ** 2
+        )
+
+    def g(z):  # written out: a dot product hides the convexity
+        return jnp.stack(
+            [
+                z[0] ** 2 + 2 * z[1] ** 2 + z[2] ** 2 + z[3] ** 2 - 3.0,
+                jnp.exp(z[0]) + jnp.exp(-z[3]) - 3.0,
+                0.4 - z[0] - z[1] - z[2],
+            ]
+        )
+
+    r = minimize(
+        f,
+        -3 * np.ones(n),
+        3 * np.ones(n),
+        ineq=g,
+        branch_point="relax",
+        n_kelley=0,
+        max_iter=60,
+        abs_tol=1e-10,
+        rel_tol=1e-10,
+    )
+    assert r.status == "optimal" and r.lower_bound <= r.fun + 1e-9
