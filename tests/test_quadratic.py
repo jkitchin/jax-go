@@ -188,3 +188,59 @@ def test_circle_packing_solves():
     assert r.lower_bound <= r.fun + 1e-6
     # stacked triangle: W = 1 + sqrt(3)/2... the solver's answer must be at most the 1 x 3 strip
     assert r.fun <= 3.0 + 1e-6
+
+
+def _ordered_circles():
+    """Three unit circles ordered by x (x1 <= x2 <= x3), in a W x H rectangle: v = (x1, y1, ..., W, H, a)."""
+    f, g0, h, lo, hi, n = _three_circles()
+
+    def g(v):
+        return jnp.concatenate([g0(v), jnp.stack([v[0] - v[2], v[2] - v[4]])])
+
+    return f, g, h, lo, hi, n
+
+
+def test_ineq_rlt_rows():
+    """Bound-factor RLT rows: generated for the ordering rows and the products they need, and
+    satisfied by every point of the box that satisfies the inequality, for any box."""
+    f, g, h, lo, hi, n = _ordered_circles()
+    Q = quadratic_form(f, g, h, n)
+    rows = Q.n_g - 2 + np.arange(2)
+    assert set(Q.qr_g.tolist()) <= set(rows.tolist()) and len(Q.qr_g) > 0
+    assert {0, 2} <= set(Q.qr_var[Q.qr_g == rows[0]].tolist())  # x1 <= x2 times bound factors of x1, x2
+    assert len(quadratic_form(*_three_circles()[:3], n).qr_g) == 0  # no linear inequality of 2-3 variables
+    L = _layout(Q, n, 0, False)
+    rng = np.random.default_rng(1)
+    T2 = len(Q.qr_g)
+    for _ in range(20):
+        a, b = rng.uniform(lo, hi), rng.uniform(lo, hi)
+        blo, bhi = np.minimum(a, b), np.maximum(a, b)
+        _, _, vals, bb, _ = _lp(Q, L, jnp.asarray(blo), jnp.asarray(bhi), 1e-6, False)
+        A = sparse.coo_matrix((np.asarray(vals), (L.pattern.rows, L.pattern.cols)), shape=(L.pattern.m, len(Q.E[0])))
+        A = A.tocsr()
+        sel = np.arange(L.pattern.m - 2 * T2, L.pattern.m)  # the RLT block is last (no tangents, no cutoff)
+        for _ in range(20):
+            x = rng.uniform(blo, bhi)
+            if np.max(np.asarray(g(x))[rows]) > 0:
+                x[2] = min(max(x[0], x[2]), bhi[2])
+                x[4] = min(max(x[2], x[4]), bhi[4])
+            if np.max(np.asarray(g(x))[rows]) > 1e-6:
+                continue
+            v = lifted_point(Q, x)
+            assert np.all(A[sel] @ v <= np.asarray(bb)[sel] + 1e-9)
+
+
+def test_ineq_rlt_tightens_ordered_circles():
+    """With x1 <= x2 the RLT rows give (x2 - x1)^2 <= U (x2 - x1): on a box where the circles'
+    x-ranges coincide (width 1.2 > 1) the McCormick facets alone allow every circle on one
+    vertical line, so the bound with the RLT rows is higher."""
+    f, g, h, lo, hi, n = _ordered_circles()
+    Q = quadratic_form(f, g, h, n)
+    blo = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0])
+    bhi = np.array([1.7, 1.2, 1.7, 1.2, 1.7, 1.2, 2.2, 1.7, 16.0])
+    with_rlt = make_quadratic_bounder(Q, tol=1e-6)(jnp.asarray(blo), jnp.asarray(bhi))[0]
+    plain = make_quadratic_bounder(Q._replace(qr_g=np.zeros(0, np.int64)), tol=1e-6)  # no RLT block
+    without = plain(jnp.asarray(blo), jnp.asarray(bhi))[0]
+    assert with_rlt > without + 1e-3
+    r = jaxglobal.minimize(f, lo, hi, ineq=g, eq=h, time_limit=60)
+    assert r.status == "optimal"
