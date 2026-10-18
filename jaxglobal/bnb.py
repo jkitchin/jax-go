@@ -630,6 +630,7 @@ _POLISH_CANDS = 512  # integer neighbours (one step, swaps) tried per polish rou
 _POLISH_CHUNK = 64  # neighbours per batch of local solves (the time budget is checked between batches)
 _POLISH_MIN, _POLISH_FRAC = 2.0, 0.1  # polish time budget: _POLISH_MIN s plus this fraction of the elapsed time
 _NEAR_ZERO_STARTS = 4  # extra random starts for the scaled local solves of a near-zero objective
+_STRICT_FRAC = 1e-3  # repair_incumbent: violation (x feas_tol) above which a reported incumbent is repaired
 _ETA, _M = 2, 4  # branch_var="reliability": observations to trust a pseudocost, strong-branching candidates
 _BAL = 10.0  # branch_var="strong": candidates are at least 1/_BAL as wide as the widest variable
 _Q, _ETA_MS = 2, 0.5  # branch_var="strong": split on up to _Q variables at once, those scoring >= _ETA_MS * best
@@ -923,6 +924,34 @@ def minimize(
         if imask.any():
             bad |= np.any(np.abs(X[:, imask] - np.round(X[:, imask])) > INT_TOL, axis=1)
         return np.where(bad, np.inf, F)
+
+    def repair_incumbent(x, fx):
+        """The incumbent to report: ``x`` itself, or a strictly feasible point near it.
+
+        The search accepts points with constraint violation up to ``feas_tol``, and relaxation
+        minimizers sit exactly there; a violation of 1e-6 in a sensitive constraint can make
+        ``f`` smaller than the problem's true optimum (st_z, ex8_5_3, ex9_2_3). When the
+        violation exceeds ``_STRICT_FRAC * feas_tol`` one local solve from ``x`` (integers
+        fixed, tight constraint tolerance) looks for a point within that; if it finds one it is
+        reported instead, with its own objective value (larger when the violation was helping,
+        smaller when the solve also improves the point). Pruning, the lower bound and the status
+        are unchanged: they are those of the problem relaxed by ``feas_tol``.
+        Returns (x, f(x), note)."""
+        strict = _STRICT_FRAC * feas_tol
+        v = float(np.asarray(K.viol(jnp.asarray(x[None], dtype=jnp.float64)))[0])
+        if not v > strict:
+            return x, fx, ""
+        L, H = np.where(imask, x, lo), np.where(imask, x, hi)
+        opts = {"constr_viol_tol": 0.1 * strict, **(near_zero_options(fx, abs_tol) or {})}
+        try:
+            X = np.clip(np.asarray(solve_local(x[None], L[None], H[None], options=opts)), L, H)
+            F, vr = screen(X), np.asarray(K.viol(jnp.asarray(X)))
+        except Exception:  # an optional improvement: any failure keeps the incumbent
+            return x, fx, ""
+        if np.isfinite(F[0]) and vr[0] <= strict:
+            return X[0], float(F[0]), (f"incumbent repaired from violation {v:.2g} to {vr[0]:.2g} "
+                                       f"(f {fx:.10g} -> {F[0]:.10g})")  # fmt: skip
+        return x, fx, ""
 
     deadline = t0 + time_limit if np.isfinite(time_limit) else None
     bound_call = [0.0]  # seconds of the slowest bound-kernel call so far (first-dive cost estimate)
@@ -1476,8 +1505,11 @@ def minimize(
     xbest = np.asarray(xbest)
     if imask.any() and np.isfinite(ub):
         xbest = np.where(imask, np.round(xbest), xbest)
-    maxv, verified, why = _verify(f, ineq, eq, xbest, ub, lo_user, hi_user, feas_tol, integer=imask)
     message = ""
+    if constrained and local_solve and np.isfinite(ub):
+        xbest, ub, message = repair_incumbent(xbest, ub)
+        glb = min(glb, ub)  # (the repair solve may also lower f)
+    maxv, verified, why = _verify(f, ineq, eq, xbest, ub, lo_user, hi_user, feas_tol, integer=imask)
     if np.isfinite(ub) and not verified:
         message = f"incumbent failed float64 verification: {why}"
         if status == "optimal":
