@@ -274,3 +274,83 @@ def test_ineq_rlt_fixed_factor_does_not_prune():
         for safe in (False, True):
             lb = float(make_quadratic_bounder(Q, tol=tol, safe=safe)(jnp.asarray(lo), jnp.asarray(hi))[0])
             assert lb <= fmin + 1e-9 * (1 + abs(fmin)), (tol, safe, lb, fmin)
+
+
+TRIM_A, TRIM_W, TRIM_D = np.array([3.0, 4.0, 5.0, 6.0]), 12.0, np.array([5.0, 4.0, 3.0, 3.0])
+
+
+def _trim_loss():
+    """Trim loss with two patterns (as tln4/tln5): v = (m_1, m_2, y_11..y_41, y_12..y_42), m_j the
+    multiplicity of pattern j and y_ij the pieces of width a_i it cuts. Rows: the capacity of each
+    pattern sum_i a_i y_ij <= W (4 variables), then the demands sum_j m_j y_ij >= d_i."""
+
+    def f(v):
+        return v[0] + v[1]
+
+    def g(v):
+        y = [[v[2 + 4 * j + i] for i in range(4)] for j in range(2)]
+        cap = [sum(TRIM_A[i] * y[j][i] for i in range(4)) - TRIM_W for j in range(2)]
+        dem = [TRIM_D[i] - v[0] * y[0][i] - v[1] * y[1][i] for i in range(4)]
+        return jnp.stack(cap + dem)
+
+    lo, hi = np.zeros(10), np.concatenate([np.full(2, 6.0), np.full(8, 4.0)])
+    return f, g, lo, hi
+
+
+def _trim_opt():
+    """The integer optimum of ``_trim_loss`` by enumeration."""
+    import itertools
+
+    pats = [np.array(y) for y in itertools.product(range(5), repeat=4) if np.dot(y, TRIM_A) <= TRIM_W]
+    best = np.inf
+    for p, q in itertools.combinations_with_replacement(pats, 2):
+        for m1 in range(7):
+            for m2 in range(7):
+                if m1 + m2 < best and np.all(m1 * p + m2 * q >= TRIM_D):
+                    best = m1 + m2
+    return best
+
+
+@pytest.mark.parametrize("safe", [False, True])
+def test_ineq_rlt_wide_rows_trim_loss(safe):
+    """A capacity row of 4 variables times its pattern's multiplicity m_j gives
+    sum_i a_i w_ij <= W m_j: with it the demands force sum_j m_j >= sum_i a_i d_i / W = 4.25,
+    while McCormick alone (w_ij <= 4 m_j) allows 1.25. The rows hold at integer feasible points,
+    and the bound stays below the integer optimum on the root box."""
+    f, g, lo, hi = _trim_loss()
+    Q = quadratic_form(f, g, None, 10)
+    assert {(0, 0), (1, 1)} <= set(zip(Q.qr_g.tolist(), Q.qr_var.tolist()))  # capacity j times m_j
+    bound = make_quadratic_bounder(Q, tol=1e-6, safe=safe)
+    plain = make_quadratic_bounder(Q._replace(qr_g=np.zeros(0, np.int64)), tol=1e-6, safe=safe)
+    lb, lb0 = float(bound(jnp.asarray(lo), jnp.asarray(hi))[0]), float(plain(jnp.asarray(lo), jnp.asarray(hi))[0])
+    assert lb0 < 2.0 and lb > 4.2 and lb <= _trim_opt() + 1e-9
+    L = _layout(Q, 10, 0, False)
+    T2 = len(Q.qr_g)
+    _, _, vals, bb, _ = _lp(Q, L, jnp.asarray(lo), jnp.asarray(hi), 1e-6, safe)
+    A = sparse.coo_matrix((np.asarray(vals), (L.pattern.rows, L.pattern.cols)), shape=(L.pattern.m, len(Q.E[0])))
+    sel = np.arange(L.pattern.m - 2 * T2, L.pattern.m)  # the RLT block is last (no tangents, no cutoff)
+    rng = np.random.default_rng(0)
+    A = A.tocsr()[sel]
+    for _ in range(100):  # random integer points within capacity (the rows of the RLT block)
+        x = rng.integers(lo, hi + 1).astype(float)
+        for j in range(2):
+            while x[2 + 4 * j: 6 + 4 * j] @ TRIM_A > TRIM_W:
+                x[2 + 4 * j + rng.choice(np.flatnonzero(x[2 + 4 * j: 6 + 4 * j]))] -= 1.0
+        assert np.all(A @ lifted_point(Q, x) <= np.asarray(bb)[sel] + 1e-9)
+
+
+def test_ineq_rlt_small_rows_first():
+    """When the pair budget binds, the rows of at most SMALL_RLT_SUPPORT variables keep their
+    pairs: the budget is spent on the 4-variable capacity rows only after them."""
+    from jaxglobal.quadratic import ineq_rlt
+
+    f, g0, lo, hi = _trim_loss()
+
+    def g(v):  # plus y_11 + y_21 <= 5 (2 variables, both with the column m_1 y_i1)
+        return jnp.concatenate([g0(v), jnp.stack([v[2] + v[3] - 5.0])])
+
+    Q = quadratic_form(f, g, None, 10)
+    small = Q.n_g - 1
+    assert small in Q.qr_g.tolist()
+    Q1 = ineq_rlt(Q._replace(qr_g=np.zeros(0, np.int64)), 10, max_pairs=1)
+    assert Q1.qr_g.tolist() == [small]
