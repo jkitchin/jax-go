@@ -146,7 +146,11 @@ def _pounce_local(f, ineq, eq, lo, hi, options=None, patterns=None):
         prob = from_jax(f, lambda x: jnp.concatenate([g(x), h(x)]), **kw)
     else:
         prob = from_jax(f, **kw)
-    opts = dict(print_level=0, tol=1e-10, max_iter=200, sb="yes", **(options or {}))
+    # bound_relax_factor 0: Ipopt's default (1e-8) lets a solution sit up to 1e-8 * max(1, |bound|)
+    # past a bound; the caller clips it back into the box, which moves the constraint values by
+    # slope x 1e-8 * |bound| and can push a feasible optimum past feas_tol (ex5_4_3: 1.6e-6, its
+    # optimum found at the root was rejected for 50 s)
+    opts = dict(print_level=0, tol=1e-10, max_iter=200, sb="yes", bound_relax_factor=0.0, **(options or {}))
 
     def with_bounds(lb, ub):  # the compiled functions are shared; only the bounds differ
         return pounce.Problem(n=lo.size, m=mi + me, problem_obj=prob.problem_obj, lb=lb, ub=ub,
