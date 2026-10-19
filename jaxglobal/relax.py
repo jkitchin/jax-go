@@ -519,6 +519,13 @@ def mc_monomial(coef, factors, safe=False, nround=0):
         else:
             Llo, Lhi, Lcv, Lcc = Llo + a * lgh, Lhi + a * lgl, Lcv + a * lcc, Lcc + a * sec
         S = S + abs(a) * (jnp.abs(lgl) + jnp.abs(lgh) + 1.0)
+    # exp(L) and coef exp(L) stay normal and finite, with ulps of exp(L.lo) normal too (else the secant's
+    # eH - eL can flush): exp of a log within log(tiny / eps) .. log(max) / 2 on both sides of coef
+    fi = jnp.finfo(Llo.dtype)
+    lc, lmin, lmax = float(np.log(coef)), float(np.log(fi.tiny / fi.eps)) + 1.0, float(np.log(fi.max)) - 1.0
+    ok = ok & (Llo > lmin) & (Llo + lc > lmin) & (Lhi < lmax) & (Lhi + lc < lmax)
+    Llo, Lhi = jnp.where(ok, Llo, 0.0), jnp.where(ok, Lhi, 1.0)
+    Lcv, Lcc = jnp.where(ok, Lcv, 0.0), jnp.where(ok, Lcc, 0.5)
     eL, eH = jnp.exp(Llo), jnp.exp(Lhi)
     W = Lhi - Llo
     z = jnp.minimum(Lcc, Lhi)
@@ -624,7 +631,10 @@ class Monomials:
         shp = jnp.shape(out.lo)
         if any(jnp.shape(bv.lo) != shp for bv, _ in fac):
             return out
-        ok, m = mc_monomial(coef, fac, self.ctx.safe, nround)
+        fi = jnp.finfo(jnp.result_type(*(bv.lo for bv, _ in fac)))
+        if not (float(fi.tiny) <= coef <= float(fi.max)):  # (in the bases' dtype: float32 parts)
+            return out
+        ok, m = mc_monomial(coef, fac, self.ctx.safe, nround + (fi.bits < 64))
         return select_mc(ok, intersect_mc(out, m), out)
 
 

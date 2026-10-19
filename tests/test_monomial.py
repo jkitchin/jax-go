@@ -154,7 +154,12 @@ def test_coefficients_that_overflow_or_scale_below_normal(safe):
     sum that rounds leaves the term to the product rule; a small coefficient gets the absolute safe margin
     after scaling, not before. Each case: f, lo, hi, the point, f's exact value there."""
     A = 2.0**53
-    cases = [(lambda x: x[0] ** 2.5 * x[1] * 1e300 * 1e300, [1e-80, 1e-100], [2e-80, 2e-100], "lo", 1e300)]
+    cases = [
+        (lambda x: x[0] ** 2.5 * x[1] * 1e300 * 1e300, [1e-80, 1e-100], [2e-80, 2e-100], "lo", 1e300),
+        # exp(L) overflows or underflows while coef exp(L) is normal
+        (lambda x: 1e-300 * x[0] ** 2.5 * x[1] ** 2.5, [1e62, 1e62], [2e62, 2e62], "lo", 1e10),
+        (lambda x: 1e300 * x[0] ** -2.5 * x[1] ** -2.5, [1e62, 1e62], [2e62, 2e62], "lo", 1e-10),
+    ]
     if safe:  # (plain mode alone already misses these: x / 1e-310 is inf, subnormal steps lose bits)
         cases += [
             (lambda x: x[0] ** 2.5 * x[1] / 1e-310, [1e-100, 1e-50], [2e-100, 2e-50], "lo", 1e10),
