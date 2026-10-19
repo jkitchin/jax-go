@@ -36,6 +36,7 @@ import tempfile
 import threading
 import time
 from concurrent.futures import CancelledError
+from concurrent.futures import TimeoutError as FutureTimeout  # (not the builtin before 3.11)
 
 import jax
 import jax.numpy as jnp
@@ -99,7 +100,7 @@ def wait_for_builds(timeout):
         while True:
             try:
                 fut = fut.result(timeout=max(end - time.perf_counter(), 0.0))
-            except TimeoutError:
+            except FutureTimeout:
                 return False
             except (Exception, CancelledError):  # a failed or cancelled build: nothing to wait for
                 break

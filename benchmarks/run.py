@@ -256,8 +256,10 @@ def main():
         # limit to compile never gets warm, however often it is rerun. Wait for those builds (the
         # result is already recorded), but exit well before the runner's timeout (_run), which
         # would lose the result.
-        _drain(a.time_limit)
-        os._exit(0)
+        try:
+            _drain(a.time_limit)
+        finally:
+            os._exit(0)
         return
 
     out = HERE / "results" / f"{a.tag}.csv"
