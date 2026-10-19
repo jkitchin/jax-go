@@ -154,9 +154,9 @@ rows_lib = [
 table(rows_lib)
 
 # %% [markdown]
-# One of three worked unchanged (`jax.nn.softplus`). `jnp.polyval` fails with a shape error inside the interpreter (it traces to a loop over the coefficient array),
-# and the normal CDF fails with a missing `erfc` rule. These are implementation gaps in the prototype, not fundamental limits; the polynomial can be written as an explicit Horner expression instead.
-# The Pyomo-side work would be the same either way: no jnp function can be called from Pyomo at all. The Pyomo alternative for the failing case is to write
+# Two of three work unchanged: `jax.nn.softplus`, and the newsvendor model built on the normal CDF (`erfc`), which is certified at -664.459 in about 2,400 nodes.
+# `jnp.polyval` fails with a shape error inside the interpreter (it traces to a loop over the coefficient array). That is an implementation gap, not a fundamental limit; the polynomial can be written as an explicit Horner expression instead.
+# The Pyomo-side work would be the same either way: no jnp function can be called from Pyomo at all. The Pyomo alternative for the newsvendor model is to write
 # the normal CDF with `pyo.erf`-free approximations or an external function, which no global solver here can then bound.
 
 # %%
@@ -252,10 +252,10 @@ save_results("05", "parametric family (3 values)", loc(camel_pyomo_param), loc(c
 # ## What was hard
 #
 # **Worked in jaxglobal**
-# * The `fori_loop` model (fixed 4 iterations; one solve took 17 to 45 s on the loaded machine versus about 2 s for the Pyomo solvers), `jax.nn.softplus`, the einsum quadratic, and the parametric loop. Both are shorter to write than the Pyomo equivalents; the Pyomo versions are also not equivalent in the Colebrook case (implicit equation versus a fixed iteration).
+# * The `fori_loop` model (fixed 4 iterations; one solve took 17 to 45 s on the loaded machine versus about 2 s for the Pyomo solvers), `jax.nn.softplus`, the normal-CDF newsvendor model, the einsum quadratic, and the parametric loop. Both are shorter to write than the Pyomo equivalents; the Pyomo versions are also not equivalent in the Colebrook case (implicit equation versus a fixed iteration).
 #
 # **Did not work, or worked only partly**
-# * Library functions are only reusable when every primitive they trace to is supported. `jnp.polyval` fails with a shape error and the normal-CDF newsvendor model fails with a missing `erfc` rule (see the errors above); `jax.nn.softplus` works.
+# * Library functions are only reusable when every primitive they trace to is supported. `jnp.polyval` fails with a shape error (see the error above); `jax.nn.softplus` and the normal CDF work.
 # * BARON (through GAMS) returned no solution for the sine-containing einsum quadratic, while SCIP and Couenne solved it. Solver coverage of functions differs.
 # * Parametric families are a Python loop. Passing the parameter as a fixed variable (`lo == hi`) worked: the first solve paid the compile cost (about 5 s) and the later ones took about 0.1 s.
 #   Closing over a new Python constant for each value would retrace the function.
@@ -268,4 +268,4 @@ save_results("05", "parametric family (3 values)", loc(camel_pyomo_param), loc(c
 # * `jaxglobal.export.to_scip` / `to_nl` now write a SCIP or `.nl` model straight from a JAX function (unrolling fixed loops, rewriting `tanh`/`softplus`, reformulating `where`/`max`) and refuse what they cannot represent, such as `erfc` or variable-dependent loops. That removes the hand translation for the supported subset; see `examples/export_scip.py`.
 #
 # **Verdict.** The advantage of the function-based approach is real for models written as numerical code, but this notebook shows that it applies to the subset of JAX that
-# the interpreter supports. For anything with integers, many constraints or large sparse structure, Pyomo remains the better choice.
+# the interpreter supports. For models with many integer or logical decisions, many constraints or large sparse structure, Pyomo remains the better choice.

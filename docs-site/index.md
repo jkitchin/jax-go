@@ -18,15 +18,15 @@ def f(x):                       # Eggholder: very rugged, optimum on the boundar
            - a * jnp.sin(jnp.sqrt(jnp.abs(a - (b + 47))))
 
 r = minimize(f, [-512, -512], [512, 512])
-# Result(status='optimal', fun=-959.64066, lower_bound=-959.64066, gap=2.06e-07,
-#        x=[512. 404.23181], nodes=47, iterations=10, time=4.82s)
+# Result(status='optimal', fun=-959.64066, lower_bound=-959.64071, gap=4.78e-05,
+#        x=[512. 404.231805], nodes=41, iterations=8, time=1.97s)
 ```
 
 ## Status
 
 jaxglobal is past the proof-of-concept stage. It is a research solver: usable,
 tested, and measured on MINLPLib, but not yet competitive with mature global
-solvers on general problems (see [Correctness and limitations](guide/correctness.md#limitations)).
+solvers on general problems (see [Limitations](guide/correctness.md#limitations)).
 
 * **Problems:** continuous and mixed-integer, with inequality and equality
   constraints, on finite or partly unbounded boxes. Models can be plain JAX
@@ -35,15 +35,74 @@ solvers on general problems (see [Correctness and limitations](guide/correctness
   checked against the library's reference bounds. Every returned point is
   re-checked in float64, and an opt-in `safe=True` mode rounds the bounds
   outward.
-* **MINLPLib, 60 s limit, cold start (compilation included):**
+* **MINLPLib against SCIP, October 2026** (`main` at 58bb551). An instance
+  passes if jaxglobal proves it optimal within max(2 x SCIP's time, 10 s).
+  "Cold" includes JAX compilation; "warm" reuses the compile caches from a
+  previous run. SCIP has no compile step, so the cold numbers are the fair
+  comparison.
+
+  | set | instances | pass, cold | pass, warm | where SCIP takes ≥ 0.5 s (warm) |
+  |---|---:|---:|---:|---:|
+  | development: the targets the recent solver work was tuned on | 79 | 68 | 74 | 20 / 23 |
+  | held out: same families, never used during development | 184 | 151 | 160 | 10 / 26 |
+
+  - **Development set.** It is drawn from `start50` and `int50` (41 of the 79 have
+    integer variables). Recent PRs fixed these instances one by one, so the
+    numbers above are optimistic. The 5 still failing, and why, are listed in
+    [`docs/PLAN-scip-gap-v2.md` §10](https://github.com/jkitchin/jax-go/blob/main/docs/PLAN-scip-gap-v2.md).
+  - **Held-out set.** Every MINLPLib instance with a SCIP reference time
+    that was not used during development: not in `start50`, `int50` or the
+    `check_wrong` sample, and not named in the code, tests or docs. The set is
+    easier than the development set: all continuous, with a median of 6
+    variables and a median SCIP time of 0.03 s.
+    - Easy instances (SCIP < 0.5 s) generalize: 150 of 158 pass, warm.
+    - Harder instances do not: 10 of 26, against 20 of 23 on the development set.
+    - 11 are rejected as unsupported, because bound propagation finds no finite
+      bounds for some variables.
+  - **Speed.** jaxglobal beats SCIP's time on only 8 of the development
+    instances and 3 of the held-out ones. Most passes rely on the 10 s floor.
+  - **Wrong answers:** 0 in either set.
+  - **To reproduce:** run `benchmarks/run.py --solvers jaxglobal,scip --names
+    <list> --time-limit 60` once with `JAXGLOBAL_CACHE=0` (cold) and again on a
+    primed cache (warm), then apply the pass rule per instance against SCIP's
+    time. `run.py` takes a single time limit, so the rule is applied
+    afterwards. The development and held-out instance lists are not checked
+    in; the held-out set is defined above.
+
+* **global50, 60 s limit** (the 50-instance BARON comparison panel from
+  discopt, `discopt_benchmarks/config/baron_global50.txt`). All solvers ran on
+  the same machine. 48 of the 50 ran; casctanks and hda are missing from this
+  repo's MINLPLib tables.
+
+  | | solved in 60 s | wrong answers | not solved in 60 s |
+  |---|---:|---:|---|
+  | jaxglobal, cold | 45 / 48 | 0 | clay0303hfsg, cvxnonsep_psig30, tanksize |
+  | jaxglobal, warm | 45 / 48 | 0 | the same three |
+  | SCIP (command line, `.nl`) | 45 / 48 | 0 | cvxnonsep_nsig30, st_e36, tspn05 |
+  | BARON (GAMS) | 47 / 48 | 1 (nvs05: reports 5.887 as optimal; the optimum is 5.471) | — |
+
+  - **Development overlap.** 11 of the 48 are in the development set above, and
+    every solver solves all 11. On the other 37, jaxglobal and SCIP each solve
+    34.
+  - **Under the 2 x SCIP / 10 s rule:** 40 of 48 pass cold and 45 warm.
+    nvs09 takes 44 s cold and 2.6 s warm, so compilation dominates the cold
+    misses.
+  - **Speed.** SCIP and BARON solve most of these instances in under 0.1 s;
+    jaxglobal takes 0.5–8 s warm. jaxglobal solves cvxnonsep_nsig30, st_e36 and
+    tspn05, which SCIP leaves unsolved, but BARON solves all three faster.
+
+* **MINLPLib, 60 s limit, cold start (compilation included)**, measured on
+  2026-10-17, before the SCIP-gap work, and not re-run since:
 
   | set | jaxglobal | SCIP |
   |---|---:|---:|
   | `start50`: 50 continuous instances, ≤ 50 variables, weighted toward hard ones | 31 | 44 |
   | `int50`: 50 mixed-integer instances, ≤ 50 variables | 29 | 45 |
 
-  jaxglobal solves no `int50` instance that SCIP does not. Details:
-  [Benchmarks and results](guide/benchmarks.md).
+  The sets are defined in [`benchmarks/sets/README.md`](https://github.com/jkitchin/jax-go/blob/main/benchmarks/sets/README.md);
+  the 31 and 29 are the issue #14 cold runs in [`docs/ROADMAP.md`](https://github.com/jkitchin/jax-go/blob/main/docs/ROADMAP.md)
+  (`results/issue14_*_cold.csv`).
+  Branching comparisons ([Solver options](guide/solver-options.md#branch_var-which-variable-to-split)) were separate runs, so their counts differ.
 * **What it is for:** problems defined by code, which equation-based solvers
   cannot read at all or need rewritten by hand: `jnp.where` logic,
   neural-network and Gaussian-process surrogates, ODE kinetics written as
@@ -75,12 +134,14 @@ equation-based solvers, batched throughput and Gaussian-process surrogates.
      decides the branch and fall back to the hull otherwise.
 3. **The relaxation is itself a JAX function**, so it can be `jit`-ed,
    `vmap`-ed over hundreds of boxes, and differentiated. `jax.grad(cv)` gives
-   subgradients of the convex relaxation. A few Frank–Wolfe steps on cv give
+   subgradients of the convex relaxation. Frank–Wolfe steps on cv (`n_fw=20`) give
    affine cuts `cv(x) + g·(v − x)`, whose minimum over the box is a valid lower
    bound (`jaxglobal/bnb.py`).
-4. **Batched spatial branch-and-bound.** Each iteration bisects the 128
-   lowest-bound boxes and bounds all 256 children in one `jit(vmap(...))` call.
-   L-BFGS-B (with `jax.grad`) polishes the incumbent.
+4. **Batched spatial branch-and-bound.** Each iteration splits the `batch // 2`
+   (128 by default) lowest-bound boxes and bounds the children with a
+   `jit(vmap(...))` kernel, in calls of `batch_sizes` boxes (16 by default).
+   A local NLP solve (pounce when installed, otherwise optax) polishes the
+   incumbent.
 5. **Bound tightening against the incumbent** (`f <= UB`), all batched:
    * *FBBT* (`jaxglobal/fbbt.py`): the jaxpr is flattened into a tape and swept
      forward (interval rules) and backward (inverse rules: `x ∈ Z − Y` for
@@ -114,4 +175,5 @@ equation-based solvers, batched throughput and Gaussian-process surrogates.
 * [Modelling](guide/modelling.md): objectives, constraints, integers, GP surrogates, `.nl` files
 * [Solver options](guide/solver-options.md): every argument of `minimize`, including branching
 * [Benchmarks and results](guide/benchmarks.md)
+* [jaxglobal and discopt](guide/discopt.md): how this solver differs from discopt
 * [API reference](api/index.md)

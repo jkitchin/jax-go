@@ -15,11 +15,15 @@ band (1–5, 6–10, 11–20, 21–50 variables):
 `int50.txt`: 50 MINLPLib instances with binary or integer variables (at most
 50 variables), for the integer work (`docs/ROADMAP.md`, *Integers: plan*).
 `benchmarks/sets/make_int50.py` selects them (seed 2026) from
-`minlplib/instances_int.csv` (`python benchmarks/minlplib/fetch.py --integer`,
-220 instances): those with a reference solution closed to 1e-4, 14 / 12 / 12 /
+`minlplib/instances_int.csv` (`python benchmarks/minlplib/fetch.py --integer`;
+220 instances with at most 50 variables when `int50.txt` was made, 328 in the
+checked-in CSV, which was later refetched with `--max-vars 100`): those with a reference solution closed to 1e-4, 14 / 12 / 12 /
 12 from the bands of 1-5, 6-10, 11-20 and 21-50 integer variables, taken
 round-robin over binary-only or general-integer and convex or not, at most 3
 per model family. SCIP runs through GAMS (`--solvers scip-gams`).
+`make_int50.py` bands on the number of integer variables only, so on the
+current CSV it can pick instances with more than 50 variables and does not
+reproduce `int50.txt`; refetch without `--max-vars 100` first.
 
 Run with
 
@@ -29,6 +33,12 @@ python benchmarks/run.py --solvers jaxglobal --tag start50 --time-limit 60 \
 ```
 
 ## Results on `start50`
+
+These are the early phase-1 runs. Later numbers are elsewhere: the 31 / 29
+cold `start50` / `int50` results of 2026-10-17 (issue #14) in
+`docs/ROADMAP.md`, and the
+development and held-out results of the SCIP-gap work in the README's
+*Status* and `docs/PLAN-scip-gap-v2.md` §10.
 
 Checked against the MINLPLib reference bounds with `report.classify`; 60 s,
 4 jobs. "Warm" reruns the same instances with the kernels already in the disk

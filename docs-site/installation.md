@@ -3,12 +3,14 @@
 ## Requirements
 
 * Python 3.10 or newer
-* JAX 0.11.2 or newer (older jaxlib versions segfault when running a
-  deserialized `jax.export` kernel with LAPACK calls in a fresh process), NumPy,
+* JAX 0.11.x (`jax>=0.11.2,<0.12`): older jaxlib versions segfault when running a
+  deserialized `jax.export` kernel with LAPACK calls in a fresh process, and JAX
+  0.12 lowers `erfc` with `bitcast_convert_type`, which has no relaxation rule. NumPy,
   SciPy, optax and flatbuffers. These are installed automatically.
 * Optional: [pounce](https://pypi.org/project/pounce-solver/) (`pounce-solver>=0.12`),
   the default local NLP solver for upper bounds when it is installed. Without
-  it jaxglobal uses optax or SciPy SLSQP.
+  it jaxglobal uses optax (pure JAX); `local_solver="scipy"` selects SciPy
+  L-BFGS-B / SLSQP.
 * Optional, for exporting models: PySCIPOpt (`jaxglobal.export.to_scip`).
 
 ## Install
@@ -20,7 +22,7 @@ git clone https://github.com/jkitchin/jax-go.git
 cd jax-go
 pip install -e .              # core
 pip install -e '.[pounce]'    # with the pounce local solver
-pip install -e '.[dev]'       # tests, notebooks: pytest, matplotlib, pounce, pyomo
+pip install -e '.[dev]'       # tests, notebooks: pytest, matplotlib, mpmath, pounce, pyomo
 ```
 
 Importing `jaxglobal` turns on 64-bit floats in JAX (`jax_enable_x64`), which
@@ -42,8 +44,8 @@ def f(x):                       # Eggholder: very rugged, optimum on the boundar
 
 r = minimize(f, [-512, -512], [512, 512])
 print(r)
-# Result(status='optimal', fun=-959.64066, lower_bound=-959.64066, gap=2.06e-07,
-#        x=[512. 404.23181], nodes=47, iterations=10, time=4.82s)
+# Result(status='optimal', fun=-959.64066, lower_bound=-959.64071, gap=4.78e-05,
+#        x=[512. 404.231805], nodes=41, iterations=8, time=1.97s)
 ```
 
 The result is a certificate: `r.fun` is the objective at a feasible point

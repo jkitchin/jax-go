@@ -5,26 +5,80 @@ compiling the bounding kernels, which dominate small problems.
 
 ## MINLPLib
 
-Solved instances at a 60 s limit, cold start (compilation included), each
-answer checked against the library's reference bounds:
+All answers are checked against the library's reference bounds.
 
-| set | jaxglobal | SCIP |
-|---|---:|---:|
-| `start50`: 50 continuous instances, ≤ 50 variables, weighted toward hard ones | 31 | 44 |
-| `int50`: 50 mixed-integer instances, ≤ 50 variables | 29 | 45 |
+* **MINLPLib against SCIP, October 2026** (`main` at 58bb551). An instance
+  passes if jaxglobal proves it optimal within max(2 x SCIP's time, 10 s).
+  "Cold" includes JAX compilation; "warm" reuses the compile caches from a
+  previous run. SCIP has no compile step, so the cold numbers are the fair
+  comparison.
 
-jaxglobal solves no `int50` instance that SCIP does not.
+  | set | instances | pass, cold | pass, warm | where SCIP takes ≥ 0.5 s (warm) |
+  |---|---:|---:|---:|---:|
+  | development: the targets the recent solver work was tuned on | 79 | 68 | 74 | 20 / 23 |
+  | held out: same families, never used during development | 184 | 151 | 160 | 10 / 26 |
 
-The subsets are chosen with a fixed seed from MINLPLib by outcome and size band
-(`benchmarks/sets/` in the repository lists the instances and how they were
-selected). 0 answers were wrong. Shifted geometric mean time at 60 s, cold:
-32.6 s against SCIP's 1.9 s on `start50`, and 35.9 s against 1.35 s on
-`int50`. A warm rerun, with the kernels already in the disk cache, solves more
-instances in the same time limit because it skips compilation.
+  - **Development set.** It is drawn from `start50` and `int50` (41 of the 79 have
+    integer variables). Recent PRs fixed these instances one by one, so the
+    numbers above are optimistic. The 5 still failing, and why, are listed in
+    [`docs/PLAN-scip-gap-v2.md` §10](https://github.com/jkitchin/jax-go/blob/main/docs/PLAN-scip-gap-v2.md).
+  - **Held-out set.** Every MINLPLib instance with a SCIP reference time
+    that was not used during development: not in `start50`, `int50` or the
+    `check_wrong` sample, and not named in the code, tests or docs. The set is
+    easier than the development set: all continuous, with a median of 6
+    variables and a median SCIP time of 0.03 s.
+    - Easy instances (SCIP < 0.5 s) generalize: 150 of 158 pass, warm.
+    - Harder instances do not: 10 of 26, against 20 of 23 on the development set.
+    - 11 are rejected as unsupported, because bound propagation finds no finite
+      bounds for some variables.
+  - **Speed.** jaxglobal beats SCIP's time on only 8 of the development
+    instances and 3 of the held-out ones. Most passes rely on the 10 s floor.
+  - **Wrong answers:** 0 in either set.
+  - **To reproduce:** run `benchmarks/run.py --solvers jaxglobal,scip --names
+    <list> --time-limit 60` once with `JAXGLOBAL_CACHE=0` (cold) and again on a
+    primed cache (warm), then apply the pass rule per instance against SCIP's
+    time. `run.py` takes a single time limit, so the rule is applied
+    afterwards. The development and held-out instance lists are not checked
+    in; the held-out set is defined above.
 
-On 328 mixed-integer MINLPLib instances with up to 100 variables (60 s, cold),
-jaxglobal solved 72 of the 220 with at most 50 variables and 1 of the 108 with
-51 to 100.
+* **global50, 60 s limit** (the 50-instance BARON comparison panel from
+  discopt, `discopt_benchmarks/config/baron_global50.txt`). All solvers ran on
+  the same machine. 48 of the 50 ran; casctanks and hda are missing from this
+  repo's MINLPLib tables.
+
+  | | solved in 60 s | wrong answers | not solved in 60 s |
+  |---|---:|---:|---|
+  | jaxglobal, cold | 45 / 48 | 0 | clay0303hfsg, cvxnonsep_psig30, tanksize |
+  | jaxglobal, warm | 45 / 48 | 0 | the same three |
+  | SCIP (command line, `.nl`) | 45 / 48 | 0 | cvxnonsep_nsig30, st_e36, tspn05 |
+  | BARON (GAMS) | 47 / 48 | 1 (nvs05: reports 5.887 as optimal; the optimum is 5.471) | — |
+
+  - **Development overlap.** 11 of the 48 are in the development set above, and
+    every solver solves all 11. On the other 37, jaxglobal and SCIP each solve
+    34.
+  - **Under the 2 x SCIP / 10 s rule:** 40 of 48 pass cold and 45 warm.
+    nvs09 takes 44 s cold and 2.6 s warm, so compilation dominates the cold
+    misses.
+  - **Speed.** SCIP and BARON solve most of these instances in under 0.1 s;
+    jaxglobal takes 0.5–8 s warm. jaxglobal solves cvxnonsep_nsig30, st_e36 and
+    tspn05, which SCIP leaves unsolved, but BARON solves all three faster.
+
+* **MINLPLib, 60 s limit, cold start (compilation included)**, measured on
+  2026-10-17, before the SCIP-gap work, and not re-run since:
+
+  | set | jaxglobal | SCIP |
+  |---|---:|---:|
+  | `start50`: 50 continuous instances, ≤ 50 variables, weighted toward hard ones | 31 | 44 |
+  | `int50`: 50 mixed-integer instances, ≤ 50 variables | 29 | 45 |
+
+  The sets are defined in [`benchmarks/sets/README.md`](https://github.com/jkitchin/jax-go/blob/main/benchmarks/sets/README.md);
+  the 31 and 29 are the issue #14 cold runs in [`docs/ROADMAP.md`](https://github.com/jkitchin/jax-go/blob/main/docs/ROADMAP.md)
+  (`results/issue14_*_cold.csv`).
+  Branching comparisons ([Solver options](solver-options.md#branch_var-which-variable-to-split)) were separate runs, so their counts differ.
+
+On 328 mixed-integer MINLPLib instances with up to 100 variables (60 s, cold,
+measured on 2026-10-17, before the SCIP-gap work), jaxglobal solved 72 of the
+220 with at most 50 variables and 1 of the 108 with 51 to 100.
 
 ### Running the MINLPLib benchmark
 
@@ -47,20 +101,20 @@ reach f\*, which shows how multimodal each problem is.
 
 | problem | n | f\* (lit.) | found | proven LB | root LB | mstart | nodes | time |
 |---|---|---|---|---|---|---|---|---|
-| gramacy_lee | 1 | −0.869011 | −0.869011 | −0.869011 | −1 | 15% | 5 | 3.7s |
-| six_hump_camel | 2 | −1.031628 | −1.031628 | −1.031630 | −156 | 95% | 23 | 4.2s |
-| mccormick | 2 | −1.913223 | −1.913223 | −1.913225 | −13.5 | 55% | 11 | 2.0s |
-| goldstein_price | 2 | 3.000000 | 3.000000 | 3.000000 | −8.79e7 | 60% | 1445 | 13.3s |
-| shubert | 2 | −186.730909 | −186.730909 | −186.731063 | −225 | 0% | 303 | 5.5s |
-| michalewicz_2d | 2 | −1.801303 | −1.801297 | −1.801303 | −2 | 5% | 11 | 3.6s |
-| holder_table | 2 | −19.208503 | −19.208503 | −19.208519 | −33.2 | 0% | 191 | 7.7s |
-| eggholder | 2 | −959.640663 | −959.640663 | −959.640663 | −1.07e3 | 0% | 47 | 3.4s |
-| hartmann3 | 3 | −3.862782 | −3.862780 | −3.862786 | −8.4 | 50% | 155 | 3.7s |
-| styblinski_tang_3d | 3 | −117.498497 | −117.498497 | −117.498551 | −638 | 15% | 9 | 2.1s |
-| shekel10_4d | 4 | −10.536443† | −10.536443 | −10.536445 | −35.4 | 25% | 83 | 3.1s |
-| hartmann6 | 6 | −3.322368 | −3.322368 | −3.322378 | −8.4 | 55% | 1083 | 4.2s |
-| piecewise_2d (where/abs/max) | 2 | — | −0.823199 | −0.823206 | −3.7 | 25% | 27 | 5.0s |
-| tanh_net_2d (16-unit MLP) | 2 | — | −0.553102 | −0.553110 | −2.8 | 30% | 287 | 2.7s |
+| gramacy_lee | 1 | −0.869011 | −0.869011 | −0.869011 | −1 | 15% | 5 | 2.4s |
+| six_hump_camel | 2 | −1.031628 | −1.031628 | −1.031632 | −156 | 95% | 21 | 2.3s |
+| mccormick | 2 | −1.913223 | −1.913223 | −1.913224 | −13.5 | 55% | 11 | 1.1s |
+| goldstein_price | 2 | 3.000000 | 3.000000 | 2.999998 | −8.79e7 | 60% | 1441 | 2.9s |
+| shubert | 2 | −186.730909 | −186.730909 | −186.731070 | −225 | 0% | 277 | 2.3s |
+| michalewicz_2d | 2 | −1.801303 | −1.801303 | −1.801303 | −2 | 5% | 11 | 2.2s |
+| holder_table | 2 | −19.208503 | −19.208503 | −19.208518 | −33.2 | 0% | 279 | 2.4s |
+| eggholder | 2 | −959.640663 | −959.640663 | −959.640711 | −1.07e3 | 0% | 41 | 1.5s |
+| hartmann3 | 3 | −3.862782 | −3.862780 | −3.862789 | −8.4 | 50% | 91 | 1.6s |
+| styblinski_tang_3d | 3 | −117.498497 | −117.498497 | −117.498551 | −638 | 15% | 9 | 1.5s |
+| shekel10_4d | 4 | −10.536443† | −10.536443 | −10.536453 | −35.4 | 25% | 67 | 1.8s |
+| hartmann6 | 6 | −3.322368 | −3.322368 | −3.322377 | −8.4 | 55% | 1035 | 1.6s |
+| piecewise_2d (where/abs/max) | 2 | — | −0.823199 | −0.823202 | −3.7 | 25% | 29 | 1.8s |
+| tanh_net_2d (16-unit MLP) | 2 | — | −0.553102 | −0.553105 | −2.8 | 30% | 239 | 1.3s |
 
 † The usual −10.5364 is f(4,4,4,4); the true minimizer is slightly off that point.
 Times are wall-clock on a laptop CPU for a first (cold) call, so they are

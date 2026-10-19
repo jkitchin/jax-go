@@ -6,7 +6,7 @@ them changed beyond tolerances and a time limit.
 
 ```python
 r = minimize(f, lo, hi, ineq=g, eq=h, integer=None,
-             abs_tol=1e-6, rel_tol=1e-6, time_limit=60, branch_var="width")
+             abs_tol=1e-6, rel_tol=1e-6, time_limit=60)   # every other option at its default
 ```
 
 ## Problem
@@ -38,22 +38,28 @@ arguments decide how.
 
 | value | rule |
 |---|---|
-| `"width"` (default) | the variable with the largest relative width among the variables that appear nonlinearly. On the lifted quadratic LP, relative width times the McCormick gap of the variable's products at the relaxation point. |
-| `"pseudocost"` | the product score of the per-variable bound gains observed so far |
+| `"auto"` (default) | `"pseudocost"` when there are no integer variables, `"width"` when there are |
+| `"width"` | the variable with the largest relative width among the variables that appear nonlinearly. On the lifted quadratic LP, relative width times the McCormick gap of the variable's products at the relaxation point. |
+| `"pseudocost"` | the product score of the per-variable bound gains observed so far; on the lifted quadratic LP, times a continuous variable's `"width"` score; with integer variables, chosen among the integers fractional at the relaxation point when there are any |
 | `"reliability"` | like `"pseudocost"`, but variables with fewer than 2 observations are strong-branched (up to 4 of them per box), within the `batch` budget |
 | `"strong"` | every selected parent is split on its best-scored variable (pseudocost product score, width before any pseudocost is known), and the padding slots of the kernel calls the iteration makes anyway strong-branch further candidates. Only variables at least 1/10 as wide as the widest are candidates. Each parent is then split on its 2 best candidates at once (those scoring at least half the best) into up to 4 orthants, each bounded by the largest of the tightened halves. |
 
-Only variables that appear nonlinearly, detected from sampled Hessians, are
+Only variables that appear nonlinearly, read off the jaxpr (sampled Hessians
+when the dependency tracing cannot follow an equation), are
 branched on in a continuous problem. Integer variables are split at integer
 values.
 
-On the 21 built-in problems plus four larger ones (all certified), node counts
-relative to `"width"` as geometric means were 0.97 for `"pseudocost"`, 0.90
+On MINLPLib start50 at 60 s, `"pseudocost"` solves 38 instances against 36
+for `"width"` and `"strong"`; on int50 `"pseudocost"` and `"strong"` each solve
+one more than `"width"` but each loses one that `"width"` solves (flay04m,
+nous1). Hence the `"auto"` default. On the 21 built-in problems plus four
+larger ones (all certified), node counts relative to `"width"` as geometric
+means were 0.97 for `"pseudocost"`, 0.90
 for `"reliability"` and 0.80 for `"strong"` (iterations 0.82). The largest
 gains for `"strong"` were on hartmann3 (157 → 46 nodes), hartmann6
 (1099 → 634) and a reactor network (1053 → 654). On problems with 2 to 6
-variables the choice of variable matters little. `"strong"` is opt-in so that
-the default reproduces the published result tables. `"reliability"` can be
+variables the choice of variable matters little. `"strong"` can cost more than
+it saves on deep trees (nn_tanh_5x8x2: 575k nodes against 244k). `"reliability"` can be
 several times slower in wall time on integer problems, because each
 strong-branching trial is a bounded box. `Result.evaluations` counts every box
 bounded, including strong-branching trials, so compare `evaluations` as well
@@ -88,6 +94,7 @@ as `nodes` when trying these rules.
 | `crown` | `False` | add the CROWN backward linear bound of `f` to every node bound: `False`, `True`, or `"auto"` (on when every primitive of `f` has a CROWN rule and `f` has a saturating activation or ReLU). Useful for neural-network surrogates. |
 | `n_fw` | `20` | Frank–Wolfe steps on the convex relaxation, which give the affine cuts |
 | `n_kelley` | `4` | Kelley points added to the cut LP of a constrained problem |
+| `cut_pool` | `128` | rows of a pool of tangent cuts of the relaxation, taken on the root box and so valid at every node, added to the node LPs of a constrained problem (reduced-space bounder only); `0` turns it off |
 | `safe` | `False` | round every quantity that feeds a lower bound outward by a few ulps (about 1.7× slower); see [Correctness](correctness.md) |
 
 ## Upper bounds (local solves)

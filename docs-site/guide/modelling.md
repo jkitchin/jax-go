@@ -64,32 +64,37 @@ tighter relaxations.
 * **Lower bound** (`jaxglobal/lp.py`): the relaxations give convex functions
   `cv_f`, `cv_g`, `cv_h`, `-cc_h`. `jax.jacfwd` turns them into affine cuts at
   the box center, 2n axis points, and 4 Kelley points. The small LP is solved by
-  a fixed-iteration primal–dual interior point method in JAX, so it `vmap`s over
+  a primal–dual interior point method in JAX (Mehrotra predictor–corrector
+  steps in a `while_loop` that stops early once converged), so it `vmap`s over
   boxes. The bound **does not trust the LP solver**. Weak duality gives a valid
   bound for *any* multipliers y ≥ 0, and the best value over all IPM iterates is
   kept. A badly converged LP gives a weaker bound, never a wrong one.
   Interval arithmetic prunes boxes that are provably infeasible.
-  Problems whose functions are all quadratic are bounded instead over a lifted
-  sparse LP with one column per product, McCormick facets and RLT rows
-  (`jaxglobal/quadratic.py`, `quadratic=True` by default).
+  Problems whose functions are all quadratic, or polynomial up to degree 6, are
+  bounded instead over a lifted sparse LP with one column per product,
+  McCormick facets and RLT rows (`jaxglobal/quadratic.py`, `quadratic=True` by
+  default). With binary variables the lifted LP also gets cuts on products of
+  binaries (static rows plus a separation pool) and bound-factor RLT rows.
+  Functions that are structurally convex on the box (`jaxglobal/convexity.py`)
+  are cut by themselves, which is outer approximation.
 * **Upper bound**: a local NLP solve with JAX gradients and Jacobians, started
   from the LP solutions: pounce (default when installed), optax or scipy
   SLSQP (`local_solver=`). A point counts as feasible when the violation is
   ≤ `feas_tol`.
-* **Branching** only on variables that appear nonlinearly, detected from
-  sampled Hessians.
+* **Branching** only on variables that appear nonlinearly, read off the jaxpr
+  (sampled Hessians as a fallback).
 * `status` is `"optimal"`, `"infeasible"`, `"max_iter"`, `"time_limit"`,
   `"unbounded_domain"`, `"unverified"` or `"unproven"` (see [Correctness](correctness.md#correctness-checks)).
 
 | problem | n | f\* | found | proven LB | nodes | time |
 |---|---|---|---|---|---|---|
-| G06 | 2 | −6961.813876 | −6961.813899 | −6961.818238 | 5 | 5.3s |
-| G08 | 2 | −0.095825 | −0.095825 | −0.095829 | 17 | 10.6s |
-| G11 (equality) | 2 | 0.750000 | 0.750000 | 0.749996 | 19 | 3.0s |
-| G24 (disconnected feasible set) | 2 | −5.508013 | −5.508013 | −5.508014 | 3 | 4.7s |
-| G04 | 5 | −30665.538672 | −30665.538709 | −30665.541579 | 7 | 10.1s |
-| Haverly pooling | 9 | −400.000000 | −400.000007 | −400.000116 | 43 | 7.9s |
-| Reactor network | 6 | −0.388811 | −0.388812 | −0.388814 | 821 | 15.0s |
+| G06 | 2 | −6961.813876 | −6961.813876 | −6961.817313 | 11 | 2.7s |
+| G08 | 2 | −0.095825 | −0.095825 | −0.095828 | 19 | 4.8s |
+| G11 (equality) | 2 | 0.750000 | 0.750000 | 0.749999 | 7 | 0.8s |
+| G24 (disconnected feasible set) | 2 | −5.508013 | −5.508013 | −5.508016 | 43 | 1.5s |
+| G04 | 5 | −30665.538672 | −30665.538672 | −30665.561787 | 13 | 5.0s |
+| Haverly pooling | 9 | −400.000000 | −400.000019 | −400.000115 | 17 | 4.9s |
+| Reactor network | 6 | −0.388811 | −0.388811 | −0.388821 | 159 | 5.0s |
 
 Equality optima can sit slightly below f\* because of `feas_tol` (1e-6).
 
@@ -100,8 +105,14 @@ makes those variables integer. Their bounds are rounded inward, FBBT rounds
 their ranges, branching splits them at integer values, and integer dives and
 root probing look for incumbents. The returned `x` is integral, and
 `Result.verified` checks that. The node bounds are the relaxations of the
-continuous problem, with no MILP cutting planes. `.nl` files with integer
-variables are read with their integer mask.
+continuous problem; only the lifted LP of polynomial problems adds cuts on
+products of binaries. Integer polynomial problems also get symmetry
+(lex-leader) pruning (`jaxglobal/symmetry.py`), and an unconstrained binary
+polynomial of small induced width is solved exactly by variable elimination
+(`jaxglobal/pseudoboolean.py`) with no search. `.nl` files with integer
+variables are read with `read_nl(path, integers="mask")`, which puts the mask
+in `m.integer`; the default raises `NLError` rather than silently solve the
+continuous relaxation.
 
 ## Gaussian-process surrogates
 
@@ -137,7 +148,7 @@ exactly.
 
 The posterior standard deviation needs more: it is a quadratic form in the
 kernel vector, and bounds through `K⁻¹` inherit its conditioning.
-`jaxglobal.gp.gp_std(x, Z, lengthscale, Kinv, sf2, kernel=...)` has the same
+`jaxglobal.gp.gp_std(x, Z, lengthscale, A, sf2, kernel=...)`, with `A = K⁻¹`, has the same
 value, and its relaxation uses the GP's structure: the quadratic form as a sum
 of squares, and the bound `|σ(x) − σ(c)| ≤ sd_prior(f(x) − f(c))`, which holds
 because the posterior is itself a Gaussian process and does not involve

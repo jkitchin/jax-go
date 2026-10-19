@@ -6,6 +6,8 @@
 floating-point rounding cannot cut off the global minimum (off by default, about
 1.7× slower). Every result is re-evaluated in float64; a point that violates the
 constraints is reported with status `"unverified"` and its `max_violation`.
+A constrained incumbent that had to be repaired to strict feasibility, and
+whose gap then exceeds 100 times the tolerance, is reported as `"unproven"`.
 `tests/test_fuzz.py` checks bounds against sampled points on random problems
 (`JAXGLOBAL_FUZZ=N` for more cases), and `benchmarks/check_wrong.py` exits
 nonzero on any wrong or unverified MINLPLib answer.
@@ -34,26 +36,36 @@ nonzero on any wrong or unverified MINLPLib answer.
 ## Limitations
 
 * **Scale.** On 328 mixed-integer MINLPLib instances with up to 100
-  variables (60 s, cold), jaxglobal solved 72 of the 220 with at most 50
+  variables (60 s, cold, measured on 2026-10-17, before the SCIP-gap work),
+  jaxglobal solved 72 of the 220 with at most 50
   variables and 1 of the 108 with 51 to 100. At that size the time goes to
   setup (tracing, compiling, the first dense LP) before the search starts. The
   node LP is a dense interior point method whose cost grows as rows × n² per
-  iteration. Only quadratic problems get a sparse lifted LP.
-* **Speed.** Shifted geometric mean time at 60 s, cold: 32.6 s against
+  iteration. Only quadratic and polynomial (degree ≤ 6) problems get a sparse
+  lifted LP.
+* **Speed.** Shifted geometric mean time at 60 s, cold (2026-10-17, before the
+  SCIP-gap work): 32.6 s against
   SCIP's 1.9 s on `start50`, and 35.9 s against 1.35 s on `int50`. Much of
   jaxglobal's cold time goes to tracing and compiling the bounding kernels. The kernels are cached in memory and on disk
   under `~/.cache/jaxglobal` (`$JAXGLOBAL_CACHE_DIR`; `JAXGLOBAL_CACHE=0`
   turns the cache off), so a repeat solve of the same model takes about
-  0.3-1 s on the built-in problems instead of 2-7 s.
+  0.3-1 s on the built-in problems instead of 2-7 s. The cache prunes its own
+  entries, oldest first, past about 2 GB of XLA executables and 2048 kernels
+  (kernels of other jaxglobal versions after a day unused). Clear it
+  with `python -c "import jaxglobal.kcache as k; k.clear_cache()"`.
 * **Relaxations.** The relaxations are reduced-space McCormick and αBB,
   univariate envelopes, scaled-Gershgorin αBB and interval arithmetic. They
-  are weak on big-M, cardinality and some bilinear structure. There are no
-  MILP cuts, no trilinear envelopes and no probing on continuous variables.
+  are weak on big-M, cardinality and some bilinear structure. Beyond the
+  binary-product cuts of the lifted polynomial LP there are no MILP cuts (no
+  Gomory or lift-and-project), no trilinear envelopes and no probing on
+  continuous variables.
   FBBT's tightened intermediate ranges are not yet fed back into the
   relaxations. The general lifted LP (`lifted=True`) is opt-in and slower.
 * **Floating point.** The default mode is not rigorous. `safe=True` rounds
   lower bounds outward by a few ulps per operation, but it assumes XLA
-  transcendentals are accurate to a few ulps and does not cover every margin. Feasibility holds to `feas_tol`, not exactly.
+  transcendentals are accurate to a few ulps and does not cover every margin
+  (see *Phase 6* in [`docs/ROADMAP.md`](https://github.com/jkitchin/jax-go/blob/main/docs/ROADMAP.md)). Feasibility holds
+  to `feas_tol`, not exactly.
 * **Supported JAX.** `dot_general` between two variable-dependent arrays is
   supported only for 1-D inner products. `lax.cond`, `while_loop` and `scan`
   with variable-dependent control flow are not supported; Python control flow
@@ -71,12 +83,15 @@ nonzero on any wrong or unverified MINLPLib answer.
 
 ## Next steps
 
-Planned work:
+The plan, with measurements for each phase, is in
+[`docs/ROADMAP.md`](https://github.com/jkitchin/jax-go/blob/main/docs/ROADMAP.md). Development is paused (October 2026);
+if it resumes, next on it are:
 
-* a sparse or first-order LP for the node bound beyond quadratic problems;
+* a sparse or first-order LP for the node bound beyond polynomial problems;
 * lower setup and compile cost for models with 50 to 100 variables;
 * tighter relaxations: FBBT ranges fed into McCormick, and more structure
-  detected from the jaxpr;
+  detected from the jaxpr (convexity, symmetry and pseudo-Boolean structure
+  are detected now);
 * a device-resident B&B loop for GPU;
 * a fully rigorous mode with verified transcendental enclosures and an exact
   LP-dual check.

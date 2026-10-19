@@ -90,6 +90,7 @@ nav:
       - Export to SCIP and .nl: guide/export.md
       - Benchmarks and results: guide/benchmarks.md
       - Correctness and limitations: guide/correctness.md
+      - jaxglobal and discopt: guide/discopt.md
   - Examples:
       - examples/index.md
       - "01 Relaxations": examples/01-relaxations.ipynb

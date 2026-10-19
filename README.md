@@ -62,7 +62,12 @@ solvers on general problems (see [Limitations](#limitations)).
   - **Speed.** jaxglobal beats SCIP's time on only 8 of the development
     instances and 3 of the held-out ones. Most passes rely on the 10 s floor.
   - **Wrong answers:** 0 in either set.
-  - **To reproduce:** `benchmarks/run.py --solvers jaxglobal --time-limit <cap>`.
+  - **To reproduce:** run `benchmarks/run.py --solvers jaxglobal,scip --names
+    <list> --time-limit 60` once with `JAXGLOBAL_CACHE=0` (cold) and again on a
+    primed cache (warm), then apply the pass rule per instance against SCIP's
+    time. `run.py` takes a single time limit, so the rule is applied
+    afterwards. The development and held-out instance lists are not checked
+    in; the held-out set is defined above.
 
 * **global50, 60 s limit** (the 50-instance BARON comparison panel from
   discopt, `discopt_benchmarks/config/baron_global50.txt`). All solvers ran on
@@ -94,8 +99,10 @@ solvers on general problems (see [Limitations](#limitations)).
   | `start50`: 50 continuous instances, ≤ 50 variables, weighted toward hard ones | 31 | 44 |
   | `int50`: 50 mixed-integer instances, ≤ 50 variables | 29 | 45 |
 
-  Details: [`benchmarks/sets/README.md`](benchmarks/sets/README.md) and
-  [`docs/ROADMAP.md`](docs/ROADMAP.md).
+  The sets are defined in [`benchmarks/sets/README.md`](benchmarks/sets/README.md);
+  the 31 and 29 are the issue #14 cold runs in [`docs/ROADMAP.md`](docs/ROADMAP.md)
+  (`results/issue14_*_cold.csv`).
+  Branching comparisons (below) were separate runs, so their counts differ.
 * **What it is for:** problems defined by code, which equation-based solvers
   cannot read at all or need rewritten by hand: `jnp.where` logic,
   neural-network and Gaussian-process surrogates, ODE kinetics written as
@@ -103,7 +110,7 @@ solvers on general problems (see [Limitations](#limitations)).
 
 Narrated, executed notebooks in [`examples/`](examples/README.md) walk through
 the relaxations, branch and bound, the test problems, the comparison with
-equation-based solvers, and batched throughput.
+equation-based solvers, batched throughput and Gaussian-process surrogates.
 
 ## How it works
 
@@ -127,12 +134,14 @@ equation-based solvers, and batched throughput.
      decides the branch and fall back to the hull otherwise.
 3. **The relaxation is itself a JAX function**, so it can be `jit`-ed,
    `vmap`-ed over hundreds of boxes, and differentiated. `jax.grad(cv)` gives
-   subgradients of the convex relaxation. A few Frank–Wolfe steps on cv give
+   subgradients of the convex relaxation. Frank–Wolfe steps on cv (`n_fw=20`) give
    affine cuts `cv(x) + g·(v − x)`, whose minimum over the box is a valid lower
    bound (`jaxglobal/bnb.py`).
-4. **Batched spatial branch-and-bound.** Each iteration bisects the 128
-   lowest-bound boxes and bounds all 256 children in one `jit(vmap(...))` call.
-   L-BFGS-B (with `jax.grad`) polishes the incumbent.
+4. **Batched spatial branch-and-bound.** Each iteration splits the `batch // 2`
+   (128 by default) lowest-bound boxes and bounds the children with a
+   `jit(vmap(...))` kernel, in calls of `batch_sizes` boxes (16 by default).
+   A local NLP solve (pounce when installed, otherwise optax) polishes the
+   incumbent.
 5. **Bound tightening against the incumbent** (`f <= UB`), all batched:
    * *FBBT* (`jaxglobal/fbbt.py`): the jaxpr is flattened into a tape and swept
      forward (interval rules) and backward (inverse rules: `x ∈ Z − Y` for
@@ -205,20 +214,25 @@ relaxations.
 * **Lower bound** (`jaxglobal/lp.py`): the relaxations give convex functions
   `cv_f`, `cv_g`, `cv_h`, `-cc_h`. `jax.jacfwd` turns them into affine cuts at
   the box center, 2n axis points, and 4 Kelley points. The small LP is solved by
-  a fixed-iteration primal–dual interior point method in JAX, so it `vmap`s over
+  a primal–dual interior point method in JAX (Mehrotra predictor–corrector
+  steps in a `while_loop` that stops early once converged), so it `vmap`s over
   boxes. The bound **does not trust the LP solver**. Weak duality gives a valid
   bound for *any* multipliers y ≥ 0, and the best value over all IPM iterates is
   kept. A badly converged LP gives a weaker bound, never a wrong one.
   Interval arithmetic prunes boxes that are provably infeasible.
-  Problems whose functions are all quadratic are bounded instead over a lifted
-  sparse LP with one column per product, McCormick facets and RLT rows
-  (`jaxglobal/quadratic.py`, `quadratic=True` by default).
+  Problems whose functions are all quadratic, or polynomial up to degree 6, are
+  bounded instead over a lifted sparse LP with one column per product,
+  McCormick facets and RLT rows (`jaxglobal/quadratic.py`, `quadratic=True` by
+  default). With binary variables the lifted LP also gets cuts on products of
+  binaries (static rows plus a separation pool) and bound-factor RLT rows.
+  Functions that are structurally convex on the box (`jaxglobal/convexity.py`)
+  are cut by themselves, which is outer approximation.
 * **Upper bound**: a local NLP solve with JAX gradients and Jacobians, started
   from the LP solutions: pounce (default when installed), optax or scipy
   SLSQP (`local_solver=`). A point counts as feasible when the violation is
   ≤ `feas_tol`.
-* **Branching** only on variables that appear nonlinearly, detected from
-  sampled Hessians.
+* **Branching** only on variables that appear nonlinearly, read off the
+  traced tape (sampled Hessians are the fallback when that fails).
 * `status` is `"optimal"`, `"infeasible"`, `"max_iter"`, `"time_limit"`,
   `"unbounded_domain"`, `"unverified"` or `"unproven"` (see *Correctness checks*).
 
@@ -241,8 +255,14 @@ makes those variables integer. Their bounds are rounded inward, FBBT rounds
 their ranges, branching splits them at integer values, and integer dives and
 root probing look for incumbents. The returned `x` is integral, and
 `Result.verified` checks that. The node bounds are the relaxations of the
-continuous problem, with no MILP cutting planes. `.nl` files with integer
-variables are read with their integer mask.
+continuous problem; only the lifted LP of polynomial problems adds cuts on
+products of binaries. Integer polynomial problems also get symmetry
+(lex-leader) pruning (`jaxglobal/symmetry.py`), and an unconstrained binary
+polynomial of small induced width is solved exactly by variable elimination
+(`jaxglobal/pseudoboolean.py`) with no search. `.nl` files with integer
+variables are read with `read_nl(path, integers="mask")`, which puts the mask
+in `m.integer`; the default raises `NLError` rather than silently solve the
+continuous relaxation.
 
 ### Choosing `branch_var`
 
@@ -250,7 +270,8 @@ The default, `branch_var="auto"`, branches on pseudocosts (the bound gains
 measured on earlier splits of each variable) when there are no integer
 variables, and on `width` (relative width times the relaxation gap, fractional
 integers first) when there are. Those were the best measured choices: on the
-MINLPLib start50 set pseudocost solves 38 instances in 60 s against 36 for
+MINLPLib start50 set (a branching comparison on 2026-10-18, a separate run from
+the cold table above) pseudocost solves 38 instances in 60 s against 36 for
 width and for `strong`, and on the 25 built-in and synthetic problems it takes
 the least total time. On
 int50 pseudocost and `strong` each solve one more instance than width, but each
@@ -331,9 +352,9 @@ discopt facts come from discopt's own README and development notes.
 | **Model input** | a plain JAX function, traced to a jaxpr, or an `.nl` file. `jnp.where` logic, neural networks, GP surrogates and Python-loop ODEs get certified bounds. | an algebraic modeling API (`Model`, `m.continuous`, `dm.exp`, ...), or `.nl`, `.gms` and QPLIB files. Opaque Python callables (`dm.custom`, `dm.external`) are solved without a dual bound. |
 | **Implementation** | pure Python and JAX: relaxations, the LP interior-point method, FBBT and OBBT are all `jit`/`vmap` kernels. | a Rust core (expression IR, B&B tree, `.nl` parser, FBBT, simplex) with a numpy relaxation layer and Python orchestration. JAX is no longer on its default solve path. |
 | **Lower bounds** | McCormick and alphaBB rules applied to each jaxpr primitive; alphaBB is derived automatically from `grad(grad(prim))`. Also a lifted quadratic and polynomial LP with RLT rows, and convex outer approximation. | McCormick over 28 primitives with a table of univariate envelopes, piecewise McCormick, alphaBB, G-convexity, RLT, PSD/SOC, GMI and OA cuts. |
-| **Node LPs** | a fixed-iteration primal–dual interior-point method in JAX, batched over boxes, with weak-duality-certified bounds. | an in-house Rust simplex with sparse LU and warm starts; HiGHS only for pure LP/MILP. |
+| **Node LPs** | a primal–dual interior-point method in JAX (Mehrotra predictor–corrector, early stop), batched over boxes, with weak-duality-certified bounds. | an in-house Rust simplex with sparse LU and warm starts; HiGHS only for pure LP/MILP. |
 | **Search** | batched spatial B&B: many boxes bounded per `vmap` call, pseudocost or width branching, and symmetry pruning on integer polynomial problems. | a native Rust spatial B&B, plus **AMP** (adaptive multivariate partitioning: piecewise MILP relaxations iterated against an NLP) and a signomial global optimizer. |
-| **Primal heuristics** | multi-start local NLP (pounce, with L-BFGS-B or scipy as fallbacks), dives, rounding repair and integer polish. | multi-start NLP, feasibility pump, diving, RINS, local branching and QUBO local search. |
+| **Primal heuristics** | multi-start local NLP (pounce when installed, otherwise optax L-BFGS; scipy on request), dives, rounding repair and integer polish. | multi-start NLP, feasibility pump, diving, RINS, local branching and QUBO local search. |
 | **Soundness** | float64 re-check of every point; optional `safe=True` outward rounding; MINLPLib wrong-answer checks and a fuzzer. | outward rounding, MINLPLib `.solu` checks and certificate checks. |
 | **Fixed cost** | JAX compilation: seconds per new model structure. A warm cache removes most of it. | small: native code with no compile step per model. |
 | **global50, 60 s** | 45 of 48 run, 0 wrong (this repo, October 2026). | 48 of 50 "ok" (incumbent matches the known optimum), at a geomean time about 8x BARON's (discopt report, July 2026). |
@@ -413,7 +434,7 @@ export.inspect(f, lo, hi, target="scip")          # report only; does not raise
 | exact rewrite | tanh → `1 - 2/(exp(2x)+1)` (or an overflow-free form, below), sigmoid, softplus, log1p, expm1, tan, sinh, cosh, asinh (odd form), acosh, atanh; `x**y` → `exp(y log x)` when `x > 0` on the box; max/min (and so relu, clip) → `(a + b ± \|a - b\|)/2` | sigmoid, log1p, expm1; sign as nested `if` |
 | reformulated | `where`/`select_n` (aux `y` and four big-M rows); `<`, `<=`, `>`, `>=` (a binary); `sign` (two binaries); and/or/not; max/min with `minmax="bigm"`; shared subexpressions of 50+ operations (aux `w == expr`); product operands that pyscipopt would expand past 1000 monomials | the same as SCIP, with `nonsmooth="reformulate"` or `portable=True` |
 | not exact (`approximated`) | reformulated comparisons and `sign` at ties (below); `reduce_precision` and float64→float32 casts (identities) | the same, when reformulated |
-| refused | erf and other special functions, a `while_loop` whose condition depends on `x`, `lax.cond` on a model value, float→int conversion and indices computed from `x`, `==`/`!=` between model values, atan/asin/acos/atan2, a `where` branch undefined on part of the box (below), big-M constants ≥ 1e20, an intermediate value that reaches 1e20 over the box, division by the constant 0, any primitive not listed | the same, minus the inverse trig functions (refused again with `portable=True`) |
+| refused | erf and other special functions, a `while_loop` whose condition depends on `x`, `lax.cond` on a model value, float→int conversion and indices computed from `x`, `==`/`!=` between model values, atan/asin/acos/atan2, a `where` branch undefined on part of the box (below), big-M constants ≥ 1e20, an intermediate value that reaches 1e20 over the box, division by the constant 0, any primitive not listed | the same, minus the inverse trig functions and `==`/`!=` between model values, which `.nl` writes natively (both refused again with `portable=True`) |
 
 Big-M constants come from interval bounds of the operands over the box. A
 reformulation is refused when a bound is not finite or a constant reaches 1e20
@@ -484,11 +505,17 @@ Points to check:
 floating-point rounding cannot cut off the global minimum (off by default, about
 1.7× slower). Every result is re-evaluated in float64; a point that violates the
 constraints is reported with status `"unverified"` and its `max_violation`.
+A constrained incumbent that had to be repaired to strict feasibility, and
+whose gap then exceeds 100 times the tolerance, is reported as `"unproven"`.
 `tests/test_fuzz.py` checks bounds against sampled points on random problems
 (`JAXGLOBAL_FUZZ=N` for more cases), and `benchmarks/check_wrong.py` exits
 nonzero on any wrong or unverified MINLPLib answer.
 
 ## Run
+
+jaxglobal needs `jax>=0.11.2,<0.12`: older jaxlib segfaults running a
+deserialized kernel in a fresh process, and JAX 0.12 lowers `erfc` to a
+primitive with no relaxation rule.
 
 ```bash
 pip install -e '.[dev]'
@@ -502,8 +529,8 @@ python benchmarks/report.py                  # checked results, SGM time, profil
 ```
 
 Any AMPL `.nl` model (text or binary) can be loaded with
-`jaxglobal.nl.read_nl(path)`, which returns `f`, `ineq`, `eq`, `lo`, `hi` for
-`minimize`.
+`jaxglobal.nl.read_nl(path)`, which returns an `NLModel` with `f`, `ineq`,
+`eq`, `lo`, `hi` (and `integer` with `integers="mask"`) for `minimize`.
 
 ## Lessons / gotchas found so far
 
@@ -529,24 +556,29 @@ Any AMPL `.nl` model (text or binary) can be loaded with
 ## Limitations
 
 * **Scale.** On 328 mixed-integer MINLPLib instances with up to 100
-  variables (60 s, cold), jaxglobal solved 72 of the 220 with at most 50
+  variables (60 s, cold, measured on 2026-10-17, before the SCIP-gap work),
+  jaxglobal solved 72 of the 220 with at most 50
   variables and 1 of the 108 with 51 to 100. At that size the time goes to
   setup (tracing, compiling, the first dense LP) before the search starts. The
   node LP is a dense interior point method whose cost grows as rows × n² per
-  iteration. Only quadratic problems get a sparse lifted LP.
-* **Speed.** Shifted geometric mean time at 60 s, cold: 32.6 s against
+  iteration. Only quadratic and polynomial (degree ≤ 6) problems get a sparse
+  lifted LP.
+* **Speed.** Shifted geometric mean time at 60 s, cold (2026-10-17, before the
+  SCIP-gap work): 32.6 s against
   SCIP's 1.9 s on `start50`, and 35.9 s against 1.35 s on `int50`. Much of
   jaxglobal's cold time goes to tracing and compiling the bounding kernels. The kernels are cached in memory and on disk
   under `~/.cache/jaxglobal` (`$JAXGLOBAL_CACHE_DIR`; `JAXGLOBAL_CACHE=0`
   turns the cache off), so a repeat solve of the same model takes about
   0.3-1 s on the built-in problems instead of 2-7 s. The cache prunes its own
-  entries, oldest first, past about 2 GB of XLA executables and 512 kernels
+  entries, oldest first, past about 2 GB of XLA executables and 2048 kernels
   (kernels of other jaxglobal versions after a day unused). Clear it
   with `python -c "import jaxglobal.kcache as k; k.clear_cache()"`.
 * **Relaxations.** The relaxations are reduced-space McCormick and αBB,
   univariate envelopes, scaled-Gershgorin αBB and interval arithmetic. They
-  are weak on big-M, cardinality and some bilinear structure. There are no
-  MILP cuts, no trilinear envelopes and no probing on continuous variables.
+  are weak on big-M, cardinality and some bilinear structure. Beyond the
+  binary-product cuts of the lifted polynomial LP there are no MILP cuts (no
+  Gomory or lift-and-project), no trilinear envelopes and no probing on
+  continuous variables.
   FBBT's tightened intermediate ranges are not yet fed back into the
   relaxations. The general lifted LP (`lifted=True`) is opt-in and slower.
 * **Floating point.** The default mode is not rigorous. `safe=True` rounds
@@ -572,12 +604,14 @@ Any AMPL `.nl` model (text or binary) can be loaded with
 ## Next steps
 
 The plan, with measurements for each phase, is in
-[`docs/ROADMAP.md`](docs/ROADMAP.md). Next on it:
+[`docs/ROADMAP.md`](docs/ROADMAP.md). Development is paused (October 2026);
+if it resumes, next on it are:
 
-* a sparse or first-order LP for the node bound beyond quadratic problems;
+* a sparse or first-order LP for the node bound beyond polynomial problems;
 * lower setup and compile cost for models with 50 to 100 variables;
 * tighter relaxations: FBBT ranges fed into McCormick, and more structure
-  detected from the jaxpr;
+  detected from the jaxpr (convexity, symmetry and pseudo-Boolean structure
+  are detected now);
 * a device-resident B&B loop for GPU;
 * a fully rigorous mode with verified transcendental enclosures and an exact
   LP-dual check.
@@ -586,7 +620,7 @@ The plan, with measurements for each phase, is in
 
 Citation keys refer to [`docs/references.bib`](docs/references.bib). Every
 entry with a DOI was checked against Crossref and its BibTeX taken from
-Crossref by `docs/verify_refs.py` (116 entries). The 39 entries without a
+Crossref by `docs/verify_refs.py` (119 entries). The 39 entries without a
 Crossref DOI (conference papers, arXiv, software, reports) are written by
 hand in `docs/refs.json`; the same script confirms each one from an
 independent source: the arXiv record, the DOI record, OpenAlex, the GitHub
