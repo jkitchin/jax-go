@@ -356,3 +356,4 @@ tests/test_rational_rows.py::test_cleared_bound_is_valid_and_not_trivial[False]
 tests/test_rational_rows.py::test_cleared_bound_is_valid_and_not_trivial[True]
 tests/test_rational_rows.py::test_cleared_row_keeps_tolerance_feasible_points
 tests/test_rational_rows.py::test_minimize_rational_fit
+tests/test_symmetry.py::test_minimize_det_with_symmetry

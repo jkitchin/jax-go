@@ -44,6 +44,7 @@ from .lifted import make_lifted_bounder
 from .lp import make_constrained_bounder, make_obbt, make_pool_cuts, pool_parts, reduce_ranges
 from .quadratic import binary_only, make_quadratic_bounder, make_quadratic_obbt, polynomial_form, quadratic_form
 from .structure import structure
+from .symmetry import lex_prune
 from .relax import SAFE_K
 from .univariate import make_relaxer
 
@@ -1205,6 +1206,16 @@ def minimize(
     if lf is not None and lf.flip >= 0 and np.all(lo[imask] == 0.0) and np.all(hi[imask] == 1.0):
         lo = lo.copy()  # complement symmetry (quadratic._flip): x_flip = 1 keeps an optimal point
         lo[lf.flip] = 1.0
+    # permutation symmetry (quadratic.QuadraticForm.sym): the elements that keep the root box's
+    # bounds are symmetries of this problem; children holding no lex-leader are dropped
+    # (symmetry.lex_prune), and the variables they move are split first, in lex order, so that boxes
+    # fix a prefix of it (the pruning then bites near the root). Not combined with the complement fixing above:
+    # each keeps some optimal point, but not necessarily a common one.
+    sym = None
+    if lf is not None and lf.sym.size and lf.flip < 0:
+        P = lf.sym[np.all((lo[lf.sym] == lo) & (hi[lf.sym] == hi), axis=1)]
+        sym = P if len(P) else None
+        sym_moved = np.any(P != np.arange(lo.size), axis=0)  # (the support of the elements kept)
     width0 = np.where(branchable, width0, np.inf)  # never split linear variables
 
     _mark("make_local")
@@ -1888,6 +1899,9 @@ def minimize(
             if imask.any():  # integers fractional at the relaxation point first, most fractional first
                 frac = np.abs(pxr - np.round(pxr))
                 score = np.where(imask & free & (frac > INT_TOL), 2.0 + frac, score)
+            if sym is not None:  # lex-leader pruning: the first free variable the symmetries move,
+                # in lex (index) order; the usual rule once all of those are fixed
+                score = np.where(sym_moved & free, 3.0 + (lo.size - np.arange(lo.size)) / lo.size, score)
             none = (score < 0).all(axis=1)
             if none.any():  # no branchable variable left to split: the widest of any kind
                 score[none] = np.where(free[none], (phi - plo)[none] / np.where(hi > lo, hi - lo, 1.0), -1.0)
@@ -1983,8 +1997,19 @@ def minimize(
         chi = np.concatenate([left_hi, phi[pp]])
 
         nlp_do = pool_nlp(clo, chi, np.concatenate([pxr[pp], pxr[pp]]), np.concatenate([ar, ar]))
+        dead = lex_prune(clo, chi, sym) if sym is not None else np.zeros(len(clo), bool)
         try:
-            clb, cx, cf, clo, chi, cxr = evaluate(clo, chi, with_obbt=obbt == "tree")
+            if dead.any():  # children with no lex-leader: not bounded, closed (bound +inf)
+                live = np.flatnonzero(~dead)
+                clb, cx, cf = np.full(len(clo), np.inf), 0.5 * (clo + chi), np.full(len(clo), np.inf)
+                cxr = 0.5 * (clo + chi)
+                if live.size:
+                    out = evaluate(clo[live], chi[live], with_obbt=obbt == "tree")
+                    clo, chi = clo.copy(), chi.copy()
+                    for dst, src in zip((clb, cx, cf, clo, chi, cxr), out):
+                        dst[live] = src
+            else:
+                clb, cx, cf, clo, chi, cxr = evaluate(clo, chi, with_obbt=obbt == "tree")
         except _CompileTimeout:  # out of time while a kernel compiles; the open boxes are unchanged
             break
         pool_judge(nlp_do, clb, np.concatenate([plb[pp], plb[pp]]))
