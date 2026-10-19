@@ -578,3 +578,37 @@ Nobody changes `minimize` defaults without an ablation table in the PR.
 7. **ex6_2_6 remains open** even after C (bound -8.8e-4 needs a relaxation
    change; the MINLPLib reference gap is open). It is reported honestly as a
    relaxation gap, not re-counted under A.
+
+---
+
+## 10. Status at completion
+
+Status sweep on `main` at 3047be4, after the PRs merged in this loop
+(#60–#67: scheduled FBBT, lifted-LP rational rows, symmetry pruning,
+pseudo-Boolean variable elimination, gap-weighted pseudocosts, the
+"unproven" status after incumbent repair, and the symmetry cost budget).
+PASS means solved within max(2 x SCIP time, 10 s). There were two warm rounds
+per bucket, with load recorded, and both rounds gave the same verdicts.
+
+**74 of 79 fast targets PASS.** These targets pass now and were open in
+earlier rounds: hadamard_5 (7.0 s), autocorr_bern20-10 and 30-04, kall_diffcircles_8 (18.7 s, cap 64.5),
+ex8_4_4 (8.9 s), ex8_4_5, ex6_2_6, flay04m, csched1a, batch and launch.
+ex8_4_4 and smallinvDAXr3b010-011 (9.7 s) are within 15% of the 10 s cap.
+
+### Out of reach (documented, not closed)
+
+| instance | dual | primal | best known | why |
+|---|---|---|---|---|
+| tln5 | 9.72 | 12.6 | 10.3 | The RLT root bound is weak, and the solver reaches 7.9k nodes without closing it (SCIP: 0.22 s). It needs global branching or a primal heuristic for the integer-scaled products. |
+| tln4 | 7.75 | 8.3 | 8.3 | The same structure as tln5. The incumbent is optimal but the bound stalls (12.5k nodes). |
+| wastewater15m1 | 2008 | 2446.43 | — | The root gap is too large for bilinear McCormick. It needs stronger relaxations for bilinear terms (SCIP: 3.0 s). |
+| smallinvDAXr5b150-165 | 88.082 | 88.120 | 88.105 | Timing out at 10.1 s, 359 nodes (SCIP: about 850 nodes). It needs a stronger node bound or a better incumbent. |
+| kall_circlespolygons_c1p12 | 0.3211 | 0.3396 | — | The bilinear-area bound is weak, the same class as c1p13/c1r13. Gap-weighted pseudocosts (#65) cut its node count, but it is still over the 13.6 s cap. |
+
+Smaller follow-ups found during review are not blocking and are tracked in
+the loop notes:
+- `sym_seconds` is not enforced while `lifted_form` is built.
+- `_refine` cannot be interrupted.
+- The test for gap weights is weak.
+- There are node-count regressions under #65 on c52, ex14_1_6, ex9_2_6 and st_robot.
+- The slow test `test_integer_neighbourhood_polish` depends on a wall-clock budget.
