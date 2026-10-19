@@ -647,6 +647,196 @@ def mul_consumed(pairs):
     return out
 
 
+def _key(k, v):
+    """``k`` if it can key a value (a hashable, non-literal operand whose value is an ``MC``), else None."""
+    return k if is_mc(v) and _hashable(k) and not isinstance(k, jcore.Literal) else None
+
+
+def _mag(m: MC):
+    """Finite magnitude of all four components of ``m`` (the error scale of sums of them)."""
+    return jnp.maximum(jnp.maximum(_fabs(m.lo), _fabs(m.hi)), jnp.maximum(_fabs(m.cv), _fabs(m.cc)))
+
+
+class _Lin(NamedTuple):
+    """A value ``rest + sum_v A_v * v * log(v)`` tracked by ``LogTerms``.
+
+    ``atoms`` maps the key of ``v`` to ``(v's MC, the eqn of one product, A_v, sum |a_k|, number of
+    terms a_k merged into A_v, roundings in each a_k)``; ``rest`` is the sum of the other terms (an
+    ``MC``, or None), ``S`` the error scale of that sum (sum of |coef| * ``_mag`` of its terms), ``K``
+    its number of terms and ``R`` the roundings in their coefficients.
+    """
+
+    atoms: dict
+    rest: object
+    S: object
+    K: int
+    R: int
+
+
+class LogTerms:
+    """Merges like terms ``a_k * v * log(v)`` of a sum, while an interpreter runs.
+
+    A model read from a file writes a sum such as ``9.6 log(x) x + 18.3 log(x) x - 31.0 log(x) x``
+    (``ex6_2_6``, the Gibbs energy of a mixture): each product is relaxed by itself, so the large
+    concave terms ``-31 x log x`` get the secant, whose gap ``31 w / e`` on ``[0, w]`` the search cannot
+    close near ``x = 0``. As one term ``(sum_k a_k) x log x`` the sum is relaxed by ``mc_xlogx`` scaled
+    by the net coefficient (here ``+1``: convex, exact).
+
+    ``observe(name, ins, invals, outvar, out, eqn)`` is called after each equation (as
+    ``Monomials.observe``). It records ``c * log(v)`` (``log``, then ``mul`` / ``div`` by constants,
+    ``neg``), ``b * v``, products ``(c log v) * (b v)`` (an atom ``A = c b``), and sums (``add``,
+    ``sub``, ``neg``, ``mul`` / ``div`` by a constant) of atoms and other values. At a sum that no later
+    linear operation consumes (``consumed``: ``lin_consumed``) and that holds an atom, the result is
+    intersected with ``rest + sum_v mc_xlogx(v) * A_v``. This is the same real function (the
+    distributive law), so it is a valid relaxation wherever each piece is. With ``ctx.safe`` it is
+    moved outward by ``2 SAFE_K`` ulps of ``(N + R + 2)`` times its error scale (``N`` terms with
+    coefficients rounded ``R`` times each, summed in floating point: each rounding is within an ulp
+    of the scale); ``mc_xlogx`` is widened as ``apply_xlogx`` widens it and the parts of ``rest`` are
+    the interpreter's (already widened) results.
+    """
+
+    def __init__(self, consumed, ctx: Ctx):
+        self.consumed = consumed
+        self.ctx = ctx
+        self.slog = {}  # key -> (v key, v MC, c, roundings in c): the value is c * log(v)
+        self.svar = {}  # key -> (v key, b, roundings in b): the value is b * v
+        self.rec = {}  # key -> _Lin
+
+    def _leaf(self, k, val, shp):
+        if _hashable(k) and k in self.rec:
+            return self.rec[k]
+        if isinstance(val, Unknown):
+            return None
+        if not is_mc(val):
+            if _const_float(val) is None:
+                return None
+            val = const_mc(jnp.asarray(val, dtype=jnp.result_type(float)))
+        if jnp.shape(val.lo) != shp:
+            return None
+        return _Lin({}, val, _mag(val), 1, 0)
+
+    @staticmethod
+    def _scale(r: _Lin, c, nr):
+        atoms = {k: (vm, e, A * c, sa * abs(c), n, R + nr) for k, (vm, e, A, sa, n, R) in r.atoms.items()}
+        rest = None if r.rest is None else mc_scale(r.rest, c)
+        return _Lin(atoms, rest, r.S * abs(c), r.K, r.R + nr)
+
+    @staticmethod
+    def _add(a: _Lin, b: _Lin):
+        atoms = dict(a.atoms)
+        for k, (vm, e, A, sa, n, R) in b.atoms.items():
+            if k in atoms:
+                vm0, e0, A0, sa0, n0, R0 = atoms[k]
+                atoms[k] = (vm0, e0, A0 + A, sa0 + sa, n0 + n, max(R0, R))
+            else:
+                atoms[k] = (vm, e, A, sa, n, R)
+        rest = b.rest if a.rest is None else a.rest if b.rest is None else mc_add(a.rest, b.rest)
+        return _Lin(atoms, rest, a.S + b.S, a.K + b.K, max(a.R, b.R))
+
+    def observe(self, name, ins, invals, outvar, out, eqn):
+        if self.ctx.interval_only or not is_mc(out) or not _hashable(outvar):
+            return out
+        shp = jnp.shape(out.lo)
+        rec = None
+        if name == "log":
+            k = _key(ins[0], invals[0])
+            if k is not None:
+                self.slog[outvar] = (k, invals[0], 1.0, 0)
+            return out
+        if name == "neg":
+            k = ins[0]
+            if _hashable(k):
+                if k in self.slog:
+                    vk, vm, c, nr = self.slog[k]
+                    self.slog[outvar] = (vk, vm, -c, nr)
+                if k in self.svar:
+                    vk, b, nr = self.svar[k]
+                    self.svar[outvar] = (vk, -b, nr)
+                if k in self.rec:
+                    rec = self._scale(self.rec[k], -1.0, 0)
+        elif name in ("mul", "div"):
+            u, v = ins
+            cu, cv = _const_float(invals[0]), _const_float(invals[1])
+            if name == "div":
+                cu, cv = None, (None if cv is None or cv == 0 else 1.0 / cv)
+            nr = 2 if name == "div" else 1
+            if cu is not None or cv is not None:
+                c, k, val = (cu, v, invals[1]) if cu is not None else (cv, u, invals[0])
+                if _hashable(k) and np.isfinite(c):
+                    if k in self.slog:
+                        vk, vm, c0, r0 = self.slog[k]
+                        self.slog[outvar] = (vk, vm, c0 * c, r0 + nr)
+                    if k in self.svar:
+                        vk, b0, r0 = self.svar[k]
+                        self.svar[outvar] = (vk, b0 * c, r0 + nr)
+                    elif _key(k, val) is not None:
+                        self.svar[outvar] = (k, c, nr - 1)
+                    if k in self.rec:
+                        rec = self._scale(self.rec[k], c, nr)
+            elif name == "mul" and _hashable(u) and _hashable(v):
+                for s, t in ((u, v), (v, u)):
+                    if s not in self.slog:
+                        continue
+                    vk, vm, c, rc = self.slog[s]
+                    if t == vk and _key(t, invals[ins.index(t)]) is not None:
+                        b, rb = 1.0, 0
+                    elif t in self.svar and self.svar[t][0] == vk:
+                        _, b, rb = self.svar[t]
+                    else:
+                        continue
+                    A = c * b
+                    if jnp.shape(vm.lo) == shp and np.isfinite(A):
+                        rec = _Lin({vk: (vm, eqn, A, abs(A), 1, rc + rb + 1)}, None, 0.0, 0, 0)
+                    break
+        elif name in ("add", "sub") and any(_hashable(k) and k in self.rec for k in ins):
+            a, b = (self._leaf(k, val, shp) for k, val in zip(ins, invals))
+            if a is not None and b is not None:
+                rec = self._add(a, self._scale(b, -1.0, 0) if name == "sub" else b)
+        if rec is None:
+            return out
+        self.rec[outvar] = rec
+        if outvar in self.consumed or not rec.atoms:
+            return out
+        # the merged sum is the same function: where the term-by-term result is NaN (a product rule's
+        # 0 * inf on a box touching log's domain end) it is all there is
+        m = self._relax(rec)
+        out = MC(*(jnp.where(jnp.isnan(o), mo, o) for o, mo in zip(out, m)))
+        return intersect_mc(out, m)
+
+    def _relax(self, r: _Lin):
+        tot, S, N, R = r.rest, r.S, r.K, r.R
+        for vm, e, A, sa, n, Rk in r.atoms.values():
+            g = apply_xlogx(self.ctx, e, vm)
+            N, R = N + n, max(R, Rk)
+            if A != 0:
+                t = mc_scale(g, A)
+                tot = t if tot is None else mc_add(tot, t)
+                S = S + sa * _mag(g)
+            else:  # (the exact sum of the a_k may still be nonzero: the margin is all that is left of it)
+                S = S + sa * jnp.maximum(jnp.abs(g.lo), jnp.abs(g.hi))
+        if tot is None:
+            tot = const_mc(jnp.zeros_like(S))
+        if not self.ctx.safe:
+            return tighten(tot)
+        eps = float(jnp.finfo(tot.lo.dtype).eps)
+        m = lax.stop_gradient(2.0 * SAFE_K * eps * (N + R + 2) * S)
+        dn = lambda v: jnp.where(jnp.isfinite(v), v - m, v)  # noqa: E731
+        up = lambda v: jnp.where(jnp.isfinite(v), v + m, v)  # noqa: E731
+        return tighten(MC(dn(tot.lo), up(tot.hi), dn(tot.cv), up(tot.cc)))
+
+
+def lin_consumed(pairs):
+    """Keys used as an operand of a linear operation (``add``, ``sub``, ``neg``, or ``mul`` / ``div``
+    with a literal other operand), from ``(name, operand keys)`` pairs: ``LogTerms`` tightens only
+    sums outside this set."""
+    out = set()
+    for name, ins in pairs:
+        lit = [isinstance(k, jcore.Literal) or not _hashable(k) or type(k).__name__ == "Const" for k in ins]
+        if name in ("add", "sub", "neg") or name in ("mul", "div") and any(lit):
+            out.update(k for k, li in zip(ins, lit) if not li)
+    return out
+
+
 def mc_abs(x: MC) -> MC:
     return convex_rule(jnp.abs, x, jnp.clip(0.0, x.lo, x.hi))
 
@@ -1228,6 +1418,8 @@ def eval_jaxpr_mc(jaxpr, consts, args, ctx: Ctx = Ctx()):
     logs, canon, seen = {}, {}, {}
     # products of powers are tightened by ``Monomials`` (log-space relaxation of the whole product)
     monos = Monomials(mul_consumed((e.primitive.name, e.invars) for e in jaxpr.eqns), ctx)
+    # like terms ``a_k * v * log(v)`` of a sum are merged by ``LogTerms`` (one ``mc_xlogx`` per ``v``)
+    terms = LogTerms(lin_consumed((e.primitive.name, e.invars) for e in jaxpr.eqns), ctx)
     for eqn in jaxpr.eqns:
         invals = [read(v) for v in eqn.invars]
         name = eqn.primitive.name
@@ -1255,7 +1447,8 @@ def eval_jaxpr_mc(jaxpr, consts, args, ctx: Ctx = Ctx()):
             for v, o in zip(eqn.outvars, outs):
                 env[v] = o
         else:
-            env[eqn.outvars[0]] = monos.observe(name, ins, invals, eqn.outvars[0], outs)
+            outs = monos.observe(name, ins, invals, eqn.outvars[0], outs)
+            env[eqn.outvars[0]] = terms.observe(name, ins, invals, eqn.outvars[0], outs, eqn)
     return [read(v) for v in jaxpr.outvars]
 
 

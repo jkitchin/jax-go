@@ -234,6 +234,15 @@ tests/test_lifted_poly.py::test_minimize_cancelled_monomial
 tests/test_lifted_poly.py::test_minimize_cubic_constrained
 tests/test_lifted_poly.py::test_minimize_large_offset_at_root[False]
 tests/test_lifted_poly.py::test_minimize_large_offset_at_root[True]
+tests/test_logterms.py::test_gibbs_problem_solves[False]
+tests/test_logterms.py::test_gibbs_problem_solves[True]
+tests/test_logterms.py::test_no_new_nans[forms]
+tests/test_logterms.py::test_no_new_nans[gibbs]
+tests/test_logterms.py::test_unbounded_and_nonpositive_boxes
+tests/test_logterms.py::test_valid_relaxations_and_cuts[forms-False]
+tests/test_logterms.py::test_valid_relaxations_and_cuts[forms-True]
+tests/test_logterms.py::test_valid_relaxations_and_cuts[gibbs-False]
+tests/test_logterms.py::test_valid_relaxations_and_cuts[gibbs-True]
 tests/test_nl.py::test_minlplib_file
 tests/test_nl.py::test_solve_from_nl
 tests/test_quadratic.py::test_circle_packing_solves
@@ -348,3 +357,7 @@ tests/test_fbbt_balance.py::test_balanced_fbbt_matches_the_chain[1.5]
 tests/test_fbbt_balance.py::test_balanced_fbbt_matches_the_chain_randomized[0]
 tests/test_fbbt_balance.py::test_balanced_fbbt_matches_the_chain_randomized[1]
 tests/test_fbbt_balance.py::test_balanced_fbbt_matches_the_chain_randomized[2]
+tests/test_rational_rows.py::test_cleared_bound_is_valid_and_not_trivial[False]
+tests/test_rational_rows.py::test_cleared_bound_is_valid_and_not_trivial[True]
+tests/test_rational_rows.py::test_cleared_row_keeps_tolerance_feasible_points
+tests/test_rational_rows.py::test_minimize_rational_fit
