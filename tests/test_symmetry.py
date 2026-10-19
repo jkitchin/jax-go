@@ -127,3 +127,58 @@ def test_minimize_det_with_symmetry():
     assert r.lower_bound <= -3.0 + 1e-6
     B = np.round(r.x[:n]).reshape(4, 4)
     assert np.linalg.det(B) == pytest.approx(3.0, abs=1e-9)
+
+
+def _sym_sum_problem(n):
+    """min sum x_i^3 over integers with sum x_i >= 3: every permutation is a symmetry (S_n)."""
+    f = {(i, i, i): 1.0 for i in range(n)}
+    g = [{**{(i,): -1.0 for i in range(n)}, (): 3.0}]
+    return f, g
+
+
+def test_large_group_listing_is_capped_and_small():
+    """S_120: the transpositions are found directly, the listing stops at the cap without forming
+    the full products, and the generators (transversal elements) come first."""
+    n = 120
+    f, g = _sym_sum_problem(n)
+    P = automorphisms(n, f, g, [], range(n), max_elements=300, deadline=np.inf)  # (no wall clock in tests)
+    assert P.shape == (300, n)
+    assert len({p.tobytes() for p in P}) == len(P)
+    first = P[0]
+    assert (first != np.arange(n)).sum() == 2  # a transposition
+    for p in P[::37]:
+        assert is_automorphism(p, f, g, [])
+
+
+def test_search_deadline_gives_up_cleanly():
+    """Out of time (an injected clock), the search returns no elements; the call budget still
+    keeps what it found."""
+    f, g, n = det_problem(3)
+    fp = {(n,): -1.0}
+    gp = [{**{k: -v for k, v in det_poly(3).items()}, (n,): 1.0}]
+    ticks = iter(range(10**6))
+    P = automorphisms(n + 1, fp, gp, [], range(n), deadline=5.0, clock=lambda: next(ticks))
+    assert P.shape == (0, n + 1)
+    assert len(automorphisms(n + 1, fp, gp, [], range(n), deadline=np.inf)) == 35
+
+
+def test_lex_prune_uses_a_bounded_prefix():
+    """lex_prune looks at only the first max_elements elements: a box only a later element prunes
+    survives with a small cap."""
+    P = np.array([[0, 1, 2, 3], [0, 1, 3, 2]])
+    lo, hi = np.array([[0.0, 0.0, 0.0, 1.0]]), np.array([[0.0, 0.0, 0.0, 1.0]])
+    assert lex_prune(lo, hi, P).tolist() == [True]
+    assert lex_prune(lo, hi, P, max_elements=1).tolist() == [False]
+
+
+def test_polynomial_form_survives_a_failing_search(monkeypatch):
+    """An exception in the symmetry search drops only the symmetry, not the lifted form."""
+    import jaxglobal.quadratic as quadratic
+
+    def boom(*a, **k):
+        raise RuntimeError
+
+    monkeypatch.setattr(quadratic, "automorphisms", boom)
+    f, g, n = det_problem(3)
+    Q = polynomial_form(f, g, None, n + 1, integer=np.arange(n))
+    assert Q is not None and Q.sym.size == 0
