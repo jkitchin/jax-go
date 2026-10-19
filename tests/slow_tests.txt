@@ -343,3 +343,5 @@ tests/test_time_limit.py::test_dive_chunks_continue_one_dive
 tests/test_time_limit.py::test_dive_runs_in_chunks_when_the_whole_dive_does_not_fit
 tests/test_incumbent.py::test_relaxation_minimizers_solved_in_their_boxes[False]
 tests/test_incumbent.py::test_relaxation_minimizers_solved_in_their_boxes[True]
+tests/test_fbbt_balance.py::test_balanced_fbbt_matches_the_chain[inf]
+tests/test_fbbt_balance.py::test_balanced_fbbt_matches_the_chain[1.5]

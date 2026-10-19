@@ -203,6 +203,84 @@ def _live_rows(prog):
     return prog._replace(op=prog.op[keep], a=prog.a[keep], b=prog.b[keep], out=prog.out[keep])
 
 
+def balance_sums(prog):
+    """``prog`` with every chain of two-operand ``add`` rows rebuilt as a balanced tree.
+
+    A sum of ``L`` terms read from an ``.nl`` file is a chain ``((t1 + t2) + t3) + ...``:
+    ``L - 1`` rows, each waiting for the previous one, so ``schedule`` needs ``L - 1`` steps for
+    it (smallinvDAX: a 495-term quadratic, 469 of its 1583 rows' steps were that chain, and
+    FBBT cost 740 ms per 16 boxes). Interval addition is associative up to rounding, so the
+    forward value of the sum, and the backward narrowing of each term (the sum's interval minus
+    that of all other terms), are the same for any bracketing. Here a maximal tree of add rows
+    (both operands non-constant, every inner result used once and by the tree only) keeps its
+    root's output slot and row count; its terms are paired lowest depth first (Huffman on the
+    depths), so the tree's depth is about ``log2 L`` past its deepest term. The rows are emitted
+    in topological order at the root's position, and inner slots belong to no other row or
+    output, so nothing outside a tree changes. Returns ``prog`` itself when nothing changes."""
+    import heapq
+
+    K = len(prog.op)
+    if K == 0:
+        return prog
+    addable = np.array([oc[0] in ("add", "add_any") and not oc[2] and not oc[3] and not oc[4] and oc[5] == 2
+                        for oc in prog.opcodes], bool)  # fmt: skip
+    S = len(prog.const_val)
+    uses = np.zeros(S, np.int64)
+    np.add.at(uses, prog.a, 1)
+    np.add.at(uses, prog.b, 1)
+    np.add.at(uses, prog.b, -(prog.a == prog.b).astype(np.int64))  # a unary row (b = a) reads once
+    for o in prog.outs:
+        np.add.at(uses, np.ravel(np.asarray(o, np.int64)), 1)
+    row_of = np.full(S, -1, np.int64)
+    row_of[prog.out] = np.arange(K)
+    is_add = addable[prog.op]
+    # an inner row: an add whose result is read once, by another add row
+    user = np.full(S, -1, np.int64)
+    for k in range(K):
+        user[prog.a[k]] = k
+        user[prog.b[k]] = k
+    inner = np.zeros(K, bool)
+    for k in np.flatnonzero(is_add):
+        s = prog.out[k]
+        inner[k] = uses[s] == 1 and user[s] >= 0 and is_add[user[s]]
+    if not inner.any():
+        return prog
+    depth = np.zeros(S, np.int64)  # steps until the slot is known, in the rebuilt program
+    rows, changed = [], False
+    for k in range(K):
+        if inner[k]:
+            continue
+        if not is_add[k]:
+            rows.append((prog.op[k], prog.a[k], prog.b[k], prog.out[k]))
+            depth[prog.out[k]] = 1 + max(depth[prog.a[k]], depth[prog.b[k]])
+            continue
+        leaves, slots, stack = [], [], [prog.a[k], prog.b[k]]
+        while stack:  # terms of the tree rooted at row k, and the inner slots it frees
+            s = stack.pop()
+            r = row_of[s]
+            if r >= 0 and inner[r]:
+                slots.append(s)
+                stack += [prog.b[r], prog.a[r]]
+            else:
+                leaves.append(s)
+        changed |= bool(slots)
+        heap = [(int(depth[s]), i, int(s)) for i, s in enumerate(leaves)]
+        heapq.heapify(heap)
+        i = len(heap)
+        while len(heap) > 1:
+            da, _, sa = heapq.heappop(heap)
+            db, _, sb = heapq.heappop(heap)
+            out = prog.out[k] if not heap else slots.pop()
+            rows.append((prog.op[k], sa, sb, out))
+            depth[out] = 1 + max(da, db)
+            heapq.heappush(heap, (int(depth[out]), i, int(out)))
+            i += 1
+    if not changed:
+        return prog
+    r = np.asarray(rows, np.int64).reshape(-1, 4)
+    return prog._replace(op=r[:, 0], a=r[:, 1], b=r[:, 2], out=r[:, 3])
+
+
 def make_propagate(tape, ineq, eq, n, feas_tol, rounds, safe=False, scheduled=None, integer=()):
     """``fbbt(lo, hi, cutoff) -> (lo, hi, empty)`` by interpreting the scalarized tape, or None.
 
@@ -218,6 +296,8 @@ def make_propagate(tape, ineq, eq, n, feas_tol, rounds, safe=False, scheduled=No
     fwd, bwd = _branches(prog, safe)
     if scheduled is None:
         scheduled = len(prog.op) >= SCHEDULE_MIN_ROWS
+    if scheduled:  # the sweeps take one step per level of the tape: no long add chains
+        prog = balance_sums(prog)
     run = _propagate_steps(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds, integer) if scheduled else \
         _propagate_rows(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds, integer)  # fmt: skip
     run.program = prog
