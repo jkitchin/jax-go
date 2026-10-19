@@ -4,8 +4,9 @@ version = "0.0.1"
 description = "Proof-of-concept deterministic global optimization of plain JAX functions via jaxpr-derived relaxations"
 requires-python = ">=3.10"
 # jax >= 0.11.2: older jaxlib segfaults running a jax.export-deserialized kernel
-# with LAPACK calls in a fresh process (kcache.py); flatbuffers: jax.export serialization
-dependencies = ["jax>=0.11.2", "numpy", "scipy", "optax", "flatbuffers"]
+# with LAPACK calls in a fresh process (kcache.py); jax < 0.12: 0.12 lowers erfc with
+# bitcast_convert_type, which has no relaxation rule; flatbuffers: jax.export serialization
+dependencies = ["jax>=0.11.2,<0.12", "numpy", "scipy", "optax", "flatbuffers"]
 
 [project.optional-dependencies]
 pounce = ["pounce-solver>=0.12"]  # default local NLP solver when installed
