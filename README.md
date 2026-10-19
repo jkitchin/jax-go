@@ -35,15 +35,66 @@ solvers on general problems (see [Limitations](#limitations)).
   checked against the library's reference bounds. Every returned point is
   re-checked in float64, and an opt-in `safe=True` mode rounds the bounds
   outward.
-* **MINLPLib, 60 s limit, cold start (compilation included):**
+* **MINLPLib against SCIP, October 2026** (`main` at 58bb551). An instance
+  passes if jaxglobal proves it optimal within max(2 x SCIP's time, 10 s).
+  "Cold" includes JAX compilation; "warm" reuses the compile caches from a
+  previous run. SCIP has no compile step, so the cold numbers are the fair
+  comparison.
+
+  | set | instances | pass, cold | pass, warm | where SCIP takes ≥ 0.5 s (warm) |
+  |---|---:|---:|---:|---:|
+  | development: the targets the recent solver work was tuned on | 79 | 68 | 74 | 20 / 23 |
+  | held out: same families, never used during development | 184 | 151 | 160 | 10 / 26 |
+
+  - **Development set.** It is drawn from `start50` and `int50` (41 of the 79 have
+    integer variables). Recent PRs fixed these instances one by one, so the
+    numbers above are optimistic. The 5 still failing, and why, are listed in
+    [`docs/PLAN-scip-gap-v2.md` §10](docs/PLAN-scip-gap-v2.md).
+  - **Held-out set.** Every MINLPLib instance with a SCIP reference time
+    that was not used during development: not in `start50`, `int50` or the
+    `check_wrong` sample, and not named in the code, tests or docs. The set is
+    easier than the development set: all continuous, with a median of 6
+    variables and a median SCIP time of 0.03 s.
+    - Easy instances (SCIP < 0.5 s) generalize: 150 of 158 pass, warm.
+    - Harder instances do not: 10 of 26, against 20 of 23 on the development set.
+    - 11 are rejected as unsupported, because bound propagation finds no finite
+      bounds for some variables.
+  - **Speed.** jaxglobal beats SCIP's time on only 8 of the development
+    instances and 3 of the held-out ones. Most passes rely on the 10 s floor.
+  - **Wrong answers:** 0 in either set.
+  - **To reproduce:** `benchmarks/run.py --solvers jaxglobal --time-limit <cap>`.
+
+* **global50, 60 s limit** (the 50-instance BARON comparison panel from
+  discopt, `discopt_benchmarks/config/baron_global50.txt`). All solvers ran on
+  the same machine. 48 of the 50 ran; casctanks and hda are missing from this
+  repo's MINLPLib tables.
+
+  | | solved in 60 s | wrong answers | not solved in 60 s |
+  |---|---:|---:|---|
+  | jaxglobal, cold | 45 / 48 | 0 | clay0303hfsg, cvxnonsep_psig30, tanksize |
+  | jaxglobal, warm | 45 / 48 | 0 | the same three |
+  | SCIP (command line, `.nl`) | 45 / 48 | 0 | cvxnonsep_nsig30, st_e36, tspn05 |
+  | BARON (GAMS) | 47 / 48 | 1 (nvs05: reports 5.887 as optimal; the optimum is 5.471) | — |
+
+  - **Development overlap.** 11 of the 48 are in the development set above, and
+    every solver solves all 11. On the other 37, jaxglobal and SCIP each solve
+    34.
+  - **Under the 2 x SCIP / 10 s rule:** 40 of 48 pass cold and 45 warm.
+    nvs09 takes 44 s cold and 2.6 s warm, so compilation dominates the cold
+    misses.
+  - **Speed.** SCIP and BARON solve most of these instances in under 0.1 s;
+    jaxglobal takes 0.5–8 s warm. jaxglobal solves cvxnonsep_nsig30, st_e36 and
+    tspn05, which SCIP leaves unsolved, but BARON solves all three faster.
+
+* **MINLPLib, 60 s limit, cold start (compilation included)**, measured on
+  2026-10-17, before the SCIP-gap work, and not re-run since:
 
   | set | jaxglobal | SCIP |
   |---|---:|---:|
   | `start50`: 50 continuous instances, ≤ 50 variables, weighted toward hard ones | 31 | 44 |
   | `int50`: 50 mixed-integer instances, ≤ 50 variables | 29 | 45 |
 
-  jaxglobal solves no `int50` instance that SCIP does not. Details:
-  [`benchmarks/sets/README.md`](benchmarks/sets/README.md) and
+  Details: [`benchmarks/sets/README.md`](benchmarks/sets/README.md) and
   [`docs/ROADMAP.md`](docs/ROADMAP.md).
 * **What it is for:** problems defined by code, which equation-based solvers
   cannot read at all or need rewritten by hand: `jnp.where` logic,
@@ -267,6 +318,39 @@ the 20-point GP of example 06, with `gp_std`: EI 1401 → 765 nodes (warm solve
 slower). [`examples/06-gaussian-processes.ipynb`](examples/06-gaussian-processes.ipynb)
 repeats the paper's case studies: GP means, acquisition functions, a chance
 constraint and a Bayesian-optimization loop.
+
+## jaxglobal and discopt
+
+[discopt](https://doi.org/10.5281/zenodo.19762815) is the author's other MINLP
+solver, and the more mature of the two. They solve the same class of problems
+with different designs. This list compares them as of October 2026; the
+discopt facts come from discopt's own README and development notes.
+
+| | jaxglobal | discopt |
+|---|---|---|
+| **Model input** | a plain JAX function, traced to a jaxpr, or an `.nl` file. `jnp.where` logic, neural networks, GP surrogates and Python-loop ODEs get certified bounds. | an algebraic modeling API (`Model`, `m.continuous`, `dm.exp`, ...), or `.nl`, `.gms` and QPLIB files. Opaque Python callables (`dm.custom`, `dm.external`) are solved without a dual bound. |
+| **Implementation** | pure Python and JAX: relaxations, the LP interior-point method, FBBT and OBBT are all `jit`/`vmap` kernels. | a Rust core (expression IR, B&B tree, `.nl` parser, FBBT, simplex) with a numpy relaxation layer and Python orchestration. JAX is no longer on its default solve path. |
+| **Lower bounds** | McCormick and alphaBB rules applied to each jaxpr primitive; alphaBB is derived automatically from `grad(grad(prim))`. Also a lifted quadratic and polynomial LP with RLT rows, and convex outer approximation. | McCormick over 28 primitives with a table of univariate envelopes, piecewise McCormick, alphaBB, G-convexity, RLT, PSD/SOC, GMI and OA cuts. |
+| **Node LPs** | a fixed-iteration primal–dual interior-point method in JAX, batched over boxes, with weak-duality-certified bounds. | an in-house Rust simplex with sparse LU and warm starts; HiGHS only for pure LP/MILP. |
+| **Search** | batched spatial B&B: many boxes bounded per `vmap` call, pseudocost or width branching, and symmetry pruning on integer polynomial problems. | a native Rust spatial B&B, plus **AMP** (adaptive multivariate partitioning: piecewise MILP relaxations iterated against an NLP) and a signomial global optimizer. |
+| **Primal heuristics** | multi-start local NLP (pounce, with L-BFGS-B or scipy as fallbacks), dives, rounding repair and integer polish. | multi-start NLP, feasibility pump, diving, RINS, local branching and QUBO local search. |
+| **Soundness** | float64 re-check of every point; optional `safe=True` outward rounding; MINLPLib wrong-answer checks and a fuzzer. | outward rounding, MINLPLib `.solu` checks and certificate checks. |
+| **Fixed cost** | JAX compilation: seconds per new model structure. A warm cache removes most of it. | small: native code with no compile step per model. |
+| **global50, 60 s** | 45 of 48 run, 0 wrong (this repo, October 2026). | 48 of 50 "ok" (incumbent matches the known optimum), at a geomean time about 8x BARON's (discopt report, July 2026). |
+
+**What jaxglobal lacks from discopt.** It has no AMP or piecewise MILP
+relaxations, no simplex warm starts, and no GMI or PSD cuts. Its heuristics are
+narrower, and every new model structure pays a compile cost. discopt is the
+better choice for problems written as equations.
+
+**What jaxglobal is for.** It takes models that are only available as JAX code:
+surrogates, `where` logic and simulation loops. It bounds them by tracing,
+without rewriting them as equations, and its bounding kernels batch over boxes.
+B&B still runs on the host, and GPU throughput has not been measured (see
+[Limitations](#limitations)).
+
+**Status.** Development is paused at this point. None of the discopt features
+above are planned for jaxglobal yet.
 
 ## Comparison with equation-based solvers
 
