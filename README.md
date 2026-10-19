@@ -1,6 +1,6 @@
 <p align="center"><img src="figures/logo.svg" alt="jaxglobal" width="560"></p>
 
-<p align="center"><a href="https://kitchingroup.cheme.cmu.edu/jax-go/"><img src="https://github.com/jkitchin/jax-go/actions/workflows/docs.yml/badge.svg" alt="docs"></a> <a href="https://github.com/jkitchin/jax-go/actions/workflows/tests.yml"><img src="https://github.com/jkitchin/jax-go/actions/workflows/tests.yml/badge.svg" alt="tests"></a></p>
+<p align="center"><a href="https://kitchingroup.cheme.cmu.edu/jax-go/"><img src="https://github.com/jkitchin/jax-go/actions/workflows/docs.yml/badge.svg" alt="docs"></a> <a href="https://github.com/jkitchin/jax-go/actions/workflows/tests.yml"><img src="https://github.com/jkitchin/jax-go/actions/workflows/tests.yml/badge.svg" alt="tests"></a> <a href="https://doi.org/10.5281/zenodo.23478503"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.23478503.svg" alt="DOI"></a></p>
 
 # jaxglobal — global optimization of plain JAX functions
 
@@ -722,7 +722,22 @@ targets):
 
 jaxglobal is released under the MIT license ([`LICENSE`](LICENSE)). To cite
 it, use the metadata in [`CITATION.cff`](CITATION.cff) (GitHub's "Cite this
-repository" button). Each GitHub release is archived on Zenodo with a DOI.
+repository" button). Each GitHub release is archived on Zenodo. The DOI
+[10.5281/zenodo.23478503](https://doi.org/10.5281/zenodo.23478503) always
+resolves to the latest release; version 0.1.0 is
+[10.5281/zenodo.23478504](https://doi.org/10.5281/zenodo.23478504).
+
+```bibtex
+@software{kitchin2026jaxglobal,
+  author    = {Kitchin, John R.},
+  title     = {jaxglobal: deterministic global optimization of plain {JAX} functions},
+  year      = {2026},
+  publisher = {Zenodo},
+  version   = {0.1.0},
+  doi       = {10.5281/zenodo.23478503},
+  url       = {https://github.com/jkitchin/jax-go}
+}
+```
 
 ## References
 
