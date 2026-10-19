@@ -222,7 +222,7 @@ def test_separable_entropy_plus_nonconvex_solves_correctly(safe):
     lo, hi = np.array([0.125] * n + [-1.5]), np.array([1.0] * n + [2.0])
     ys = np.linspace(-1.5, 2, 200001)
     true = -n * xs + np.min((ys**2 - 1) ** 2 + 0.003 * ys)
-    r = minimize(f, lo, hi, time_limit=20, local_solve=False, safe=safe)
+    r = minimize(f, lo, hi, time_limit=120, local_solve=False, safe=safe)  # (~7 s; headroom for load)
     assert r.lower_bound <= true + 1e-6
     assert r.status == "optimal" and abs(r.fun - true) < 1e-4
 
