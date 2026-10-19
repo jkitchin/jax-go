@@ -60,7 +60,7 @@ jobs:
         # Tests that take >= 1 s (tests/slow_tests.txt) run only on a manual dispatch with
         # "all"; the full suite, fuzz and check_wrong are pre-merge gates run locally.
         run: >-
-          python -m pytest -q -ra -n auto --timeout 600 --durations=25
+          python -m pytest -q -ra -n auto --timeout 600 --durations=40 --durations-min=3
           ${{ inputs.all && ' ' || '-m "not slow"' }} tests
       # Saved even when a test fails, so the next run starts warm.
       - name: Save compiled kernels
