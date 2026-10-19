@@ -476,8 +476,8 @@ class _Kernels:
                 lo_i, hi_i = blo[idx], bhi[idx]
                 fl = jnp.floor(x[idx])
                 X = jnp.stack([x.at[idx].set(jnp.clip(fl + (x[idx] - fl > t), lo_i, hi_i)) for t in ROUNDINGS])
-                v = jax.vmap(violation)(X)
-                fv = jnp.where(v <= feas_tol, jax.vmap(f)(X), jnp.inf)
+                v, fX = jax.vmap(violation)(X), jax.vmap(f)(X)
+                fv = jnp.where((v <= feas_tol) & jnp.isfinite(fX), fX, jnp.inf)  # f = -inf is no minimum
                 best = jnp.where(jnp.isfinite(fv).any(), jnp.argmin(fv), jnp.argmin(v))
                 x, fx = X[best], fv[best]
                 rlo, rhi, e = round_box(rlo, rhi)  # no integer point of the box has f <= cutoff
@@ -1270,14 +1270,19 @@ def minimize(
     def screen(X):
         """Objective values of candidate incumbents ``X`` (k, n), ``inf`` for any that is not one.
 
-        A candidate must lie in the box, have its integer variables integral (to ``INT_TOL``)
-        and satisfy every constraint to ``feas_tol`` (``K.viol``, float64), and ``f`` must be
-        a number. Every point a local solve or the polish proposes passes through here before
-        it can become the incumbent, i.e. before it is used as a cutoff to prune."""
-        X = np.asarray(X, dtype=np.float64)
+        A candidate must be finite, lie in the box, have its integer variables integral (to
+        ``INT_TOL``) and satisfy every constraint to ``feas_tol`` (``K.viol``, float64; a NaN or
+        +inf constraint value violates, g = -inf satisfies), and ``f`` must be finite: ``f = -inf`` (log at 0) is
+        no attained minimum, and as a cutoff it would prune every box. Every point a local
+        solve, a dive, the polish or a point box proposes passes through here before it can
+        become the incumbent, i.e. before it is used as a cutoff to prune."""
+        X = np.atleast_2d(np.asarray(X, dtype=np.float64))
+        bad = np.any((X < lo) | (X > hi) | ~np.isfinite(X), axis=1)
+        X = np.where(bad[:, None], 0.5 * (np.where(np.isfinite(lo), lo, 0.0) + np.where(np.isfinite(hi), hi, 0.0)), X)
         F = np.asarray(K.fvals(jnp.asarray(X)), dtype=np.float64)
-        bad = np.isnan(F) | np.any((X < lo) | (X > hi) | np.isnan(X), axis=1)
+        bad |= ~np.isfinite(F)
         if constrained:
+            # (violation is NaN or inf at a NaN or +inf g and a non-finite h; g = -inf is satisfied)
             bad |= ~(np.asarray(K.viol(jnp.asarray(X))) <= feas_tol)
         if imask.any():
             bad |= np.any(np.abs(X[:, imask] - np.round(X[:, imask])) > INT_TOL, axis=1)
@@ -1439,8 +1444,9 @@ def minimize(
         """Improve the incumbent from candidate points and local solves."""
         nonlocal ub, xbest
         starts = []
+        fc = np.where(np.isfinite(fc), fc, np.inf)  # f = -inf or NaN: no candidate (``screen``)
         if np.any(np.isfinite(fc)):
-            i = int(np.nanargmin(fc))
+            i = int(np.argmin(fc))
             if fc[i] < ub:
                 fs = float(screen(np.asarray(xc[i])[None])[0])  # the kernel checked feasibility; screen re-checks
                 if fs < ub:                                     # it in float64 with the box and integrality
@@ -1945,7 +1951,8 @@ def minimize(
             next_dive = it + dive_every
         if branch_var != "width":
             # pseudocost observations: bound gain per squared relative width
-            gl, gr = np.maximum(clb[:M] - plb[pp], 0.0), np.maximum(clb[M:] - plb[pp], 0.0)
+            with np.errstate(invalid="ignore"):  # -inf - -inf: NaN, dropped below (``good``)
+                gl, gr = np.maximum(clb[:M] - plb[pp], 0.0), np.maximum(clb[M:] - plb[pp], 0.0)
             if np.isfinite(ub):
                 cap = np.maximum(ub - plb[pp], 0.0)
                 gl, gr = np.minimum(gl, cap), np.minimum(gr, cap)
