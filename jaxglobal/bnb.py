@@ -1023,9 +1023,8 @@ def minimize(
     saturating activation or ReLU; otherwise off). With ``True`` and an
     unsupported ``f`` the CROWN bound is ``-inf``, i.e. no effect.
 
-    A problem whose integer variables are all binary, whose objective at binary points is a
-    polynomial of them (``f`` itself, or an epigraph ``min t, t >= P(x)``) and that has no other
-    constraint is solved without a search when the polynomial's induced width is small: exact
+    A problem whose integer variables are all binary, posed as an epigraph ``min t, t >= P(x)``
+    with ``P`` a polynomial of them at binary points and no other constraint, is solved without a search when the polynomial's induced width is small: exact
     variable elimination (``pseudoboolean.py``) gives the minimum and a minimizer.
 
     ``safe`` rounds every quantity feeding a lower bound outward (interval and
@@ -1207,9 +1206,10 @@ def minimize(
                 pool["args"] = None
 
     _mark("pseudo_boolean")
-    # a binary polynomial objective with no other constraint and a small induced width is
-    # minimized exactly by variable elimination (``pseudoboolean.py``): no search needed
-    if quadratic and not lifted and (~imask).sum() <= 1 and np.all(np.isin(lo[imask], (0.0, 1.0))) \
+    # a binary polynomial epigraph with no other constraint and a small induced width is minimized
+    # exactly by variable elimination (``pseudoboolean.py``): no search needed. Unconstrained problems
+    # are left out: they never build ``lifted_form`` otherwise, and that alone can take seconds.
+    if quadratic and not lifted and ineq is not None and (~imask).sum() <= 1 and np.all(np.isin(lo[imask], (0.0, 1.0))) \
             and np.all(np.isin(hi[imask], (0.0, 1.0))):  # fmt: skip
         done = _pseudo_boolean(K, f, ineq, eq, lo, hi, lo_user, hi_user, imask, abs_tol, rel_tol, feas_tol, t0)
         if done is not None:

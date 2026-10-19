@@ -141,7 +141,8 @@ def test_search_unconstrained():
         return chain_poly(x, n)
 
     r = jaxglobal.minimize(f, np.zeros(n), np.ones(n), integer=np.arange(n))
-    assert r.status == "optimal" and "variable elimination" in r.message
+    # no constraint: the shortcut is skipped (building ``lifted_form`` would be new work), the search solves it
+    assert r.status == "optimal" and "variable elimination" not in r.message
     assert r.fun == pytest.approx(brute(n), abs=1e-9)
     assert r.lower_bound <= r.fun
 

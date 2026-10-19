@@ -255,9 +255,11 @@ def det3(x):
             - m[0][2] * m[1][1] * m[2][0] - m[0][0] * m[1][2] * m[2][1] - m[0][1] * m[1][0] * m[2][2])  # fmt: skip
 
 
-def test_minimize_binary_determinant():
+def test_minimize_binary_determinant(monkeypatch):
     """max det of a 3x3 0/1 matrix (= 2; hadamard_N in miniature): t <= det(B), maximize t, on the
-    lifted polynomial LP; the result is optimal, verified, and its bound is valid."""
+    lifted polynomial LP (the exact variable-elimination shortcut, ``bnb._pseudo_boolean``, off);
+    the result is optimal, verified, and its bound is valid."""
+    monkeypatch.setattr(jaxglobal.bnb, "_pseudo_boolean", lambda *a, **k: None)
     f = lambda x: -x[9]  # noqa: E731
     g = lambda x: jnp.stack([x[9] - det3(x)])  # noqa: E731
     lo, hi = np.r_[np.zeros(9), -6.0], np.r_[np.ones(9), 6.0]
