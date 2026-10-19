@@ -217,9 +217,10 @@ def test_binary_only_and_column_cap():
 
 
 @pytest.mark.parametrize("safe", [False, True])
-def test_minimize_binary_polynomial(safe):
+def test_minimize_binary_polynomial(safe, monkeypatch):
     """The search on an epigraph binary polynomial (FBBT skipped: binary_only) proves the enumerated
-    optimum."""
+    optimum (the exact variable-elimination shortcut, ``bnb._pseudo_boolean``, off: the search)."""
+    monkeypatch.setattr(jaxglobal.bnb, "_pseudo_boolean", lambda *a, **k: None)
     n = 8
     terms = binary_terms(11, n, n_terms=16)
     f, g, lo, hi, p = epigraph(terms, n)
@@ -262,9 +263,11 @@ def test_flip_detection():
 
 @pytest.mark.parametrize("safe", [False, True])
 @pytest.mark.parametrize("extra,int_hi", [(0.0, 1.0), (0.5, 1.0), (0.0, 2.0)])
-def test_minimize_with_flip(safe, extra, int_hi):
+def test_minimize_with_flip(safe, extra, int_hi, monkeypatch):
     """The search (with the fix x_flip = 1 when it applies) proves the enumerated minimum; with a
-    variable allowed up to 2 the fix is not made, and the minimum is over {0, 1, 2} for it."""
+    variable allowed up to 2 the fix is not made, and the minimum is over {0, 1, 2} for it. (The
+    variable-elimination shortcut, ``bnb._pseudo_boolean``, is off: this tests the search.)"""
+    monkeypatch.setattr(jaxglobal.bnb, "_pseudo_boolean", lambda *a, **k: None)
     n = 7
     f, g, E = autocorr(n, 2, extra)
     pts = [np.r_[x, v] for x in binary_points(n - 1) for v in ([0.0, 1.0, 2.0] if int_hi == 2.0 else [0.0, 1.0])]
