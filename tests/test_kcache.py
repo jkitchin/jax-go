@@ -207,3 +207,35 @@ def test_load_refreshes_noexport_marker(tmp_path, monkeypatch):
     os.utime(marker, (t, t))
     assert kcache.load(key) is False
     assert time.time() - os.path.getmtime(marker) < 60
+
+
+def test_wait_for_builds_follows_nested_futures():
+    import threading
+    from concurrent.futures import Future
+
+    gate = threading.Event()
+    inner, outer, failed = Future(), Future(), Future()
+    failed.set_exception(RuntimeError("build failed"))
+    outer.set_result(inner)  # a trace that handed its lowered kernel to a compiler pool
+    kcache.track(failed)
+    kcache.track(outer)
+    assert not kcache.wait_for_builds(0.0)  # the compile is still running
+    threading.Thread(target=lambda: (gate.wait(), inner.set_result("executable"))).start()
+    gate.set()
+    assert kcache.wait_for_builds(30.0)
+    assert outer not in kcache._BUILDS or kcache._settled(outer)
+    kcache.track(Future()).set_result(None)  # finished builds are dropped from the list
+    assert all(not kcache._settled(f) for f in kcache._BUILDS[:-1])
+
+
+def test_precompiled_builds_are_tracked():
+    import jax
+
+    from jaxglobal.bnb import _Precompiled
+
+    k = _Precompiled(jax.jit(lambda lo, hi, c: jnp.sum(lo * hi, axis=1) + c), "test")
+    k.start(2, 3)
+    fut = k.ready[k._key(k._args(2, 3))]
+    assert fut in kcache._BUILDS
+    assert kcache.wait_for_builds(60.0)
+    assert kcache._settled(fut)

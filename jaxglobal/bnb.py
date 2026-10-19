@@ -292,7 +292,7 @@ class _Precompiled:
         key = self._key(args)
         if key not in self.ready:
             tracer, compiler = _pools()
-            self.ready[key] = tracer.submit(lambda: compiler.submit(self._lower(args, fingerprint).compile))
+            self.ready[key] = kcache.track(tracer.submit(lambda: compiler.submit(self._lower(args, fingerprint).compile)))
 
     def wait(self, *args, deadline=None):
         """Wait until ``deadline`` for the background executable of ``args``' shapes, if one was
@@ -1171,7 +1171,7 @@ def minimize(
     if pool is not None:  # the pool's tangent kernel, traced after the bound kernels
         tracer, compiler = _pools()
         pts, vec = jax.ShapeDtypeStruct((_POOL_CHUNK, lo.size), jnp.float64), jax.ShapeDtypeStruct((lo.size,), jnp.float64)
-        pool["exe"] = tracer.submit(lambda: compiler.submit(K.pool_cuts.trace(pts, vec, vec).lower().compile))
+        pool["exe"] = kcache.track(tracer.submit(lambda: compiler.submit(K.pool_cuts.trace(pts, vec, vec).lower().compile)))
     _mark("start_dive_compile")
     if K.dive is not None and padded.mesh is None:  # the dive kernel too, traced after the others
         box, cut = jax.ShapeDtypeStruct((_DIVES, lo.size), jnp.float64), jax.ShapeDtypeStruct((), jnp.float64)

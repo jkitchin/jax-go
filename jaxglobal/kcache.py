@@ -33,13 +33,18 @@ import hashlib
 import os
 import re
 import tempfile
+import threading
 import time
+from concurrent.futures import CancelledError
+from concurrent.futures import TimeoutError as FutureTimeout  # (not the builtin before 3.11)
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
-_MAX_KERNELS = 512  # serialized kernels kept on disk (oldest removed first)
+_MAX_KERNELS = 2048  # serialized kernels kept on disk (oldest removed first; ~350 KB each). Several checkouts
+# share one cache, each with its own source and so its own kernels: at 512 a benchmark set run from two
+# or three of them can evict kernels that the next run of the same checkout needs
 # size cap of ``xla/`` (bytes): every compile is cached, hundreds per solve. Pruned once per process,
 # down to _XLA_PRUNE_TO of the cap, least recently used first. (JAX's own cap,
 # ``jax_compilation_cache_max_size``, rescans the directory on every write: 0.3 s at 9000 files.)
@@ -54,6 +59,54 @@ _XLA_NAME = re.compile(r"^.+-[0-9a-f]{64}-(cache|atime)$")
 _KERNEL_NAME = re.compile(r"^(?:[0-9a-f]{12}-)?[0-9a-f]{64}-.*\.(bin|noexport)$")
 _TMP_PREFIX = "jaxglobal-tmp-"
 _PRUNED = []  # kernels/ was pruned in this process
+_BUILDS = []  # futures of the background kernel builds of this process (``track``)
+_BUILDS_LOCK = threading.Lock()
+
+
+def track(fut):
+    """Remember the future ``fut`` of a background kernel build (trace, export, XLA compile) so that
+    ``wait_for_builds`` can let it finish. Its result may itself be a future (a trace that hands the
+    lowered kernel to a compiler pool): that one is waited for too. Returns ``fut``."""
+    with _BUILDS_LOCK:
+        _BUILDS[:] = [f for f in _BUILDS if not _settled(f)]
+        _BUILDS.append(fut)
+    return fut
+
+
+def _settled(fut):
+    """Whether ``fut`` and the future it may return are both done."""
+    if not fut.done():
+        return False
+    if fut.cancelled() or fut.exception() is not None:
+        return True
+    r = fut.result()
+    return not hasattr(r, "done") or r.done()
+
+
+def wait_for_builds(timeout):
+    """Wait up to ``timeout`` s for the background kernel builds this process started (``track``).
+
+    ``minimize`` returns at its time limit without waiting for kernels still being
+    traced or compiled. Their results reach the disk caches (``kernels/`` once
+    traced and exported, ``xla/`` once compiled) only if the process lives until
+    they finish. A short-lived caller that will solve the same problem again (a
+    benchmark worker) can call this before exiting so that the next process starts
+    warm. Returns True if every build finished (or failed), False at the timeout.
+    The builds themselves are not changed and nothing is cancelled."""
+    end = time.perf_counter() + max(float(timeout), 0.0)
+    with _BUILDS_LOCK:
+        futs = list(_BUILDS)
+    for fut in futs:
+        while True:
+            try:
+                fut = fut.result(timeout=max(end - time.perf_counter(), 0.0))
+            except FutureTimeout:
+                return False
+            except (Exception, CancelledError):  # a failed or cancelled build: nothing to wait for
+                break
+            if not hasattr(fut, "result") or not hasattr(fut, "done"):
+                break
+    return True
 
 
 def cache_root():
