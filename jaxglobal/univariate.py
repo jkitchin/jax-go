@@ -35,7 +35,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from .fbbt import Const, _has_tracer, make_tape, tape_cache
-from .relax import (AUTO_UNIVARIATE, MC, RULES, SAFE_K, STRUCTURAL, Ctx, Unknown, apply_rule, apply_xlogx, eval_jaxpr_mc, Monomials, mul_consumed,
+from .relax import (AUTO_UNIVARIATE, MC, RULES, SAFE_K, STRUCTURAL, Ctx, Unknown, apply_rule, apply_xlogx, eval_jaxpr_mc, LogTerms, Monomials, lin_consumed, mul_consumed,
                     is_mc, tighten, xlogx_pair)
 
 INTERVAL_CTX = Ctx(interval_only=True)
@@ -368,6 +368,7 @@ def make_univariate(f, K=65, multivariate=False, safe=False, interpret="auto"):
         vals = {0: MC(lo, hi, x, x)}
         logs = {}  # slot of each log -> its operand slot (``x * log(x)``: ``relax.mc_xlogx``)
         monos = Monomials(mul_consumed((nd.eqn.primitive.name, nd.ins) for nd in tape.nodes), ctx)  # products of powers
+        terms = LogTerms(lin_consumed((nd.eqn.primitive.name, nd.ins) for nd in tape.nodes), ctx)  # like x log x terms
         for node in tape.nodes:
             eqn = node.eqn
             invals = [a.val if isinstance(a, Const) else vals[a] for a in node.ins]
@@ -382,7 +383,8 @@ def make_univariate(f, K=65, multivariate=False, safe=False, interpret="auto"):
             else:
                 outs = apply_rule(ctx, eqn, invals)
             if not eqn.primitive.multiple_results:
-                outs = [monos.observe(name, node.ins, invals, node.outs[0], outs)]
+                outs = monos.observe(name, node.ins, invals, node.outs[0], outs)
+                outs = [terms.observe(name, node.ins, invals, node.outs[0], outs, eqn)]
             for s, o in zip(node.outs, outs):
                 if s in override and is_mc(o):
                     b, k, m = override[s]
