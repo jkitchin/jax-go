@@ -514,7 +514,6 @@ class _Kernels:
         self._problem, self._opts, self._fingerprints, self._nonlinear, self._structure = (f, ineq, eq), opts, {}, {}, {}
         self._quadratic, self._use_quadratic, self._qlock = {}, bool(quadratic) and not lifted, threading.Lock()
         self.viol = jax.jit(jax.vmap(violation))
-        # every constraint value finite (``violation`` reads g = -inf as satisfied)
         self.dive = None
         if idx.size and fbbt:
             # its own FBBT (own tape and interpreter caches): this kernel is traced on the
@@ -1272,8 +1271,8 @@ def minimize(
         """Objective values of candidate incumbents ``X`` (k, n), ``inf`` for any that is not one.
 
         A candidate must be finite, lie in the box, have its integer variables integral (to
-        ``INT_TOL``) and satisfy every constraint to ``feas_tol`` (``K.viol``, float64, with
-        every constraint value finite), and ``f`` must be finite: ``f = -inf`` (log at 0) is
+        ``INT_TOL``) and satisfy every constraint to ``feas_tol`` (``K.viol``, float64; a NaN or
+        +inf constraint value violates, g = -inf satisfies), and ``f`` must be finite: ``f = -inf`` (log at 0) is
         no attained minimum, and as a cutoff it would prune every box. Every point a local
         solve, a dive, the polish or a point box proposes passes through here before it can
         become the incumbent, i.e. before it is used as a cutoff to prune."""
