@@ -168,8 +168,9 @@ def test_pool_probe_verdicts(monkeypatch, verdict):
     lo, hi = -3 * np.ones(3), 3 * np.ones(3)
     r0 = minimize(f, lo, hi, ineq=g, cut_pool=0, max_iter=2000)
     # the zero-row kernel compiles in the background after an "off" verdict; with a cold kernel
-    # cache (JAXGLOBAL_CACHE=0) it may not be ready in the second run either, so retry a few times
-    for attempt in range(6):
+    # cache (JAXGLOBAL_CACHE=0) on a loaded machine it may take a while, so retry until a deadline
+    deadline = time.monotonic() + 120.0
+    for attempt in range(1000):
         if attempt:
             time.sleep(2.0)
         rows.clear()
@@ -177,7 +178,7 @@ def test_pool_probe_verdicts(monkeypatch, verdict):
         assert r.status == "optimal"
         assert r.fun == pytest.approx(r0.fun, rel=1e-5, abs=1e-6)
         assert r.lower_bound <= r0.fun + 1e-6
-        if attempt >= 1 and (verdict == "on" or 0 in rows):
+        if attempt >= 1 and (verdict == "on" or 0 in rows or time.monotonic() > deadline):
             break
     assert rows[0] > 0  # the probe runs with the pool's rows
     assert (0 in rows) == (verdict == "off")
