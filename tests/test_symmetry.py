@@ -9,10 +9,13 @@ import numpy as np
 import pytest
 
 import jaxglobal
+import jaxglobal.bnb
 from jaxglobal.quadratic import polynomial_form
 from jaxglobal.symmetry import automorphisms, is_automorphism, lex_prune
 
 jax.config.update("jax_enable_x64", True)
+
+NO_CLOCK = np.inf  # symmetry detection in these tests: no wall-clock limit (results must not depend on timing)
 
 
 def _sign(p):
@@ -48,7 +51,7 @@ def test_det_group():
     and the transpose, 2 (m!)^2 / 2 elements, the identity left out."""
     m = 3
     P = automorphisms(m * m + 1, {(m * m,): -1.0}, [{**{k: -v for k, v in det_poly(m).items()}, (m * m,): 1.0}], [],
-                      range(m * m))  # fmt: skip
+                      range(m * m), deadline=NO_CLOCK)  # fmt: skip
     assert len(P) == 36 - 1
     assert len({p.tobytes() for p in P}) == len(P)
     for p in P:
@@ -58,9 +61,9 @@ def test_det_group():
 
 def test_none_found_without_symmetry():
     f = {(0,): 1.0, (1,): 2.0, (2,): 3.0, (0, 1): 1.0}
-    assert automorphisms(3, f, [], [], range(3)).shape == (0, 3)
+    assert automorphisms(3, f, [], [], range(3), deadline=NO_CLOCK).shape == (0, 3)
     # x0 and x1 swap; x2 is continuous and may not move even where it would fit
-    P = automorphisms(4, {(0,): 1.0, (1,): 1.0, (2,): 1.0, (3,): 1.0}, [], [], [0, 1])
+    P = automorphisms(4, {(0,): 1.0, (1,): 1.0, (2,): 1.0, (3,): 1.0}, [], [], [0, 1], deadline=NO_CLOCK)
     assert [p.tolist() for p in P] == [[1, 0, 2, 3]]
 
 
@@ -68,14 +71,14 @@ def test_rows_permuted_and_equalities():
     """Inequality rows may be permuted among themselves; an asymmetric equality breaks the swap."""
     f = {(0, 1): 1.0}
     gs = [{(0,): 1.0, (): -1.0}, {(1,): 1.0, (): -1.0}]
-    assert len(automorphisms(2, f, gs, [], [0, 1])) == 1
-    assert len(automorphisms(2, f, gs, [{(0,): 1.0, (): -1.0}], [0, 1])) == 0
-    assert len(automorphisms(2, f, [{(0,): 1.0, (): -1.0}, {(1,): 2.0, (): -1.0}], [], [0, 1])) == 0
+    assert len(automorphisms(2, f, gs, [], [0, 1], deadline=NO_CLOCK)) == 1
+    assert len(automorphisms(2, f, gs, [{(0,): 1.0, (): -1.0}], [0, 1], deadline=NO_CLOCK)) == 0
+    assert len(automorphisms(2, f, [{(0,): 1.0, (): -1.0}, {(1,): 2.0, (): -1.0}], [], [0, 1], deadline=NO_CLOCK)) == 0
 
 
 def test_polynomial_form_finds_det_group():
     f, g, n = det_problem(3)
-    Q = polynomial_form(f, g, None, n + 1, integer=np.arange(n))
+    Q = polynomial_form(f, g, None, n + 1, integer=np.arange(n), sym_seconds=NO_CLOCK)
     assert Q.flip == -1 and Q.sym.shape == (35, n + 1)
     assert polynomial_form(f, g, None, n + 1, integer=None).sym.size == 0  # no integers: no claim
 
@@ -92,7 +95,7 @@ def test_lex_prune_keeps_orbit_leaders(seed):
     n = m * m
     f = {(n,): -1.0}
     g = [{**{k: -v for k, v in det_poly(m).items()}, (n,): 1.0}]
-    P = automorphisms(n + 1, f, g, [], range(n))
+    P = automorphisms(n + 1, f, g, [], range(n), deadline=NO_CLOCK)
     group = np.vstack([np.arange(n + 1), P])
     pts = np.array(list(itertools.product([0.0, 1.0], repeat=n)))
     pts = np.c_[pts, np.zeros(len(pts))]
@@ -115,10 +118,12 @@ def test_lex_prune_keeps_orbit_leaders(seed):
             assert any(_lex_key(x[p]) > _lex_key(x) for p in P)
 
 
-def test_minimize_det_with_symmetry():
+def test_minimize_det_with_symmetry(monkeypatch):
     """max det over 0/1 4 x 4 matrices is 3: proved with the pruning on, from the full group."""
+    monkeypatch.setattr(jaxglobal.bnb, "SYM_SHARE", 1e9)  # minimize's detection: no wall-clock limit
+    monkeypatch.setattr(jaxglobal.bnb, "SEARCH_SECONDS", 1e9)
     f, g, n = det_problem(4)
-    Q = polynomial_form(f, g, None, n + 1, integer=np.arange(n))
+    Q = polynomial_form(f, g, None, n + 1, integer=np.arange(n), sym_seconds=NO_CLOCK)
     assert len(Q.sym) == 2 * 24 * 24 // 2 - 1
     lo, hi = np.r_[np.zeros(n), -30.0], np.r_[np.ones(n), 30.0]
     r = jaxglobal.minimize(f, lo, hi, ineq=g, integer=np.arange(n), abs_tol=1e-6, rel_tol=1e-6)
@@ -127,3 +132,58 @@ def test_minimize_det_with_symmetry():
     assert r.lower_bound <= -3.0 + 1e-6
     B = np.round(r.x[:n]).reshape(4, 4)
     assert np.linalg.det(B) == pytest.approx(3.0, abs=1e-9)
+
+
+def _sym_sum_problem(n):
+    """min sum x_i^3 over integers with sum x_i >= 3: every permutation is a symmetry (S_n)."""
+    f = {(i, i, i): 1.0 for i in range(n)}
+    g = [{**{(i,): -1.0 for i in range(n)}, (): 3.0}]
+    return f, g
+
+
+def test_large_group_listing_is_capped_and_small():
+    """S_120: the transpositions are found directly, the listing stops at the cap without forming
+    the full products, and the generators (transversal elements) come first."""
+    n = 120
+    f, g = _sym_sum_problem(n)
+    P = automorphisms(n, f, g, [], range(n), max_elements=300, deadline=NO_CLOCK)
+    assert P.shape == (300, n)
+    assert len({p.tobytes() for p in P}) == len(P)
+    first = P[0]
+    assert (first != np.arange(n)).sum() == 2  # a transposition
+    for p in P[::37]:
+        assert is_automorphism(p, f, g, [])
+
+
+def test_search_deadline_gives_up_cleanly():
+    """Out of time (an injected clock), the search returns no elements; the call budget still
+    keeps what it found."""
+    f, g, n = det_problem(3)
+    fp = {(n,): -1.0}
+    gp = [{**{k: -v for k, v in det_poly(3).items()}, (n,): 1.0}]
+    ticks = iter(range(10**6))
+    P = automorphisms(n + 1, fp, gp, [], range(n), deadline=5.0, clock=lambda: next(ticks))
+    assert P.shape == (0, n + 1)
+    assert len(automorphisms(n + 1, fp, gp, [], range(n), deadline=NO_CLOCK)) == 35
+
+
+def test_lex_prune_uses_a_bounded_prefix():
+    """lex_prune looks at only the first max_elements elements: a box only a later element prunes
+    survives with a small cap."""
+    P = np.array([[0, 1, 2, 3], [0, 1, 3, 2]])
+    lo, hi = np.array([[0.0, 0.0, 0.0, 1.0]]), np.array([[0.0, 0.0, 0.0, 1.0]])
+    assert lex_prune(lo, hi, P).tolist() == [True]
+    assert lex_prune(lo, hi, P, max_elements=1).tolist() == [False]
+
+
+def test_polynomial_form_survives_a_failing_search(monkeypatch):
+    """An exception in the symmetry search drops only the symmetry, not the lifted form."""
+    import jaxglobal.quadratic as quadratic
+
+    def boom(*a, **k):
+        raise RuntimeError
+
+    monkeypatch.setattr(quadratic, "automorphisms", boom)
+    f, g, n = det_problem(3)
+    Q = polynomial_form(f, g, None, n + 1, integer=np.arange(n))
+    assert Q is not None and Q.sym.size == 0

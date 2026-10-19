@@ -39,7 +39,7 @@ import numpy as np
 
 from .lp import EPS, reduce_ranges
 from .relax import SAFE_K
-from .symmetry import automorphisms
+from .symmetry import SEARCH_SECONDS, automorphisms
 
 MAX_RLT_SUPPORT = 12  # ineq_rlt: linear inequalities with at most this many variables
 # ineq_rlt: rows with at most this many variables take the pair budget first. Wider rows only
@@ -124,7 +124,8 @@ class QuadraticForm(NamedTuple):
     sym: np.ndarray = np.zeros((0, 0), np.int64)
 
 
-def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS, integer=None, max_poly_columns=None):
+def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS, integer=None, max_poly_columns=None,
+                   sym_seconds=None):
     """The problem as ``QuadraticForm``, or None if some function is not a polynomial of degree
     at most ``degree``, the tape cannot be scalarized, or the lifted LP would have more than
     ``max_columns`` columns. With ``degree=2`` the columns are the products ``x_i x_j``; above,
@@ -330,8 +331,12 @@ def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS, integer=No
             Q = Q._replace(flip=_flip(rows[0][0], rows[1] if ineq is not None else [],
                                       rows[-1] if eq is not None else [], ints))
             if Q.flip < 0:
-                Q = Q._replace(sym=automorphisms(n, rows[0][0], rows[1] if ineq is not None else [],
-                                                 rows[-1] if eq is not None else [], ints))
+                try:  # optional (pruning only): any failure means no symmetry handling
+                    Q = Q._replace(sym=automorphisms(n, rows[0][0], rows[1] if ineq is not None else [],
+                                                     rows[-1] if eq is not None else [], ints,
+                                                     seconds=SEARCH_SECONDS if sym_seconds is None else sym_seconds))
+                except Exception:
+                    pass
     return ineq_rlt(Q, n) if degree == 2 else Q
 
 
@@ -440,15 +445,17 @@ def _flip(f, gs, hs, ints):
 
 
 def polynomial_form(f, ineq, eq, n, degree=MAX_DEGREE, max_columns=MAX_COLUMNS, integer=None,
-                    max_poly_columns=None):
+                    max_poly_columns=None, sym_seconds=None):
     """``quadratic_form`` of a polynomial problem of degree up to ``degree`` (sparse lifted LP:
     one column per monomial present and per intermediate product, no other monomials). At most
     ``max_columns`` columns, or ``max_poly_columns`` when some monomial has degree above 2 (by
-    default ``MAX_POLY_COLUMNS`` with the default ``max_columns``, else ``max_columns``)."""
+    default ``MAX_POLY_COLUMNS`` with the default ``max_columns``, else ``max_columns``).
+    ``sym_seconds`` caps the symmetry search (``symmetry.automorphisms``; default: its own
+    ``SEARCH_SECONDS``)."""
     if max_poly_columns is None:
         max_poly_columns = MAX_POLY_COLUMNS if max_columns == MAX_COLUMNS else max_columns
     return quadratic_form(f, ineq, eq, n, degree=degree, max_columns=max_columns, integer=integer,
-                          max_poly_columns=max_poly_columns)
+                          max_poly_columns=max_poly_columns, sym_seconds=sym_seconds)
 
 
 def _binary_cuts(col, n, ints):

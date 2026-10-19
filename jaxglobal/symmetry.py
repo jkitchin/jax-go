@@ -18,12 +18,16 @@ an optimal point and a valid lower bound (Margot, "Symmetry in integer linear pr
 (``bnb``: elements must keep the variable bounds) are safe.
 """
 
+import time
+
 import numpy as np
 
-MAX_ELEMENTS = 20000  # group elements listed (lex_prune cost is linear in them)
+MAX_ELEMENTS = 20000  # group elements listed (lex_prune uses the first MAX_PRUNE)
 MAX_ENTRIES = 4_000_000  # elements * variables kept
 MAX_TERMS = 20000  # monomials over all rows; larger problems are not searched
 SEARCH_BUDGET = 20000  # refinement calls in the whole search
+SEARCH_SECONDS = 1.5  # wall-clock cap on the search (bnb passes less for short time limits)
+MAX_PRUNE = 500  # elements lex_prune uses per call (its cost is linear in them; any subset is valid)
 
 
 def _clean(p):
@@ -47,6 +51,39 @@ def is_automorphism(perm, f, gs, hs):
         if sorted(_key(_apply(p, perm)) for p in rows) != sorted(_key(p) for p in rows):
             return False
     return True
+
+
+class _Swaps:
+    """``is_automorphism`` for the transposition of two variables, looking only at the monomials
+    and rows that hold one of them (the others map to themselves)."""
+
+    def __init__(self, f, gs, hs):
+        self.f = f
+        self.fam = (gs, hs)
+        self.f_at, self.rows_at = {}, ({}, {})
+        for k in f:
+            for i in set(k):
+                self.f_at.setdefault(i, []).append(k)
+        for at, rows in zip(self.rows_at, self.fam):
+            for r, p in enumerate(rows):
+                for i in {i for k in p for i in k}:
+                    at.setdefault(i, []).append(r)
+
+    def __call__(self, a, b):
+        sw = {a: b, b: a}
+
+        def mono(k):
+            return tuple(sorted(sw.get(i, i) for i in k))
+
+        for k in self.f_at.get(a, []) + self.f_at.get(b, []):
+            if self.f.get(mono(k)) != self.f[k]:
+                return False
+        for at, rows in zip(self.rows_at, self.fam):
+            touched = set(at.get(a, [])) | set(at.get(b, []))
+            img = sorted(tuple(sorted((mono(k), v) for k, v in rows[r].items())) for r in touched)
+            if img != sorted(_key(rows[r]) for r in touched):
+                return False
+        return True
 
 
 class _Graph:
@@ -121,16 +158,31 @@ def _refine(G, cols):
             ncol = m
 
 
-def automorphisms(n, f, gs, hs, ints, max_elements=MAX_ELEMENTS, budget=SEARCH_BUDGET):
+def automorphisms(n, f, gs, hs, ints, max_elements=MAX_ELEMENTS, budget=SEARCH_BUDGET, seconds=SEARCH_SECONDS,
+                  deadline=None, clock=time.perf_counter):
     """Non-identity symmetries of the problem as an ``(S, n)`` int array (rows ``p``: ``x[p]`` is
     feasible with the same objective value whenever ``x`` is), possibly a subset of the group.
-    Only integer variables (``ints``) move. Empty when none is found."""
+    Only integer variables (``ints``) move. Empty when none is found.
+
+    The search stops after ``budget`` refinement calls or once ``clock()`` passes ``deadline``
+    (default: ``seconds`` from the start); out of time it returns no elements at all (no
+    symmetry handling), so a slow search costs at most that much setup time."""
+    deadline = clock() + seconds if deadline is None else deadline
+    empty = np.zeros((0, n), np.int64)
     f, gs, hs = _clean(f), [_clean(p) for p in gs], [_clean(p) for p in hs]
     ints = set(int(i) for i in ints)
     if len(ints) < 2 or sum(len(p) for p in [f, *gs, *hs]) > MAX_TERMS:
-        return np.zeros((0, n), np.int64)
+        return empty
     G = _Graph(n, f, gs, hs, ints)
+    swap_ok = _Swaps(f, gs, hs)
     left = [budget]
+    late = [False]
+
+    def out_of_time():
+        if not late[0] and clock() > deadline:
+            late[0] = True
+            left[0] = 0
+        return late[0]
 
     def indiv(c, u):
         c = c.copy()
@@ -154,6 +206,8 @@ def automorphisms(n, f, gs, hs, ints, max_elements=MAX_ELEMENTS, budget=SEARCH_B
         Lu = indiv(L, u)
         for w in np.flatnonzero(R[:n] == L[u]):
             left[0] -= 1
+            if out_of_time():
+                return None
             out = _refine(G, [Lu, indiv(R, int(w))])
             if out is not None:
                 p = extend(*out)
@@ -165,7 +219,7 @@ def automorphisms(n, f, gs, hs, ints, max_elements=MAX_ELEMENTS, budget=SEARCH_B
 
     base = _refine(G, [G.c0])
     if base is None:
-        return np.zeros((0, n), np.int64)
+        return empty
     C = base[0]
     transversals = []
     while left[0] > 0:
@@ -179,6 +233,13 @@ def automorphisms(n, f, gs, hs, ints, max_elements=MAX_ELEMENTS, budget=SEARCH_B
         U = []
         for t in np.flatnonzero(cv == cv[b]):
             if t == b:
+                continue
+            if out_of_time():
+                break
+            if swap_ok(b, int(t)):  # the transposition (b t): in the stabilizer of the earlier base
+                p = np.arange(n)  # points (t shares b's cell, which they are not in) and maps b to t
+                p[b], p[t] = t, b
+                U.append(p)
                 continue
             left[0] -= 1
             out = _refine(G, [Lb, indiv(C, int(t))])
@@ -194,32 +255,41 @@ def automorphisms(n, f, gs, hs, ints, max_elements=MAX_ELEMENTS, budget=SEARCH_B
         if nxt is None:
             break
         C = nxt[0]
-    if not transversals:
-        return np.zeros((0, n), np.int64)
+    if late[0] or not transversals:
+        return empty
     cap = max(1, min(max_elements, MAX_ENTRIES // max(n, 1)))
     # products u_1 u_2 ... u_L (each u_l the identity or an element of transversal l): composing
-    # x -> x[a] then x -> x[b] gives x[a][b] = x[a[b]], again a symmetry
+    # x -> x[a] then x -> x[b] gives x[a][b] = x[a[b]], again a symmetry. Only the rows that fit
+    # under the cap are multiplied (E[:k, U] has k |U| rows), so memory stays O(cap n).
     E = np.arange(n)[None]
     for U in transversals:
         U = np.asarray(U, np.int64)
-        E = np.concatenate([E, E[:, U].reshape(-1, n)])[: cap + 1]
-    E = np.unique(E, axis=0)
+        room = cap + 1 - len(E)
+        if room <= 0:
+            break
+        k = -(-room // len(U))
+        E = np.concatenate([E, E[:k, U].reshape(-1, n)[:room]])
+    # the transversal elements (a generating set) first, then the other products, so that a
+    # prefix (``MAX_PRUNE`` in lex_prune) holds the generators
+    E = np.concatenate([np.concatenate([np.asarray(U, np.int64) for U in transversals]), E])
+    _, first = np.unique(E, axis=0, return_index=True)
+    E = E[np.sort(first)]
     E = E[np.any(E != np.arange(n), axis=1)][:cap]
     return E
 
 
-def lex_prune(lo, hi, P, order=None):
-    """Boxes (rows of ``lo``, ``hi``) that hold no lex-leader: some ``p`` in ``P`` has
-    ``x[p] >lex x`` for every ``x`` in the box (lex order over ``order``, default ``0..n-1``)."""
+def lex_prune(lo, hi, P, max_elements=MAX_PRUNE):
+    """Boxes (rows of ``lo``, ``hi``) that hold no lex-leader: some ``p`` among the first
+    ``max_elements`` rows of ``P`` has ``x[p] >lex x`` for every ``x`` in the box (lex order over
+    ``0..n-1``). Using fewer elements prunes less but stays valid (any subset of the group is)."""
     lo, hi = np.asarray(lo, float), np.asarray(hi, float)
     B, n = lo.shape
     out = np.zeros(B, bool)
     if not len(P) or not B:
         return out
-    P = np.asarray(P, np.int64)
-    order = np.arange(n) if order is None else np.asarray(order, np.int64)
+    P = np.asarray(P, np.int64)[:max_elements]
     bi, gi = np.repeat(np.arange(B), len(P)), np.tile(np.arange(len(P)), B)  # alive (box, element) pairs
-    for i in order:
+    for i in range(n):
         if not bi.size:
             break
         j = P[gi, i]

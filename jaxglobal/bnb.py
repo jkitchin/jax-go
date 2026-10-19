@@ -45,7 +45,7 @@ from .lp import make_constrained_bounder, make_obbt, make_pool_cuts, pool_parts,
 from .pseudoboolean import EPS, objective_polynomial, solve_binary_polynomial
 from .quadratic import binary_only, make_quadratic_bounder, make_quadratic_obbt, polynomial_form, quadratic_form
 from .structure import structure
-from .symmetry import lex_prune
+from .symmetry import SEARCH_SECONDS, lex_prune
 from .relax import SAFE_K
 from .univariate import make_relaxer
 
@@ -219,6 +219,7 @@ def nonlinear_variables(fns, lo, hi, n_samples=3, seed=0, hessians=None):
 # Functions are keyed by identity, as ``jax.jit`` does, so a function whose
 # behavior changes through mutable globals is not recompiled; call
 # ``clear_cache()`` after such a change.
+SYM_SHARE = 0.1  # symmetry detection: at most this share of time_limit (and symmetry.SEARCH_SECONDS)
 SAFE_DEFAULT = False  # outward rounding of every bound; set after measuring its overhead (docs/ROADMAP.md)
 _CACHE = OrderedDict()
 _CACHE_SIZE = 32
@@ -408,16 +409,18 @@ class _Kernels:
 
         poly_forms, poly_lock = {}, threading.Lock()
 
-        def lifted_form(n):
+        def lifted_form(n, sym_seconds=None):
             """The lifted LP's form on ``n`` variables: the quadratic one (``self.quadratic``), else
             the polynomial one (``quadratic.polynomial_form``: every monomial a column that is the
-            product of two earlier columns), else None (reduced-space cuts)."""
+            product of two earlier columns), else None (reduced-space cuts). ``sym_seconds`` bounds
+            the symmetry search of the call that builds the form."""
             Q = self.quadratic(n)
             if Q is None and quadratic and not lifted:
                 with poly_lock:
                     if n not in poly_forms:
                         try:  # an optional faster bounder: any failure falls back to the reduced-space path
-                            poly_forms[n] = polynomial_form(f, ineq, eq, n, integer=integer)
+                            poly_forms[n] = polynomial_form(f, ineq, eq, n, integer=integer,
+                                                            sym_seconds=sym_seconds)
                         except Exception:
                             poly_forms[n] = None
                     Q = poly_forms[n]
@@ -1183,7 +1186,10 @@ def minimize(
     K = _cached(("kernels", f, ineq, eq, tuple(sorted(opts.items()))), lambda: _Kernels(f, ineq, eq, **opts))
     # the cut pool: tangents of the root box's relaxation at good points, added to every node LP
     pool = None
-    if K.bound_pool is not None and K.lifted_form(lo.size) is None:
+    # symmetry detection (polynomial_form) is setup: a small share of the time limit, at most
+    # symmetry.SEARCH_SECONDS; out of time the problem gets no symmetry handling
+    sym_seconds = min(SYM_SHARE * time_limit, SEARCH_SECONDS)
+    if K.bound_pool is not None and K.lifted_form(lo.size, sym_seconds) is None:
         rows0 = np.zeros((int(cut_pool), lo.size + 2))
         rows0[:, lo.size] = -np.inf
         pool = dict(rows=rows0, root=np.stack([lo, hi]), mask=pmask, next=0, args=None)
@@ -1280,7 +1286,7 @@ def minimize(
     branchable = nl | imask
     _mark("quadratic")
     quad = K.quadratic(lo.size) if constrained else None  # the lifted quadratic LP's form, if used
-    lf = K.lifted_form(lo.size) if constrained and not lifted else None
+    lf = K.lifted_form(lo.size, sym_seconds) if constrained and not lifted else None
     if lf is not None and lf.flip >= 0 and np.all(lo[imask] == 0.0) and np.all(hi[imask] == 1.0):
         lo = lo.copy()  # complement symmetry (quadratic._flip): x_flip = 1 keeps an optimal point
         lo[lf.flip] = 1.0
