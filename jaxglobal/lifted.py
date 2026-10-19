@@ -325,8 +325,6 @@ def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_ro
         chat = cu / cn
         f0 = cf[0] + Ef[0] @ clo
         fmag = jnp.abs(cf[0]) + jnp.abs(Ef[0]) @ jnp.abs(clo)
-        box_A = jnp.concatenate([jnp.eye(N), -jnp.eye(N)])
-        box_b = jnp.concatenate([jnp.ones(N), jnp.zeros(N)])
 
         def dual(A, b, y):
             y = jnp.where(jnp.isfinite(y), jnp.maximum(y, 0.0), 0.0)
@@ -348,8 +346,8 @@ def make_lifted_bounder(f, ineq=None, eq=None, n_kelley=3, ipm_iters=40, fbbt_ro
         for it in range(n_kelley + 1):
             A, b = unit(jnp.concatenate([r[0] for r in rows]), jnp.concatenate([r[1] for r in rows]))
             nA = A.shape[0]
-            z, y, lb = ipm(chat, jnp.concatenate([A, box_A]), jnp.concatenate([b, box_b]), ipm_iters,
-                           cert=lambda y, A=A, b=b, nA=nA: dual(A, b, y[:nA])[0])  # fmt: skip
+            z, y, lb = ipm(chat, A, b, ipm_iters, cert=lambda y, A=A, b=b, nA=nA: dual(A, b, y[:nA])[0],
+                           box=True)  # fmt: skip
             lb = jnp.where(jnp.isnan(lb) | ~finite, -jnp.inf, lb)
             best = jnp.maximum(best, lb)
             _, r = dual(A, b, y[:nA])

@@ -144,7 +144,7 @@ def _cut_rows(shape, nl):
     return np.flatnonzero(keep.reshape(-1))
 
 
-def ipm(c, A, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10):
+def ipm(c, A, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10, box=False, target=jnp.inf):
     """Primal-dual interior point for ``min c.z s.t. A z <= b`` (dense, tiny).
 
     Infeasible start: z = 0.5 (the LP lives in the unit box), slacks and duals 1.
@@ -154,8 +154,15 @@ def ipm(c, A, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10):
     all iterates is returned as well, so a late bad step can never lose a good
     certificate.
 
+    ``box=True`` adds the rows ``0 <= z <= 1`` implicitly (``_ipm_box``, with
+    predictor-corrector steps and an early stop), and ``y`` is then
+    the duals of the rows of ``A`` only; ``target``: stop once the certificate
+    reaches it (box mode only).
+
     Returns ``(z, y_best, best_cert)`` where ``y_best`` attains ``best_cert``.
     """
+    if box:
+        return _ipm_box(c, A, b, iters, sigma, cert, mu_tol, target)
     m, n = A.shape
     eye = jnp.eye(n)
     cert = cert or (lambda y: -jnp.inf)
@@ -190,6 +197,113 @@ def ipm(c, A, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10):
     st = (z0, s0, y0, jnp.where(jnp.isnan(c0), -jnp.inf, c0), y0)
     z, s, y, best, yb = jax.lax.fori_loop(0, iters, body, st)
     return z, yb, best
+
+
+def _ipm_box(c, A, b, iters, sigma, cert, mu_tol, target, pc=True):
+    """``ipm`` for ``min c.z s.t. A z <= b, 0 <= z <= 1`` with the box rows implicit.
+
+    The rows ``z <= 1`` and ``-z <= 0`` are unit vectors, so their share of the normal
+    matrix ``A^T (y/s) A`` is the diagonal ``yh/sh + yl/sl``. With ``pc=False`` the Newton
+    steps, step lengths and iterates are those of ``ipm`` with the box rows appended to
+    ``A`` (up to rounding), at the cost of ``A`` alone (on the reduced-space LP the box rows
+    were about a third of all rows). ``pc=True`` (the default) takes Mehrotra
+    predictor-corrector steps instead of ``ipm``'s fixed ``sigma``: an affine step sets
+    ``sigma = (mu_aff / mu)^3`` and a second-order correction, both solved with one
+    Cholesky factorization (Jacobi-scaled, as in ``quadratic._ipm``). On flay04m's node LPs
+    that cut the mean iteration count from about 23 to 10. The fixed trip count becomes a ``while_loop`` that stops once
+    the iterate is frozen (``mu <= mu_tol`` or a failed step, after which ``ipm``'s
+    remaining iterations change nothing) or the best certificate reaches ``target`` (the
+    caller prunes there); under ``vmap`` it runs until every box has stopped. ``cert``
+    gets the duals of the ``A`` rows only; the stopping rule only decides when to stop,
+    ``best`` is a certificate whatever it says."""
+    m, n = A.shape
+    eye = jnp.eye(n)
+    cert = cert or (lambda y: -jnp.inf)
+    mt = m + 2 * n
+
+    def step_len(v, dv):
+        r = jnp.where(dv < 0, -v / jnp.where(dv < 0, dv, -1.0), jnp.inf)
+        return jnp.min(r, initial=jnp.inf)
+
+    def cond(st):
+        k, frozen, best = st[0], st[1], st[-2]
+        return (k < iters) & ~frozen & ~(best >= target)
+
+    def body(st):
+        k, _, z, s, y, sh, yh, sl, yl, best, yb = st
+        rp, rph, rpl = A @ z + s - b, z + sh - 1.0, sl - z
+        rd = c + A.T @ y + yh - yl
+        mu = (s @ y + sh @ yh + sl @ yl) / mt
+        M = (A.T * (y / s)) @ A + jnp.diag(yh / sh + yl / sl) + 1e-12 * eye
+        t, th, tl = ((sigma * mu - s * y + y * rp) / s, (sigma * mu - sh * yh + yh * rph) / sh,
+                     (sigma * mu - sl * yl + yl * rpl) / sl)  # fmt: skip
+        dz = jnp.linalg.solve(M, -rd - (A.T @ t + th - tl))
+        ds, dsh, dsl = -rp - A @ dz, -rph - dz, -rpl + dz
+        dy, dyh, dyl = ((sigma * mu - s * y - y * ds) / s, (sigma * mu - sh * yh - yh * dsh) / sh,
+                        (sigma * mu - sl * yl - yl * dsl) / sl)  # fmt: skip
+        ap = jnp.minimum(1.0, 0.99 * jnp.minimum(step_len(s, ds), jnp.minimum(step_len(sh, dsh), step_len(sl, dsl))))
+        ad = jnp.minimum(1.0, 0.99 * jnp.minimum(step_len(y, dy), jnp.minimum(step_len(yh, dyh), step_len(yl, dyl))))
+        new = (z + ap * dz, s + ap * ds, y + ad * dy, sh + ap * dsh, yh + ad * dyh, sl + ap * dsl, yl + ad * dyl)
+        ok = jnp.all(jnp.isfinite(new[0])) & jnp.all(jnp.isfinite(new[2])) & jnp.all(jnp.isfinite(new[4])) & \
+            jnp.all(jnp.isfinite(new[6])) & (mu > mu_tol)  # fmt: skip
+        z, s, y, sh, yh, sl, yl = jax.tree.map(lambda a, b_: jnp.where(ok, a, b_), new, (z, s, y, sh, yh, sl, yl))
+        cy = cert(y)
+        cy = jnp.where(jnp.isnan(cy), -jnp.inf, cy)
+        better = cy > best
+        # a step not taken leaves the state as it was, so every later one would repeat it: stop
+        return k + 1, ~ok, z, s, y, sh, yh, sl, yl, jnp.where(better, cy, best), jnp.where(better, y, yb)
+
+    def body_pc(st):
+        # Mehrotra predictor-corrector: an affine-scaling step picks sigma = (mu_aff / mu)^3 and a
+        # second-order correction; both solves share one (Jacobi-scaled) Cholesky factorization
+        k, _, z, s, y, sh, yh, sl, yl, best, yb = st
+        rp, rph, rpl = A @ z + s - b, z + sh - 1.0, sl - z
+        rd = c + A.T @ y + yh - yl
+        mu = (s @ y + sh @ yh + sl @ yl) / mt
+        M = (A.T * (y / s)) @ A + jnp.diag(yh / sh + yl / sl) + 1e-12 * eye
+        dm = jnp.sqrt(jnp.diag(M))
+        fac = jax.scipy.linalg.cho_factor(M / dm[:, None] / dm[None, :], lower=True)
+
+        def direction(rc, rch, rcl):
+            t, th, tl = (rc + y * rp) / s, (rch + yh * rph) / sh, (rcl + yl * rpl) / sl
+            dz = jax.scipy.linalg.cho_solve(fac, (-rd - (A.T @ t + th - tl)) / dm) / dm
+            ds, dsh, dsl = -rp - A @ dz, -rph - dz, -rpl + dz
+            return dz, ds, dsh, dsl, (rc - y * ds) / s, (rch - yh * dsh) / sh, (rcl - yl * dsl) / sl
+
+        def lengths(d):
+            dz, ds, dsh, dsl, dy, dyh, dyl = d
+            return (jnp.minimum(step_len(s, ds), jnp.minimum(step_len(sh, dsh), step_len(sl, dsl))),
+                    jnp.minimum(step_len(y, dy), jnp.minimum(step_len(yh, dyh), step_len(yl, dyl))))
+
+        aff = direction(-s * y, -sh * yh, -sl * yl)
+        pa, da = lengths(aff)
+        pa, da = jnp.minimum(1.0, pa), jnp.minimum(1.0, da)
+        _, ds_, dsh_, dsl_, dy_, dyh_, dyl_ = aff
+        mu_aff = ((s + pa * ds_) @ (y + da * dy_) + (sh + pa * dsh_) @ (yh + da * dyh_)
+                  + (sl + pa * dsl_) @ (yl + da * dyl_)) / mt
+        sg = jnp.clip((mu_aff / mu) ** 3, 0.0, 1.0)
+        sg = jnp.where(jnp.isfinite(sg), sg, sigma)
+        d = direction(sg * mu - s * y - ds_ * dy_, sg * mu - sh * yh - dsh_ * dyh_, sg * mu - sl * yl - dsl_ * dyl_)
+        ap, ad = lengths(d)
+        ap, ad = jnp.minimum(1.0, 0.99 * ap), jnp.minimum(1.0, 0.99 * ad)
+        dz, ds, dsh, dsl, dy, dyh, dyl = d
+        new = (z + ap * dz, s + ap * ds, y + ad * dy, sh + ap * dsh, yh + ad * dyh, sl + ap * dsl, yl + ad * dyl)
+        ok = jnp.all(jnp.isfinite(new[0])) & jnp.all(jnp.isfinite(new[2])) & jnp.all(jnp.isfinite(new[4])) & \
+            jnp.all(jnp.isfinite(new[6])) & (mu > mu_tol)  # fmt: skip
+        z, s, y, sh, yh, sl, yl = jax.tree.map(lambda a, b_: jnp.where(ok, a, b_), new, (z, s, y, sh, yh, sl, yl))
+        cy = cert(y)
+        cy = jnp.where(jnp.isnan(cy), -jnp.inf, cy)
+        better = cy > best
+        return k + 1, ~ok, z, s, y, sh, yh, sl, yl, jnp.where(better, cy, best), jnp.where(better, y, yb)
+
+    z0 = jnp.full(n, 0.5)
+    s0 = jnp.maximum(b - A @ z0, 1.0)
+    y0 = jnp.ones(m)
+    ones = jnp.ones(n)
+    c0 = cert(y0)
+    st = (0, jnp.array(False), z0, s0, y0, ones, ones, ones, ones, jnp.where(jnp.isnan(c0), -jnp.inf, c0), y0)
+    st = jax.lax.while_loop(cond, body_pc if pc else body, st)
+    return st[2], st[-1], st[-2]
 
 
 def _cut_const(v, J, lo, p, coef, safe):
@@ -412,8 +526,6 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
             bvec = _row_margin(A, bvec, jnp.where(live, mag / nrm, 0.0), live, safe)
             return A, bvec
 
-        box_A = jnp.concatenate([jnp.eye(n + 1), -jnp.eye(n + 1)])
-        box_b = jnp.concatenate([jnp.ones(n + 1), jnp.zeros(n + 1)])
         cobj = jnp.zeros(n + 1).at[n].set(1.0)
 
         def dual(A, bvec, y):
@@ -446,10 +558,8 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
             """One LP over the current cuts: (best', rlo', rhi', u)."""
             A, bvec = rows(const, coef)
             nA = A.shape[0]
-            z, y, lb = ipm(
-                cobj, jnp.concatenate([A, box_A]), jnp.concatenate([bvec, box_b]), ipm_iters,
-                cert=lambda y: dual(A, bvec, y[:nA])[0],
-            )  # fmt: skip
+            z, y, lb = ipm(cobj, A, bvec, ipm_iters, cert=lambda y: dual(A, bvec, y[:nA])[0], box=True,
+                           target=cutoff)  # fmt: skip
             lb = jnp.where(jnp.isnan(lb) | bad_t, -jnp.inf, lb)
             best = jnp.maximum(best, lb)
             # range reduction from this round's certificate (r is per unit of u)
@@ -615,8 +725,6 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
             keep = _cut_rows(const.shape, nl)
             return (A, b) if keep is None else (A[keep], b[keep])
 
-        box_A = jnp.concatenate([jnp.eye(n), -jnp.eye(n)])
-        box_b = jnp.concatenate([jnp.ones(n), jnp.zeros(n)])
         C = jnp.concatenate([jnp.eye(n), -jnp.eye(n)])
 
         def solve(cvec, A, bvec):
@@ -630,7 +738,7 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
                     err = SAFE_K * err
                 return val - err
 
-            z, _, best = ipm(cvec, jnp.concatenate([A, box_A]), jnp.concatenate([bvec, box_b]), ipm_iters, cert=cert)
+            z, _, best = ipm(cvec, A, bvec, ipm_iters, cert=cert, box=True)
             return jnp.clip(z, 0.0, 1.0), best
 
         axis = jnp.concatenate([jnp.eye(n), -jnp.eye(n)]) * (w / 4)

@@ -740,6 +740,18 @@ def _repair_rounding(xi, ref, lo, hi, rows, tol, max_steps=_REPAIR_STEPS):
     return x if holds(x) else None
 
 
+def _moves_keep(rows, xi, D, feas_tol):
+    """``(k,)`` bool: which moves of the integers ``xi`` keep the rows on integers only
+    (``_integer_rows``) satisfied, the moves given by their row changes ``D`` ``(k, m)``.
+
+    A move that breaks such a row by more than ``10 * feas_tol`` (plus rounding slack) can
+    have no feasible completion: the polish skips it. It only filters candidate incumbents."""
+    A, c, is_eq = rows
+    r = A @ xi + c + D
+    lim = 10.0 * feas_tol + 1e-9 * (1.0 + np.abs(A).sum(axis=1) * (1.0 + np.abs(xi).max(initial=0.0)) + np.abs(c))
+    return np.all(np.where(is_eq, np.abs(r), r) <= lim, axis=1)
+
+
 def _verify(f, ineq, eq, x, fun, lo, hi, feas_tol, integer=None):
     """Re-evaluate ``x`` outside jit in float64: ``(max_violation, ok, reason)``.
 
@@ -1239,6 +1251,13 @@ def minimize(
 
     int_rows = []  # [rows] once read (``_integer_rows``): the linear rows on integers only, or [None]
 
+    def integer_rows():
+        """``_integer_rows`` of the problem, read once."""
+        if not int_rows:
+            st = K.structure(lo.size)
+            int_rows.append(_integer_rows(ineq, eq, lo, hi, imask, jac=None if st is None else st.jac))
+        return int_rows[0]
+
     def repaired(X, R):
         """The rounded points ``X`` (k, n) whose integers violate a linear row on integers only,
         repaired (``_repair_rounding``, towards the relaxation points ``R``): (k', n), the
@@ -1247,10 +1266,7 @@ def minimize(
         out = np.zeros((0, lo.size))
         if _past(deadline):
             return out
-        if not int_rows:
-            st = K.structure(lo.size)
-            int_rows.append(_integer_rows(ineq, eq, lo, hi, imask, jac=None if st is None else st.jac))
-        rows = int_rows[0]
+        rows = integer_rows()
         if rows is None:
             return out
         A, c, is_eq = rows
@@ -1552,8 +1568,23 @@ def minimize(
         one = [(j, d) for j in ii for d in (-1.0, 1.0) if lo[j] <= x[j] + d <= hi[j]]
         up = [j for j in ii if x[j] + 1 <= hi[j]]
         dn = [j for j in ii if x[j] - 1 >= lo[j]]
-        room = max(_POLISH_CANDS - len(one), 0)
         pairs = [(a, b) for a in up for b in dn if a != b]
+        rows = integer_rows() if one or pairs else None
+        if rows is not None:
+            # a move that breaks a linear row on integers only (``_integer_rows``: a budget, an
+            # assignment row) has no feasible completion, whatever the continuous variables do:
+            # its local solve is wasted (flay04m: 138 of 156 neighbours, about 2 s of polish)
+            col = np.cumsum(imask) - 1  # column of each integer variable in the rows
+            A, xi = rows[0], x[imask]
+            if one:
+                jj, dd = np.array(one).T
+                one = [o for o, k in zip(one, _moves_keep(rows, xi, (A[:, col[jj.astype(int)]] * dd).T, feas_tol)) if k]
+            if len(pairs) > _POLISH_CANDS * 8:  # (bounded work: sampled down first)
+                pairs = [pairs[i] for i in prng.choice(len(pairs), _POLISH_CANDS * 8, replace=False)]
+            if pairs:
+                pa, pb = np.array(pairs).T
+                pairs = [q for q, k in zip(pairs, _moves_keep(rows, xi, (A[:, col[pa]] - A[:, col[pb]]).T, feas_tol)) if k]
+        room = max(_POLISH_CANDS - len(one), 0)
         if len(pairs) > room:
             pairs = [pairs[i] for i in prng.choice(len(pairs), room, replace=False)]
         Y = np.repeat(x[None], len(one) + len(pairs), 0)
