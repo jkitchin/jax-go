@@ -42,6 +42,7 @@ from . import kcache
 from .fbbt import make_fbbt
 from .lifted import make_lifted_bounder
 from .lp import make_constrained_bounder, make_obbt, make_pool_cuts, pool_parts, reduce_ranges
+from .pseudoboolean import EPS, objective_polynomial, solve_binary_polynomial
 from .quadratic import binary_only, make_quadratic_bounder, make_quadratic_obbt, polynomial_form, quadratic_form
 from .structure import structure
 from .symmetry import lex_prune
@@ -908,6 +909,35 @@ class Result:
         )
 
 
+def _pseudo_boolean(K, f, ineq, eq, lo, hi, lo_user, hi_user, imask, abs_tol, rel_tol, feas_tol, t0):
+    """The ``Result`` of an exact variable-elimination solve (``pseudoboolean.solve_binary_polynomial``)
+    when the problem is a binary polynomial one it applies to and the solution checks out, else None.
+
+    The lower bound is the polynomial's exact minimum less its float error and, for an epigraph
+    ``f = s t + c_0`` whose row only has to hold to ``feas_tol``, ``|s / alpha| feas_tol`` (how far
+    below the polynomial ``f`` can go then). The minimizer is screened in float64 like any
+    incumbent; if it fails, or the gap to the bound is above the tolerance, the search runs."""
+    Q = K.lifted_form(lo.size)
+    if Q is None:
+        return None
+    try:
+        out = solve_binary_polynomial(Q, lo.size, lo, hi, imask)
+    except Exception:  # an optional shortcut: any failure leaves the problem to the search
+        return None
+    if out is None:
+        return None
+    x, F, tol_scale, mag = out
+    nm = len(objective_polynomial(Q, lo.size)[0])
+    lb = F - tol_scale * feas_tol - (nm + 2) * EPS * mag - 4 * EPS * abs(F)
+    ub = float(np.asarray(K.fvals(jnp.asarray(x[None])))[0])
+    maxv, verified, _ = _verify(f, ineq, eq, x, ub, lo_user, hi_user, feas_tol, integer=imask)
+    if not (verified and np.isfinite(ub) and lb <= ub + 1e-9 * (1 + abs(ub)) and ub - lb <= max(abs_tol, rel_tol * abs(ub))):
+        return None
+    return Result(x=x, fun=ub, lower_bound=min(lb, ub), converged=True, iterations=0, nodes=1, evaluations=0,
+                  time=time.perf_counter() - t0, status="optimal", max_violation=maxv, verified=True,
+                  message="solved exactly by variable elimination (binary polynomial)")
+
+
 def minimize(
     f,
     lo,
@@ -992,6 +1022,10 @@ def minimize(
     every primitive of ``f`` has a CROWN rule and ``f`` has a smooth
     saturating activation or ReLU; otherwise off). With ``True`` and an
     unsupported ``f`` the CROWN bound is ``-inf``, i.e. no effect.
+
+    A problem whose integer variables are all binary, posed as an epigraph ``min t, t >= P(x)``
+    with ``P`` a polynomial of them at binary points and no other constraint, is solved without a search when the polynomial's induced width is small: exact
+    variable elimination (``pseudoboolean.py``) gives the minimum and a minimizer.
 
     ``safe`` rounds every quantity feeding a lower bound outward (interval and
     McCormick values, envelopes, alphaBB, CROWN lines, LP rows and the dual
@@ -1171,6 +1205,15 @@ def minimize(
                 pool["next"] = (pool["next"] + 1) % len(rows)
                 pool["args"] = None
 
+    _mark("pseudo_boolean")
+    # a binary polynomial epigraph with no other constraint and a small induced width is minimized
+    # exactly by variable elimination (``pseudoboolean.py``): no search needed. Unconstrained problems
+    # are left out: they never build ``lifted_form`` otherwise, and that alone can take seconds.
+    if quadratic and not lifted and ineq is not None and (~imask).sum() <= 1 and np.all(np.isin(lo[imask], (0.0, 1.0))) \
+            and np.all(np.isin(hi[imask], (0.0, 1.0))):  # fmt: skip
+        done = _pseudo_boolean(K, f, ineq, eq, lo, hi, lo_user, hi_user, imask, abs_tol, rel_tol, feas_tol, t0)
+        if done is not None:
+            return done
     _mark("start_compile")
     extra = () if pool is None else (pool["rows"].shape, pool["root"].shape)  # the bound kernel's pool arguments
     padded = _Padder(batch, batch_sizes, jax.devices() if devices is None else list(devices))
