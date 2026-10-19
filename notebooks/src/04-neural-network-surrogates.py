@@ -171,6 +171,12 @@ table(rows_exp)
 
 # %% [markdown]
 # A status of `locallyOptimal` (BARON, if it appears) means BARON stopped without proving the gap, so its bound should not be read as certified.
+#
+# SCIP's full-space objective (−0.923114) and BARON's (−0.923092) are slightly *below* the certified optimum −0.923084 found by every reduced-space solve.
+# They do not contradict jaxglobal's proven bound (−0.923168), and they are not better points.
+# A full-space solver reports the objective in its own activation variables, which satisfy the 32 neuron equations only to its feasibility tolerance (1e-6), and those small violations, carried through the layers, shift the output by a few 1e-5.
+# Evaluating the network itself at the solver's `x` removes the difference: on a re-run, SCIP's full-space objective was 3e-5 below `net(x)` at its own point, with a largest equation violation of 9.8e-7.
+# The reduced-space models have no such equations and report the network's own value.
 
 # %% [markdown]
 # ## OMLT

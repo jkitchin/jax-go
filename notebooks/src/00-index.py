@@ -105,7 +105,7 @@ df.style.format({"obj": "{:.6g}", "bound": "{:.6g}"}, na_rep="n/a").hide(axis="i
 #
 # * **Speed.** On these small problems the Pyomo solvers (SCIP, BARON) finish in about a second or a few seconds. jaxglobal takes from a few seconds to about 30 s, a large part of which is JIT compilation of the traced function.
 #   Where the same function is solved again, the second solve is much faster (notebook 01).
-# * **Agreement.** Where both sides finish, objectives agree to the gap tolerance.
+# * **Agreement.** Where both sides finish, objectives agree to the gap tolerance. Full-space formulations can report an objective a few 1e-5 below the optimum, because their equations hold only to the solver's feasibility tolerance (notebook 04).
 # * **Where jaxglobal reads better.** Models that are numerical code: ODE integrators, neural networks, loops, library functions, vectorized algebra. There is no transcription step.
 # * **Where Pyomo is better.** Integer and logical structure, a choice of mature solvers, named constraints and duals, sparse large-scale models, and a large ecosystem (`pyomo.dae`, GDP, OMLT).
 # * **Current jaxglobal limits found while writing these notebooks.** Compile time grows quickly with the length of an unrolled loop (notebook 03); `lax.scan` and `jnp.interp` are not supported
