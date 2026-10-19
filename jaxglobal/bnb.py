@@ -66,6 +66,20 @@ def _gap_scores(Q, lo, hi, x):
     return out
 
 
+_GAP_FLOOR = 1e-3  # _gap_weights: weight of a variable whose products are all exact at the relaxation point
+
+
+def _gap_weights(Q, lo, hi, x, relw, ok):
+    """Per (box, variable): the ``branch_var="width"`` score on the lifted quadratic LP,
+    relative width times the McCormick gap of the variable's products at the relaxation
+    point (normalized by the box's largest gap); just the relative width in a box with no
+    gap; -1 where ``ok`` is False."""
+    gsc = _gap_scores(Q, lo, hi, x)
+    gmax = gsc.max(axis=1, keepdims=True)
+    score = np.where(ok, relw, -1.0)
+    return np.where(ok & (gmax > 0), relw * gsc / np.where(gmax > 0, gmax, 1.0), score)
+
+
 _SHRINK = (8.0, 100.0)  # _branch_widths: rescale only variables root tightening narrowed at least [0]-fold, by at most [1]-fold
 
 
@@ -1011,7 +1025,8 @@ def minimize(
     pseudocost and strong solves one more than width but loses flay04m or nous1), ``"width"`` (largest
     relative width among nonlinear variables; on the lifted quadratic LP, relative width
     times the McCormick gap of the variable's products at the relaxation point), ``"pseudocost"`` (product score
-    of per-variable bound gains observed so far; with integer variables, among the integers
+    of per-variable bound gains observed so far, on the lifted quadratic LP times a continuous
+    variable's ``"width"`` score; with integer variables, among the integers
     fractional at the relaxation point when there are any) or ``"reliability"`` (like
     pseudocost, but variables with fewer than ``_ETA`` observations are
     strong-branched, up to ``_M`` of them per box, within the ``batch`` budget)
@@ -1893,9 +1908,7 @@ def minimize(
             pp = np.arange(k)
             score = np.where(branchable & free, relw, -1.0)
             if quad is not None:  # lifted quadratic LP: relative width times the McCormick gap
-                gsc = _gap_scores(quad, plo, phi, pxr)
-                gmax = gsc.max(axis=1, keepdims=True)
-                score = np.where(branchable & free & (gmax > 0), relw * gsc / np.where(gmax > 0, gmax, 1.0), score)
+                score = _gap_weights(quad, plo, phi, pxr, relw, branchable & free)
             if imask.any():  # integers fractional at the relaxation point first, most fractional first
                 frac = np.abs(pxr - np.round(pxr))
                 score = np.where(imask & free & (frac > INT_TOL), 2.0 + frac, score)
@@ -1911,6 +1924,15 @@ def minimize(
             groups = [[i] for i in range(k)]
         else:
             score, _ = pseudo_scores(relw, phi > plo, pxr)
+            if branch_var == "pseudocost" and quad is not None:
+                # lifted quadratic LP: weigh each continuous variable's pseudocost score by its
+                # width score (relative width times the McCormick gap of its products at the
+                # relaxation point), much as SCIP combines pseudocosts with violation. Gains
+                # alone say nothing while the bound sits on a floor (kall_diffcircles_8's
+                # objective variable >= 0 holds every bound at 0 for the first ~15k nodes):
+                # unsolved at 61k nodes before, solved in 18k with the weights
+                wsc = _gap_weights(quad, plo, phi, pxr, relw, branchable & free)
+                score = np.where((score >= 0) & ~imask, score * np.maximum(wsc, _GAP_FLOOR), score)
             if branch_var == "pseudocost":
                 if imask.any():  # as with width, integers fractional at the relaxation point first
                     # (tloss: 2815 nodes without this, 127 with it, 31 with width)

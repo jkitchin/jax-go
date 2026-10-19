@@ -175,3 +175,25 @@ def test_failed_local_solves_on_a_convex_problem_keep_finite_branch_points(monke
         rel_tol=1e-10,
     )
     assert r.status == "optimal" and r.lower_bound <= r.fun + 1e-9
+
+
+def test_gap_weights():
+    """The width score on the lifted quadratic LP (which also weighs pseudocost scores there):
+    relative width times the variable's McCormick gap over the box's largest; the relative
+    width alone in a box whose products are exact at the relaxation point; -1 where not ok."""
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from jaxglobal.bnb import _gap_weights
+
+    Q = SimpleNamespace(pairs=np.array([[0, 0], [0, 1]]))  # x0^2 and x0*x1; x2 in no product
+    lo = np.zeros((2, 3))
+    hi = np.array([[2.0, 2.0, 1.0]] * 2)
+    x = np.array([[1.0, 1.0, 0.5], [0.0, 0.0, 0.0]])  # box 1 at a vertex: every gap is 0
+    relw = np.array([[1.0, 0.5, 0.25]] * 2)
+    ok = np.array([[True, True, True], [True, True, False]])
+    w = _gap_weights(Q, lo, hi, x, relw, ok)
+    # box 0: gaps x0^2 -> 1, x0*x1 -> 2; per variable 3, 2, 0
+    assert np.allclose(w[0], [1.0, 0.5 * 2 / 3, 0.0])
+    assert np.allclose(w[1], [1.0, 0.5, -1.0])
