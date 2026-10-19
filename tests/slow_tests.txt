@@ -315,3 +315,23 @@ tests/test_xlogx.py::test_entropy_problem_solves_with_finite_bound[0.0]
 tests/test_xlogx.py::test_separable_entropy_plus_nonconvex_solves_correctly[False]
 tests/test_xlogx.py::test_separable_entropy_plus_nonconvex_solves_correctly[True]
 tests/test_branching.py::test_failed_local_solves_on_a_convex_problem_keep_finite_branch_points
+# measured on a cold-cache CI run (2026-10-18): >= 8 s each
+tests/test_branching.py::test_branching_options_reach_optimum[G24-branch_var=pseudocost]
+tests/test_branching.py::test_branching_options_reach_optimum[six_hump_camel-branch_point=relax]
+tests/test_branching.py::test_pseudocost_with_integers
+tests/test_branching.py::test_small_batch_keeps_boxes_in_sync[branch_var=width]
+tests/test_cut_pool.py::test_kelley_stall_keeps_bound_valid[False]
+tests/test_cut_pool.py::test_kelley_stall_keeps_bound_valid[True]
+tests/test_fbbt_dead.py::test_compared_arm_minimize[safe]
+tests/test_fbbt_interp.py::test_never_looser_than_propagate[rows-0.5]
+tests/test_fbbt_where.py::test_double_where_stays_tight[plain]
+tests/test_fbbt_where.py::test_double_where_stays_tight[safe]
+tests/test_incumbent.py::test_incumbent_repair_does_not_walk_away
+tests/test_incumbent.py::test_polish_batches_fit_the_budget
+tests/test_incumbent.py::test_rounding_repaired_into_incumbent
+tests/test_integer.py::test_infeasible_by_integrality
+tests/test_integer.py::test_point_boxes_close[width-False]
+tests/test_integer.py::test_point_boxes_close[width-True]
+tests/test_nan_bound.py::test_nan_bound_never_reaches_the_result
+tests/test_time_limit.py::test_dive_chunks_continue_one_dive
+tests/test_time_limit.py::test_dive_runs_in_chunks_when_the_whole_dive_does_not_fit
