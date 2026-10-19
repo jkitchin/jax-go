@@ -33,6 +33,7 @@ import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+_T_START = time.time()  # the worker's start (see _drain)
 HERE = pathlib.Path(__file__).resolve().parent
 LIB = HERE / "minlplib"
 REL_GAP, ABS_GAP, FEAS_TOL = 1e-4, 1e-6, 1e-6
@@ -85,6 +86,17 @@ def worker(name, tl):
     status = {"optimal": "optimal", "infeasible": "infeasible", "time_limit": "time_limit"}.get(r.status, "error")
     return dict(status=status, time=time.perf_counter() - t0, primal=_num(p), dual=_num(d),
                 nodes=r.nodes, message=r.status)  # fmt: skip
+
+
+def _drain(tl):
+    """Let the worker's background kernel builds finish (see main()) for at most the runner's
+    timeout less a margin, or ``$JAXGLOBAL_DRAIN`` s (0: exit at once)."""
+    budget = tl * 1.5 + 60 - (time.time() - _T_START) - 20  # _run's timeout, less what has run and a margin
+    if "JAXGLOBAL_DRAIN" in os.environ:
+        budget = min(budget, float(os.environ["JAXGLOBAL_DRAIN"]))
+    kc = sys.modules.get("jaxglobal.kcache")
+    if budget > 0 and kc is not None and kc.cache_root() is not None:  # (nothing to keep without a cache)
+        kc.wait_for_builds(budget)
 
 
 def run_scip(name, tl):
@@ -238,9 +250,13 @@ def main():
     a = ap.parse_args()
     if a.worker:
         print(TAG + json.dumps(worker(a.worker, a.time_limit)), flush=True)
-        # exit now: a kernel still compiling in the background (abandoned at the time limit)
-        # would otherwise hold the process open until the runner kills it and loses the result
         sys.stdout.flush()
+        # A kernel still being traced or compiled when minimize returned at its time limit reaches
+        # the disk caches only once it finishes: without this a solve that needs more than the time
+        # limit to compile never gets warm, however often it is rerun. Wait for those builds (the
+        # result is already recorded), but exit well before the runner's timeout (_run), which
+        # would lose the result.
+        _drain(a.time_limit)
         os._exit(0)
         return
 

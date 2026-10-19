@@ -34,6 +34,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from . import kcache
 from .fbbt import joint_tape, make_fbbt
 
 _POOL = []  # one compiler thread, created on first use
@@ -326,7 +327,7 @@ def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed
         if not _POOL:
             _POOL.append(ThreadPoolExecutor(1, thread_name_prefix="jaxglobal-domain"))
         spec = jax.ShapeDtypeStruct(lo.shape, jnp.float64)
-        fut = _POOL[0].submit(lambda: fb.trace(spec, spec, jax.ShapeDtypeStruct((), jnp.float64)).lower().compile())
+        fut = kcache.track(_POOL[0].submit(lambda: fb.trace(spec, spec, jax.ShapeDtypeStruct((), jnp.float64)).lower().compile()))
         try:
             fb = fut.result(timeout=max(deadline - time.perf_counter(), 0.0))
         except TimeoutError:
