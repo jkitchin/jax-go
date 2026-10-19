@@ -51,6 +51,33 @@ def _check_topological(prog):
         assert set(np.ravel(o).tolist()) <= known
 
 
+def slot_values(p, x):
+    """Point values of all of ``p``'s slots at ``x``."""
+    v = np.where(np.isnan(p.const_val), 0.0, p.const_val)
+    v[: p.n] = x
+    names = [oc[0] for oc in p.opcodes]
+    for op, a, b, o in zip(p.op, p.a, p.b, p.out):
+        nm = names[op]
+        if nm in ("add", "add_any"):
+            v[o] = v[a] + v[b]
+        elif nm == "sub":
+            v[o] = v[a] - v[b]
+        elif nm == "mul":
+            v[o] = v[a] * v[b]
+        elif nm == "neg":
+            v[o] = -v[a]
+        elif nm == "integer_pow":
+            v[o] = v[a] ** p.opcodes[op][-1].params["y"]
+        else:
+            raise AssertionError(nm)
+    return v
+
+
+def evaluate(p, x):
+    v = slot_values(p, x)
+    return np.concatenate([v[np.ravel(o)] for o in p.outs])
+
+
 def test_balance_keeps_rows_and_outputs_and_cuts_depth():
     _, prog = program()
     bal = FI.balance_sums(prog)
@@ -68,30 +95,49 @@ def test_balance_evaluates_the_same_functions():
     tape, prog = program()
     bal = FI.balance_sums(prog)
     rng = np.random.default_rng(0)
-
-    def evaluate(p, x):
-        v = np.where(np.isnan(p.const_val), 0.0, p.const_val)
-        v[: p.n] = x
-        names = [oc[0] for oc in p.opcodes]
-        for op, a, b, o in zip(p.op, p.a, p.b, p.out):
-            nm = names[op]
-            if nm in ("add", "add_any"):
-                v[o] = v[a] + v[b]
-            elif nm == "sub":
-                v[o] = v[a] - v[b]
-            elif nm == "mul":
-                v[o] = v[a] * v[b]
-            elif nm == "neg":
-                v[o] = -v[a]
-            elif nm == "integer_pow":
-                v[o] = v[a] ** p.opcodes[op][-1].params["y"]
-            else:
-                raise AssertionError(nm)
-        return np.concatenate([v[np.ravel(o)] for o in p.outs])
-
     for _ in range(5):
         x = rng.uniform(0, 3, N + 1)
         np.testing.assert_allclose(evaluate(bal, x), evaluate(prog, x), rtol=1e-12, atol=1e-12)
+
+
+def test_balance_drops_stale_ids():
+    """``ids`` entries naming a slot the rebuild moved are dropped; the others still name slots
+    with the same values."""
+    _, prog = program()
+    bal = FI.balance_sums(prog)
+    assert set(bal.ids) < set(prog.ids)
+    x = np.random.default_rng(2).uniform(0, 3, N + 1)
+    v0, v1 = slot_values(prog, x), slot_values(bal, x)
+    for t, v in bal.ids.items():
+        np.testing.assert_allclose(v1[np.asarray(v)], v0[np.asarray(prog.ids[t])], rtol=1e-12, atol=1e-12)
+
+
+def _propagators(tape, g, h, n, integer=(), monkeypatch=None):
+    """The scheduled FBBT sweep of the chain and of the balanced program, the pick forced."""
+    monkeypatch.setattr(FI, "SCHEDULE_MIN_ROWS", 0)
+    runs = {}
+    for tag in ("chain", "bal"):
+        pick = (lambda p, *_: (p, FI.schedule(p))) if tag == "chain" else \
+            (lambda p, *_: (lambda q: (q, FI.schedule(q)))(FI.balance_sums(p)))  # fmt: skip
+        monkeypatch.setattr(FI, "_pick_program", pick)
+        runs[tag] = FI.make_propagate(tape, g, h, n, 1e-6, 5, integer=integer)
+    assert FI.schedule(runs["bal"].program).steps < FI.schedule(runs["chain"].program).steps
+    return runs["bal"], runs["chain"]
+
+
+def _same_boxes(new, old, LO, HI, cutoff, both=False):
+    """Equal empty verdicts (with ``both``: some empty, some not) and equal boxes (up to rounding) where not empty."""
+    run = lambda fn: [np.asarray(v) for v in jax.jit(jax.vmap(fn, in_axes=(0, 0, None)))(LO, HI, cutoff)]  # noqa: E731
+    a, b = run(new), run(old)
+    np.testing.assert_array_equal(a[2], b[2])
+    ok = ~a[2]
+    assert ok.any() and (a[2].any() or not both)
+    for u, v in zip(a[:2], b[:2]):
+        u, v = u[ok], v[ok]
+        np.testing.assert_array_equal(np.isinf(u), np.isinf(v))
+        fin = np.isfinite(v)
+        assert np.all(u[~fin] == v[~fin])
+        assert np.all(np.abs(u - v)[fin] <= 1e-9 * (1.0 + np.abs(v[fin])))
 
 
 @pytest.mark.parametrize("cutoff", [np.inf, 1.5])
@@ -100,21 +146,62 @@ def test_balanced_fbbt_matches_the_chain(cutoff, monkeypatch):
     rebuild: interval sums do not depend on the bracketing."""
     f, g = chain_model()
     tape, _ = program()
-    integer = tuple(range(N))
-    monkeypatch.setattr(FI, "SCHEDULE_MIN_ROWS", 0)
-    new = FI.make_propagate(tape, g, None, N + 1, 1e-6, 5, integer=integer)
-    monkeypatch.setattr(FI, "balance_sums", lambda p: p)
-    old = FI.make_propagate(tape, g, None, N + 1, 1e-6, 5, integer=integer)
+    new, old = _propagators(tape, g, None, N + 1, tuple(range(N)), monkeypatch)
     rng = np.random.default_rng(1)
     B = 24
     LO = np.zeros((B, N + 1))
     HI = np.concatenate([rng.integers(1, 12, (B, N)).astype(float), np.full((B, 1), 50.0)], axis=1)
     LO[:, N] = -5.0
-    run = lambda fn: [np.asarray(v) for v in jax.jit(jax.vmap(fn, in_axes=(0, 0, None)))(LO, HI, cutoff)]  # noqa: E731
-    a, b = run(new), run(old)
-    np.testing.assert_array_equal(a[2], b[2])
-    ok = ~a[2]
-    assert ok.any()
-    sc = 1.0 + np.abs(b[0]) + np.abs(b[1])
-    assert np.all((np.abs(a[0] - b[0]) / sc)[ok] <= 1e-9)
-    assert np.all((np.abs(a[1] - b[1]) / sc)[ok] <= 1e-9)
+    _same_boxes(new, old, LO, HI, cutoff)
+
+
+def random_model(rng, n=6):
+    """Random sums of random terms, each summed into one chain; partial sums taken mid-chain are
+    read again by later terms and rows (fan-out out of a chain); inequality and equality rows."""
+    kinds = rng.integers(0, 4, 400)
+    idx = rng.integers(0, n, (400, 2))
+    coef = rng.uniform(-2.0, 2.0, 400)
+    lens = rng.integers(12, 30, 5)
+    rhs = rng.uniform(-1.0, 3.0, 5)
+
+    def sums(x):
+        out, parts, k = [], [], 0
+        for L in lens:
+            s = 0.0
+            for _ in range(L):
+                i, j = idx[k]
+                kind = kinds[k] if parts else min(kinds[k], 2)
+                term = [x[i], x[i] * x[j], x[i] ** 2, None][kind]
+                if term is None:  # a partial sum read again, inside another sum
+                    term = parts[j % len(parts)] * x[i]
+                s = s + coef[k] * term
+                if k % 7 == 3:
+                    parts.append(s)
+                k += 1
+            out.append(s)
+        return out, parts
+
+    def g(x):
+        out, parts = sums(x)
+        return jnp.stack([out[0] - rhs[0], out[1] - rhs[1], -out[2] - rhs[2], parts[1] * parts[2] - rhs[3]])
+
+    def h(x):
+        out, _ = sums(x)
+        return jnp.stack([out[3] - rhs[4], out[4] - out[0]])
+
+    return (lambda x: x[0]), g, h
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_balanced_fbbt_matches_the_chain_randomized(seed, monkeypatch):
+    """Random sums with fan-out out of the chains, equality rows: the balanced program's FBBT
+    boxes and empty verdicts are the chain's."""
+    n = 6
+    rng = np.random.default_rng(seed)
+    f, g, h = random_model(rng, n)
+    tape = joint_tape(f, g, h, jnp.zeros(n))
+    new, old = _propagators(tape, g, h, n, (), monkeypatch)
+    B = 32
+    c = rng.uniform(-2.0, 2.0, (B, n))
+    w = rng.uniform(0.05, 2.0, (B, n)) * rng.choice([0.1, 1.0], (B, 1))
+    _same_boxes(new, old, c - w, c + w, np.inf, both=True)
