@@ -718,6 +718,12 @@ targets):
 - sources: ([Floudas et al. 1999](#ref-floudas1999handbook); [Ryoo & Sahinidis 1995](#ref-ryoo1995global); [Haverly 1978](#ref-haverly1978studies); [Michalewicz & Schoenauer 1996](#ref-michalewicz1996evolutionary); [Liang et al. 2006](#ref-liang2006problem); [Surjanovic & Bingham 2013](#ref-surjanovic2013virtual); [Jamil & Yang 2013](#ref-jamil2013literature));
 - MINLPLib ([Bussieck et al. 2003](#ref-bussieck2003minlplib)).
 
+## Citing and license
+
+jaxglobal is released under the MIT license ([`LICENSE`](LICENSE)). To cite
+it, use the metadata in [`CITATION.cff`](CITATION.cff) (GitHub's "Cite this
+repository" button). Each GitHub release is archived on Zenodo with a DOI.
+
 ## References
 
 Generated from `docs/references.bib` by `docs/readme_bib.py`.

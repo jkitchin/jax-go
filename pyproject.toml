@@ -1,8 +1,10 @@
 [project]
 name = "jaxglobal"
-version = "0.0.1"
+version = "0.1.0"
 description = "Deterministic global optimization of plain JAX functions via jaxpr-derived relaxations"
 requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "John R. Kitchin", email = "jkitchin@andrew.cmu.edu"}]
 # jax >= 0.11.2: older jaxlib segfaults running a jax.export-deserialized kernel
 # with LAPACK calls in a fresh process (kcache.py); jax < 0.12: 0.12 lowers erfc with
 # bitcast_convert_type, which has no relaxation rule; flatbuffers: jax.export serialization
