@@ -169,7 +169,7 @@ relaxations.
 * **Branching** only on variables that appear nonlinearly, detected from
   sampled Hessians.
 * `status` is `"optimal"`, `"infeasible"`, `"max_iter"`, `"time_limit"`,
-  `"unbounded_domain"` or `"unverified"` (see *Correctness checks*).
+  `"unbounded_domain"`, `"unverified"` or `"unproven"` (see *Correctness checks*).
 
 | problem | n | f\* | found | proven LB | nodes | time |
 |---|---|---|---|---|---|---|

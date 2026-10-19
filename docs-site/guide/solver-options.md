@@ -126,12 +126,12 @@ moves the cache and `JAXGLOBAL_CACHE=0` turns it off.
 | `fun` | `f(x)`, an upper bound on the global minimum |
 | `lower_bound` | proven lower bound on the global minimum |
 | `gap` | `fun - lower_bound` |
-| `status` | `"optimal"`, `"infeasible"`, `"max_iter"`, `"time_limit"`, `"unbounded_domain"` or `"unverified"` |
+| `status` | `"optimal"`, `"infeasible"`, `"max_iter"`, `"time_limit"`, `"unbounded_domain"`, `"unverified"` or `"unproven"` |
 | `message` | details for a non-optimal status |
 | `converged` | whether the gap closed |
 | `nodes`, `iterations`, `evaluations` | search-tree nodes, B&B iterations, boxes bounded (including strong-branching trials) |
 | `time` | wall-clock seconds |
 | `history` | per-iteration progress |
-| `max_violation`, `verified` | the incumbent re-checked outside `jit` in float64: box, `ineq`, `eq`, integrality and `f(x) == fun`. A failed check turns `"optimal"` into `"unverified"`. |
+| `max_violation`, `verified` | the incumbent re-checked outside `jit` in float64: box, `ineq`, `eq`, integrality and `f(x) == fun`. A failed check turns `"optimal"` into `"unverified"`. An incumbent repaired to strict feasibility (`message` says so) whose gap then exceeds 100x the tolerance turns it into `"unproven"`. |
 
 See the [API reference](../api/jaxglobal.md) for the full docstring.
