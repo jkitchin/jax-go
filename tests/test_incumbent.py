@@ -89,6 +89,36 @@ def test_incumbent_repaired_to_strict_feasibility():
     assert r.fun >= -1e-8  # no objective value below the true optimum 0
     assert r.lower_bound <= r.fun
     assert "repaired" in r.message
+    assert r.fun - r.lower_bound <= 100 * max(1e-6, 1e-4 * abs(r.fun))  # (bnb._REPAIR_GAP x the tolerance)
+
+
+def test_status_after_repair():
+    """A repair that moves ``fun`` away from the lower bound re-decides the status (no solve)."""
+    from jaxglobal.bnb import _REPAIR_GAP, _status_after_repair
+
+    note = "incumbent repaired from violation 0.01 to 0 (f -10 -> 1e-11)"
+    st, conv, msg = _status_after_repair("optimal", True, 1e-11, -10.0, 1e-6, note)
+    assert (st, conv) == ("unproven", False) and msg.startswith(note) and "gap 10" in msg
+    assert _status_after_repair("optimal", True, 2e-6, 0.0, 1e-6, note) == ("optimal", True, note)  # st_z-sized
+    assert _status_after_repair("optimal", True, _REPAIR_GAP * 1e-6 * 1.01, 0.0, 1e-6, "")[0] == "unproven"
+    assert _status_after_repair("time_limit", False, 5.0, -10.0, 1e-6, "") == ("time_limit", False, "")
+    assert _status_after_repair("optimal", True, np.nan, -10.0, 1e-6, "")[0] == "unproven"
+
+
+@needs_pounce
+def test_repaired_incumbent_gap_sets_status():
+    """feas_tol 1e-2 on a row scaled by 1e-3 lets t reach -10, while strictly feasible points have
+    t >= -2.5: the search closes its gap at f = -10 and the repair then moves f far above the
+    bound. It was reported "optimal" with a gap of 10; "optimal" must imply a closed gap."""
+    n = 5
+    P = lambda z: z[0] * z[1] * z[2] - 2 * z[2] * z[3] * z[4] + z[0] * z[4] - 0.5 * z[1]  # noqa: E731
+    r = minimize(lambda z: z[n], np.r_[np.zeros(n), -10], np.r_[np.ones(n), 10],
+                 ineq=lambda z: jnp.atleast_1d(1e-3 * (P(z) - z[n])), integer=np.arange(n), feas_tol=1e-2)  # fmt: skip
+    assert r.lower_bound <= r.fun and r.lower_bound <= -10 + 1e-6
+    if r.status == "optimal":
+        assert r.converged and r.fun - r.lower_bound <= 100 * max(1e-6, 1e-6 * abs(r.fun)) + 1e-9
+    else:
+        assert r.status == "unproven" and not r.converged and "gap" in r.message
 
 
 @needs_pounce

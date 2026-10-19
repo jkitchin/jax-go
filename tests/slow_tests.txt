@@ -191,6 +191,7 @@ tests/test_gp.py::test_relaxation_sound_5d
 tests/test_incumbent.py::test_free_slack_instances_solve[clay0203m-41573.26]
 tests/test_incumbent.py::test_free_slack_instances_solve[m3-37.8]
 tests/test_incumbent.py::test_incumbent_repaired_to_strict_feasibility
+tests/test_incumbent.py::test_repaired_incumbent_gap_sets_status
 tests/test_incumbent.py::test_integer_neighbourhood_polish
 tests/test_incumbent.py::test_near_zero_objective_incumbent
 tests/test_incumbent.py::test_polish_respects_constraints
