@@ -98,8 +98,9 @@ def test_compared_arm_minimize(safe):
     # the compared ``log(x0)`` is also an arm: it must not make x0 < 0 infeasible. (The lower
     # bound need not close: the relaxation does not decide ``log(x0) < c`` False where x0 < 0.)
     f = lambda x: W(jnp.log(x[0]) < -0.5, 5.0 + jnp.log(x[0]), -1.0 + 0.1 * x[0]) + x[1] ** 2  # noqa: E731
-    r = minimize(f, np.array([-2.0, -1.0]), np.array([-0.5, 1.0]), time_limit=5, safe=safe)
-    assert r.status in ("optimal", "time_limit") and abs(r.fun + 1.2) < 1e-6
+    # a node cap, not a time limit: on a slow runner 5 s can pass before the first incumbent
+    r = minimize(f, np.array([-2.0, -1.0]), np.array([-0.5, 1.0]), max_iter=20, safe=safe)
+    assert r.status in ("optimal", "max_iter") and abs(r.fun + 1.2) < 1e-6
 
 
 @pytest.mark.parametrize("safe", modes)
