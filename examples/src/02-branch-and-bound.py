@@ -149,10 +149,11 @@ fig.tight_layout()
 
 # %% [markdown]
 # The relaxations are tight enough that pruning is close to perfect: from level
-# 1 on, only the box holding each global minimum (stars) survives, and the
-# surviving area falls by the full factor of four per level. (At level 6 four
-# boxes survive because each minimum lies near the edge of its box, so a
-# neighbour cannot be ruled out yet; one level later it can.) Every grey box
+# 1 on, only the box holding each global minimum (stars) survives, two boxes in
+# all, so from level 2 on the surviving area falls by the full factor of four
+# per level. (At level 6 four boxes survive, and the area only halves, because
+# each minimum lies near the edge of its box, so a neighbour cannot be ruled out
+# yet; one level later it can, and the area falls eightfold.) Every grey box
 # has been **proved** not to contain a point better than the incumbent, so
 # the rest of the domain, including the four non-global local minima, never
 # has to be looked at again.
