@@ -515,7 +515,6 @@ class _Kernels:
         self._quadratic, self._use_quadratic, self._qlock = {}, bool(quadratic) and not lifted, threading.Lock()
         self.viol = jax.jit(jax.vmap(violation))
         # every constraint value finite (``violation`` reads g = -inf as satisfied)
-        self.cfinite = jax.jit(jax.vmap(lambda x: jnp.all(jnp.isfinite(g(x))) & jnp.all(jnp.isfinite(h(x)))))
         self.dive = None
         if idx.size and fbbt:
             # its own FBBT (own tape and interpreter caches): this kernel is traced on the
@@ -1284,7 +1283,8 @@ def minimize(
         F = np.asarray(K.fvals(jnp.asarray(X)), dtype=np.float64)
         bad |= ~np.isfinite(F)
         if constrained:
-            bad |= ~(np.asarray(K.viol(jnp.asarray(X))) <= feas_tol) | ~np.asarray(K.cfinite(jnp.asarray(X)))
+            # (violation is NaN or inf at a NaN or +inf g and a non-finite h; g = -inf is satisfied)
+            bad |= ~(np.asarray(K.viol(jnp.asarray(X))) <= feas_tol)
         if imask.any():
             bad |= np.any(np.abs(X[:, imask] - np.round(X[:, imask])) > INT_TOL, axis=1)
         return np.where(bad, np.inf, F)

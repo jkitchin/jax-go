@@ -1,4 +1,5 @@
-"""A point whose objective or constraint values are not finite never becomes the incumbent.
+"""A point whose objective is not finite never becomes the incumbent (nor one whose constraint
+violation is NaN or inf; g = -inf is a satisfied inequality).
 
 ``f = -inf`` (log at 0) is no attained minimum: accepted as the incumbent it would be a cutoff
 that prunes every box, and the search would end with ``fun = -inf`` and status "infeasible"
@@ -20,12 +21,12 @@ def test_integer_neg_inf_objective_point_is_skipped():
     assert np.isfinite(r.lower_bound)
 
 
-def test_integer_neg_inf_constraint_point_is_skipped():
-    """min x0 s.t. log(x0) <= 0 over the integers 0..3: g(0) = -inf is no satisfied constraint
-    (the problem is undefined there), so the minimum is at x0 = 1."""
-    r = minimize(lambda x: x[0], lo=[0.0], hi=[3.0], ineq=lambda x: jnp.log(x[0]), integer=[0])
-    assert r.status == "optimal"
-    assert r.fun == 1.0 and np.allclose(r.x, [1.0])
+def test_neg_inf_constraint_value_is_satisfied():
+    """g = -inf is a satisfied inequality (a ``where`` that switches the constraint off): such points
+    stay incumbents, else boxes the bounder sees as feasible would never close."""
+    g = lambda x: jnp.where(x[0] < 1, -jnp.inf, x[0] - 1.5)  # noqa: E731
+    r = minimize(lambda x: (x[0] - 0.2) ** 2, lo=[-2.0], hi=[2.0], ineq=g, max_iter=200)
+    assert r.status == "optimal" and abs(r.fun) < 1e-8 and abs(r.x[0] - 0.2) < 1e-4
 
 
 def test_continuous_neg_inf_objective_is_not_an_incumbent():
