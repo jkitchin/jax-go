@@ -39,6 +39,7 @@ import numpy as np
 
 from .lp import EPS, reduce_ranges
 from .relax import SAFE_K
+from .symmetry import automorphisms
 
 MAX_RLT_SUPPORT = 12  # ineq_rlt: linear inequalities with at most this many variables
 # ineq_rlt: rows with at most this many variables take the pair budget first. Wider rows only
@@ -117,6 +118,10 @@ class QuadraticForm(NamedTuple):
     den_row: np.ndarray = np.zeros(0, np.int64)
     den_coef: np.ndarray = np.zeros(0)
     den_pow: np.ndarray = np.zeros((0, 0), np.int64)
+    # permutation symmetry (``symmetry.automorphisms``): (S, n) elements p of the problem's
+    # symmetry group on the integer variables (x[p] feasible with f(x[p]) = f(x)), for lex-leader
+    # pruning (``symmetry.lex_prune``); valid on a box only if p keeps its bounds
+    sym: np.ndarray = np.zeros((0, 0), np.int64)
 
 
 def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS, integer=None, max_poly_columns=None):
@@ -324,6 +329,9 @@ def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS, integer=No
         if exact[0] and not den_row:  # (the symmetry argument is about the rows as polynomials)
             Q = Q._replace(flip=_flip(rows[0][0], rows[1] if ineq is not None else [],
                                       rows[-1] if eq is not None else [], ints))
+            if Q.flip < 0:
+                Q = Q._replace(sym=automorphisms(n, rows[0][0], rows[1] if ineq is not None else [],
+                                                 rows[-1] if eq is not None else [], ints))
     return ineq_rlt(Q, n) if degree == 2 else Q
 
 
