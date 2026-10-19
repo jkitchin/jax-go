@@ -465,6 +465,188 @@ def apply_xlogx(ctx, eqn, x):
     return widen(eqn, [x], out) if ctx.safe else out
 
 
+def _const_float(v):
+    """``v`` as a Python float if it is a concrete numeric scalar, else None."""
+    if is_mc(v) or isinstance(v, Unknown):
+        return None
+    try:
+        a = np.asarray(v)
+    except Exception:  # a tracer
+        return None
+    if a.shape != () or not np.issubdtype(a.dtype, np.floating) and not np.issubdtype(a.dtype, np.integer):
+        return None
+    a = float(a)
+    return a if np.isfinite(a) else None
+
+
+def mc_monomial(coef, factors, safe=False, nround=0):
+    """Relaxation of the monomial ``coef * prod_i b_i ** a_i`` (``coef > 0``) in log space.
+
+    On a box where every base is positive and bounded (``0 < lo_i``, ``hi_i < inf``) the monomial
+    is ``coef * exp(L)`` with ``L = sum_i a_i log b_i``, and McCormick composition gives:
+
+    * ``L``: interval ``sum_i a_i [log lo_i, log hi_i]`` (ordered by the sign of ``a_i``); ``cv(L)``
+      adds ``a_i sec_i(cv b_i)`` for ``a_i > 0`` (``sec_i``: log's secant on ``[lo_i, hi_i]``, its
+      convex envelope, which is increasing) and ``a_i log(cc b_i)`` for ``a_i < 0`` (``a_i log b`` is
+      convex and decreasing in ``b``); ``cc(L)`` is the mirror image (``a_i log(cc b_i)`` and
+      ``a_i sec_i(cv b_i)``);
+    * ``exp`` (convex, increasing): ``cv = coef exp(max(cv L, L.lo))`` and ``cc`` the secant of exp
+      on ``[L.lo, L.hi]`` at ``min(cc L, L.hi)``.
+
+    ``cv`` is convex and ``cc`` concave in the point (compositions of convex nondecreasing with convex,
+    sums with nonnegative weights), and ``cv <= monomial <= cc`` on the box. Factor-by-factor McCormick
+    products lose that a posynomial term is convex in ``log x``; this keeps it, and is intersected with
+    the product's. With ``safe`` everything is moved outward by a relative margin of ``SAFE_K`` ulps
+    times the error scale of the log-space sum (see the comment below), plus ``nround`` roundings in
+    ``coef`` (a finite, normal float), and then by an absolute ``tiny``. Returns ``(ok, MC)``: ``ok``
+    marks the boxes where it applies; elsewhere the result is a dummy.
+    """
+    ok = jnp.asarray(True)
+    for b, _ in factors:
+        ok = ok & (b.lo > 0) & jnp.isfinite(b.hi)
+    Llo = Lhi = Lcv = Lcc = 0.0
+    S = 0.0  # error scale of the log-space quantities: sum of |a_i| (|log lo_i| + |log hi_i| + 1)
+    for b, a in factors:
+        lo = jnp.where(ok, b.lo, 1.0)
+        hi = jnp.where(ok, b.hi, 2.0)
+        lgl, lgh = jnp.log(lo), jnp.log(hi)
+        w = hi - lo
+        slope = jnp.where(w > 0, (lgh - lgl) / jnp.where(w > 0, w, 1.0), 0.0)
+        sec = lgl + slope * (jnp.clip(jnp.where(ok, b.cv, 1.5), lo, hi) - lo)  # log's secant at cv b
+        lcc = jnp.log(jnp.clip(jnp.where(ok, b.cc, 1.5), lo, hi))  # log at cc b
+        if a > 0:
+            Llo, Lhi, Lcv, Lcc = Llo + a * lgl, Lhi + a * lgh, Lcv + a * sec, Lcc + a * lcc
+        else:
+            Llo, Lhi, Lcv, Lcc = Llo + a * lgh, Lhi + a * lgl, Lcv + a * lcc, Lcc + a * sec
+        S = S + abs(a) * (jnp.abs(lgl) + jnp.abs(lgh) + 1.0)
+    # exp(L) and coef exp(L) stay normal and finite, with ulps of exp(L.lo) normal too (else the secant's
+    # eH - eL can flush): exp of a log within log(tiny / eps) .. log(max) / 2 on both sides of coef
+    fi = jnp.finfo(Llo.dtype)
+    lc, lmin, lmax = float(np.log(coef)), float(np.log(fi.tiny / fi.eps)) + 1.0, float(np.log(fi.max)) - 1.0
+    ok = ok & (Llo > lmin) & (Llo + lc > lmin) & (Lhi < lmax) & (Lhi + lc < lmax)
+    Llo, Lhi = jnp.where(ok, Llo, 0.0), jnp.where(ok, Lhi, 1.0)
+    Lcv, Lcc = jnp.where(ok, Lcv, 0.0), jnp.where(ok, Lcc, 0.5)
+    eL, eH = jnp.exp(Llo), jnp.exp(Lhi)
+    W = Lhi - Llo
+    z = jnp.minimum(Lcc, Lhi)
+    cc = eL + jnp.where(W > 0, (eH - eL) / jnp.where(W > 0, W, 1.0), 0.0) * (z - Llo)
+    cc = jnp.where(jnp.isinf(eH), jnp.inf, cc)  # exp(L.hi) overflowed: no secant (inf * 0 at the corner)
+    cv, lo, hi = jnp.exp(jnp.maximum(Lcv, Llo)), eL, eH
+    if safe:
+        # each log is within a few ulps of its magnitude and the secant evaluations, scalings and the
+        # sum of k terms add at most (k + 1) ulps of S: the computed L-quantities are within
+        # d = SAFE_K eps (k + 1) S of the exact ones. exp of them is then within a factor
+        # exp(+-d) (1 +- SAFE_K eps) of exact; the secant of exp is off by at most (d + ulps) eH.
+        # A relative margin m = 2 SAFE_K eps ((k + 1) S + 2) covers both (exp(-d) >= 1 - d).
+        # coef carries nround roundings and the scaling by it one more, each within an ulp.
+        m = 2.0 * SAFE_K * float(jnp.finfo(eL.dtype).eps) * ((len(factors) + 1) * S + 3.0 + nround)
+        m = lax.stop_gradient(m)
+        # exp and the scaling flush values below the normal range to 0, where no relative margin helps:
+        # an absolute tiny after scaling covers it, and the monomial is positive so lo and cv stay >= 0.
+        tiny = float(jnp.finfo(eL.dtype).tiny)
+        lo, cv = (jnp.maximum(coef * v * (1.0 - m) - tiny, 0.0) for v in (lo, cv))
+        hi, cc = coef * hi * (1.0 + m) + tiny, coef * (cc + m * eH) * (1.0 + m) + tiny
+        return ok, MC(lo, hi, cv, cc)
+    return ok, MC(coef * lo, coef * hi, coef * cv, coef * cc)
+
+
+def intersect_mc(a: MC, b: MC) -> MC:
+    """Both relaxations at once: the larger lower bounds and the smaller upper bounds."""
+    return tighten(MC(jnp.maximum(a.lo, b.lo), jnp.minimum(a.hi, b.hi), jnp.maximum(a.cv, b.cv), jnp.minimum(a.cc, b.cc)))
+
+
+class Monomials:
+    """Recognizes products of powers ``c * prod_i b_i ** a_i`` while an interpreter runs, and
+    tightens each maximal one with ``mc_monomial``.
+
+    ``observe(name, ins, invals, out)`` is called after each equation with its operand keys
+    (jaxpr variables or tape slots; anything hashable, or a literal), the operand values and the
+    rule's result, and returns the (possibly tightened) result. A record is started by ``pow`` with
+    a constant exponent and extended by ``mul`` / ``div`` with a positive constant or another
+    factor (an operand without a record is a factor with exponent 1). Only a product that no later
+    ``mul`` / ``div`` consumes (``consumed``: the keys used as operands of those) and that has at
+    least two bases, one of them from ``pow``, is tightened: the intermediate products are left to
+    the product rule, which keeps the kernels small.
+    """
+
+    MAX_FACTORS = 8
+
+    def __init__(self, consumed, ctx: Ctx):
+        self.consumed = consumed
+        self.ctx = ctx
+        self.rec = {}  # key -> (coef, {base key: (base MC, exponent)}, has_pow, roundings in coef)
+
+    def _factor(self, k, v):
+        if _hashable(k) and k in self.rec:
+            return self.rec[k]
+        if is_mc(v) and _hashable(k):
+            return (1.0, {k: (v, 1.0)}, False, 0)
+        return None
+
+    def observe(self, name, ins, invals, outvar, out):
+        if self.ctx.interval_only or name not in ("pow", "mul", "div") or not is_mc(out) or not _hashable(outvar):
+            return out
+        rec = None
+        if name == "pow":
+            p = _const_float(invals[1])
+            if is_mc(invals[0]) and p is not None and _hashable(ins[0]):
+                rec = (1.0, {ins[0]: (invals[0], p)}, True, 0)
+        else:
+            u, v = ins
+            cu, cv = _const_float(invals[0]), _const_float(invals[1])
+            if name == "div":
+                cv = None if cv is None or cv == 0 else 1.0 / cv
+            if cu is not None or cv is not None:
+                c, k, val = (cu, v, invals[1]) if cu is not None else (cv, u, invals[0])
+                fr = self._factor(k, val) if c > 0 else None
+                if fr is not None and (name == "mul" or cv is not None):
+                    rec = (fr[0] * c, fr[1], fr[2], fr[3] + (2 if name == "div" else 1))
+            else:
+                fu, fv = self._factor(u, invals[0]), self._factor(v, invals[1])
+                if fu is not None and fv is not None:
+                    sgn = -1.0 if name == "div" else 1.0
+                    fac = dict(fu[1])
+                    exact = True
+                    for kk, (bv, a) in fv[1].items():
+                        if kk in fac:
+                            e0, e1 = fac[kk][1], sgn * a
+                            t = e0 + e1
+                            exact &= (e0 - (t - (t - e0))) + (e1 - (t - e0)) == 0  # TwoSum: no rounding
+                            fac[kk] = (bv, t)
+                        else:
+                            fac[kk] = (bv, sgn * a)
+                    rec = (fu[0] * fv[0] if sgn > 0 else fu[0] / fv[0], fac, fu[2] or fv[2], fu[3] + fv[3] + 1)
+                    if not exact:  # a rounded exponent sum is not the function's monomial: unusable
+                        rec = (np.nan,) + rec[1:]
+        if rec is None or len(rec[1]) > self.MAX_FACTORS:
+            return out
+        if not (np.finfo(np.float64).tiny <= rec[0] < np.inf):  # NaN from here on: products keep it
+            rec = (np.nan,) + rec[1:]
+        self.rec[outvar] = rec
+        coef, fac, has_pow, nround = rec
+        fac = [(bv, a) for bv, a in fac.values() if a != 0]
+        # a coef that over- or underflowed at any step (1e300 * 1e300, 1 / 1e-310) is NaN: leave it
+        if outvar in self.consumed or not has_pow or len(fac) < 2 or not (coef > 0):
+            return out
+        shp = jnp.shape(out.lo)
+        if any(jnp.shape(bv.lo) != shp for bv, _ in fac):
+            return out
+        fi = jnp.finfo(jnp.result_type(*(bv.lo for bv, _ in fac)))
+        if not (float(fi.tiny) <= coef <= float(fi.max)):  # (in the bases' dtype: float32 parts)
+            return out
+        ok, m = mc_monomial(coef, fac, self.ctx.safe, nround + (fi.bits < 64))
+        return select_mc(ok, intersect_mc(out, m), out)
+
+
+def mul_consumed(pairs):
+    """Keys used as an operand of a ``mul`` or ``div``, from ``(name, operand keys)`` pairs."""
+    out = set()
+    for name, ins in pairs:
+        if name in ("mul", "div"):
+            out.update(k for k in ins if _hashable(k) and not isinstance(k, jcore.Literal))
+    return out
+
+
 def mc_abs(x: MC) -> MC:
     return convex_rule(jnp.abs, x, jnp.clip(0.0, x.lo, x.hi))
 
@@ -1044,6 +1226,8 @@ def eval_jaxpr_mc(jaxpr, consts, args, ctx: Ctx = Ctx()):
     # to its operand, and ``canon`` merges repeated element reads (``x[0] * jnp.log(x[0])`` slices
     # ``x`` twice) so that the two operands are recognized as the same value
     logs, canon, seen = {}, {}, {}
+    # products of powers are tightened by ``Monomials`` (log-space relaxation of the whole product)
+    monos = Monomials(mul_consumed((e.primitive.name, e.invars) for e in jaxpr.eqns), ctx)
     for eqn in jaxpr.eqns:
         invals = [read(v) for v in eqn.invars]
         name = eqn.primitive.name
@@ -1071,7 +1255,7 @@ def eval_jaxpr_mc(jaxpr, consts, args, ctx: Ctx = Ctx()):
             for v, o in zip(eqn.outvars, outs):
                 env[v] = o
         else:
-            env[eqn.outvars[0]] = outs
+            env[eqn.outvars[0]] = monos.observe(name, ins, invals, eqn.outvars[0], outs)
     return [read(v) for v in jaxpr.outvars]
 
 

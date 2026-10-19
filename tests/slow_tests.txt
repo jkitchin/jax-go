@@ -315,6 +315,12 @@ tests/test_xlogx.py::test_entropy_problem_solves_with_finite_bound[0.0]
 tests/test_xlogx.py::test_separable_entropy_plus_nonconvex_solves_correctly[False]
 tests/test_xlogx.py::test_separable_entropy_plus_nonconvex_solves_correctly[True]
 tests/test_branching.py::test_failed_local_solves_on_a_convex_problem_keep_finite_branch_points
+tests/test_monomial.py::test_valid_relaxations_and_cuts[term-True]
+tests/test_monomial.py::test_valid_relaxations_and_cuts[term-False]
+tests/test_monomial.py::test_valid_relaxations_and_cuts[mixed-True]
+tests/test_monomial.py::test_valid_relaxations_and_cuts[mixed-False]
+tests/test_monomial.py::test_small_posynomial_problem[True]
+tests/test_monomial.py::test_small_posynomial_problem[False]
 # measured on a cold-cache CI run (2026-10-18): >= 8 s each
 tests/test_branching.py::test_branching_options_reach_optimum[G24-branch_var=pseudocost]
 tests/test_branching.py::test_branching_options_reach_optimum[six_hump_camel-branch_point=relax]
