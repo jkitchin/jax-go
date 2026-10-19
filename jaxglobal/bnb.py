@@ -1199,10 +1199,12 @@ def minimize(
     solve_local = _cached(("local", f, ineq, eq, local_solver, lo.tobytes(), hi.tobytes()),
                           lambda: make_local(f, ineq, eq, lo, hi, local_solver, patterns=K.structure(lo.size)))
 
-    def local(starts, options=None):
+    def local(starts, options=None, boxes=None):
         """Local solves from each start; returns (x, f) of the best feasible result.
 
         ``options``: extra local-solver options for these solves (``near_zero_options``).
+        ``boxes``: ``(L, H)``, per-start boxes inside [lo, hi] to solve in (problems without
+        integer variables only); a start's solve stays in its box.
 
         With integer variables a start (an LP point, which can violate the nonlinear
         constraints far more than any rounding can repair) is first solved as the
@@ -1229,6 +1231,10 @@ def minimize(
                 L, H = np.where(imask, Y, lo), np.where(imask, Y, hi)
                 Y = np.clip(np.asarray(solve_local(Y, L, H, options=options)), L, H)
                 X, F = np.concatenate([X, Y]), np.concatenate([F, screen(Y)])
+        elif boxes is not None:
+            L, H = boxes
+            X = np.clip(np.asarray(solve_local(np.clip(S, L, H), L, H, options=options)), L, H)
+            F = screen(X)
         else:
             X = np.clip(np.asarray(solve_local(S, options=options)), lo, hi)
             F = screen(X)
@@ -1440,10 +1446,20 @@ def minimize(
 
     backoff = [0, 0]  # local-search back-off: current wait length, iterations left to skip
 
-    def update_incumbent(xc, fc, lb):
-        """Improve the incumbent from candidate points and local solves."""
+    def update_incumbent(xc, fc, lb, blo=None, bhi=None):
+        """Improve the incumbent from candidate points and local solves.
+
+        ``blo``, ``bhi``: the boxes of the candidates (rows of ``xc``). Without integer
+        variables, a relaxation minimizer is then solved in its own box as well as in the root
+        box (one batch): from the LP point of a promising box the root-box solve tends to slide
+        back into the basin of the incumbent (circle packing: kall_diffcircles_6 found the
+        optimum after 12467 nodes from root-box solves alone, after ~1400 with box solves),
+        while the box alone can hold only a worse local minimum (kall_congruentcircles_c52:
+        167 nodes with both, 507 with box solves alone). A solution in a sub-box is a point of
+        the root box, screened like any other."""
         nonlocal ub, xbest
         starts = []
+        sboxes = []  # the box of each start
         fc = np.where(np.isfinite(fc), fc, np.inf)  # f = -inf or NaN: no candidate (``screen``)
         if np.any(np.isfinite(fc)):
             i = int(np.argmin(fc))
@@ -1452,25 +1468,32 @@ def minimize(
                 if fs < ub:                                     # it in float64 with the box and integrality
                     ub, xbest = fs, xc[i]
                 starts.append(xc[i])
+                sboxes.append((lo, hi))
         if constrained:
             # relaxation minimizers of the most promising boxes are good starts
             n_try = n_starts * (4 if not np.isfinite(ub) else 1)
             for i in np.argsort(lb)[:n_try]:
                 if lb[i] < ub - tol():
                     starts.append(xc[i])
+                    sboxes.append((lo, hi))
+                    if blo is not None and not imask.any():
+                        starts.append(xc[i])
+                        sboxes.append((blo[i], bhi[i]))
         if local_solve and starts and not _past(deadline):  # (a batch already running is not interrupted)
             # with an incumbent, back off after local searches that did not improve it (skip
             # 1, 3, 7, ... iterations, up to _LOCAL_BACKOFF); an improvement resets the wait
             if np.isfinite(ub) and backoff[1] > 0:
                 backoff[1] -= 1
                 return
-            xl, fl = local(starts)
+            boxes = None if imask.any() or blo is None else tuple(np.array(b) for b in zip(*sboxes))
+            xl, fl = local(starts, boxes=boxes)
             nz = near_zero_options(min(ub, fl), abs_tol)
             if nz is not None and not _past(deadline):
                 # near-zero objective: solve again with the objective scaled up (local.near_zero_options),
                 # also from the incumbent and a few random points of the box
                 extra = [xl if fl < ub else xbest] + list(prng.uniform(lo, hi, size=(_NEAR_ZERO_STARTS, lo.size)))
-                x2, f2 = local(starts + extra, options=nz)
+                root = [x for x, b in zip(starts, sboxes) if b[0] is lo]  # (not the box copies)
+                x2, f2 = local(root + extra, options=nz)
                 if f2 < fl:
                     xl, fl = x2, f2
             if fl < ub:
@@ -1940,7 +1963,7 @@ def minimize(
             ok = np.isfinite(X).all(axis=1)  # a failed solve keeps its LP point
             cxr = cxr.copy()
             cxr[rows[ok]] = np.clip(X[ok], clo[rows[ok]], chi[rows[ok]])
-        update_incumbent(cx, cf, clb)
+        update_incumbent(cx, cf, clb, clo, chi)
         if imask.any() and it >= next_dive:  # dives from the most promising children
             o = np.argsort(clb)[:_DIVES]
             before = ub

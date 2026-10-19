@@ -209,3 +209,55 @@ def test_rounding_repaired_into_incumbent(monkeypatch):
     r = minimize(f, np.zeros(5), np.array([3.0, 3, 3, 3, 1]), ineq=g, integer=[0, 1, 2, 3], max_iter=200)
     assert any(found)
     assert r.status == "optimal" and r.verified and abs(r.fun - 0.84) <= 1e-6
+
+
+def _packing(n=3):
+    """``n`` circles of diameter 1 in a W x H rectangle, x-ordered; minimize the area t = W H.
+    Optimum 3 (a row). t >= 2 holds the bound at t's own lower bound until W or H is split."""
+
+    def ineq(v):
+        x, y, W, H = v[0 : 2 * n : 2], v[1 : 2 * n : 2], v[2 * n], v[2 * n + 1]
+        rows = [1.0 - (x[i] - x[j]) ** 2 - (y[i] - y[j]) ** 2 for i in range(n) for j in range(i + 1, n)]
+        rows += [x[i] + 0.5 - W for i in range(n)] + [y[i] + 0.5 - H for i in range(n)]
+        rows += [x[i] - x[i + 1] for i in range(n - 1)]
+        return jnp.stack(rows)
+
+    lo = np.r_[np.tile([0.5, 0.5], n), 1.0, 1.0, 2.0]
+    hi = np.r_[np.tile([3.5, 1.5], n), 4.0, 2.0, 8.0]
+    return (lambda v: v[-1]), ineq, (lambda v: jnp.atleast_1d(v[-1] - v[2 * n] * v[2 * n + 1])), lo, hi
+
+
+@needs_pounce
+@pytest.mark.parametrize("safe", [False, True])
+def test_relaxation_minimizers_solved_in_their_boxes(monkeypatch, safe):
+    """Without integers, a node's relaxation minimizer is solved locally in the node's box
+    (``update_incumbent``): every start lies in its box, every box in the root box, and some
+    boxes are proper sub-boxes. The incumbent is still the global optimum."""
+    from jaxglobal import bnb
+
+    f, g, h, lo, hi = _packing()
+    calls = []
+    orig = bnb.make_local
+
+    def recording(*a, **k):
+        solve = orig(*a, **k)
+
+        def wrapped(X0, LO=None, HI=None, options=None):
+            if LO is not None:
+                calls.append((np.array(X0), np.array(LO), np.array(HI)))
+            return solve(X0, LO, HI, options=options)
+
+        return wrapped
+
+    monkeypatch.setattr(bnb, "make_local", recording)
+    bnb.clear_cache()
+    r = minimize(f, lo, hi, ineq=g, eq=h, safe=safe, rel_tol=1e-6)
+    assert r.status == "optimal" and r.verified
+    assert abs(r.fun - 3.0) <= 1e-5 and r.lower_bound <= 3.0 + 1e-9
+    assert calls
+    sub = False
+    for X0, L, H in calls:
+        assert np.all(L <= X0) and np.all(X0 <= H)
+        assert np.all(lo <= L) and np.all(H <= hi)
+        sub |= bool(np.any((L > lo) | (H < hi)))
+    assert sub
