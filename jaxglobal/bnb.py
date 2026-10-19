@@ -1496,8 +1496,11 @@ def minimize(
                 x2, f2 = local(root + extra, options=nz)
                 if f2 < fl:
                     xl, fl = x2, f2
+            # only a real improvement resets the wait (re-finding the incumbent to round-off does not)
+            gain = ub - fl > 1e-9 * max(abs(ub), 1.0) if np.isfinite(ub) else fl < ub
             if fl < ub:
                 ub, xbest = fl, xl
+            if gain:
                 backoff[:] = [0, 0]
             elif np.isfinite(ub):
                 backoff[0] = min(2 * backoff[0] + 1, _LOCAL_BACKOFF)
