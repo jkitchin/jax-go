@@ -177,3 +177,6 @@ equation-based solvers, batched throughput and Gaussian-process surrogates.
 * [Benchmarks and results](guide/benchmarks.md)
 * [jaxglobal and discopt](guide/discopt.md): how this solver differs from discopt
 * [API reference](api/index.md)
+
+To cite jaxglobal, use [doi:10.5281/zenodo.23478503](https://doi.org/10.5281/zenodo.23478503)
+(see [Citing and license](references.md#citing-and-license)).

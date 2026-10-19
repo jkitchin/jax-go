@@ -15,6 +15,14 @@ authors:
     orcid: "https://orcid.org/0000-0003-2625-9232"
     affiliation: "Carnegie Mellon University"
     email: jkitchin@andrew.cmu.edu
+doi: 10.5281/zenodo.23478503
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.23478503
+    description: "Concept DOI: all versions, resolves to the latest release"
+  - type: doi
+    value: 10.5281/zenodo.23478504
+    description: "Version 0.1.0"
 repository-code: "https://github.com/jkitchin/jax-go"
 url: "https://kitchingroup.cheme.cmu.edu/jax-go/"
 license: MIT
