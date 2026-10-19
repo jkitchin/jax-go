@@ -112,6 +112,11 @@ class QuadraticForm(NamedTuple):
     # complement symmetry (``_flip``): an integer variable that may be fixed to 1 on a root box
     # where every integer variable is binary, or -1
     flip: int = -1
+    # equality rows cleared of a denominator d (``quadratic_form``): d = sum_t den_coef[t] *
+    # prod_i x_i ** den_pow[t, i] over the terms t with den_row[t] = the row (index into h)
+    den_row: np.ndarray = np.zeros(0, np.int64)
+    den_coef: np.ndarray = np.zeros(0)
+    den_pow: np.ndarray = np.zeros((0, 0), np.int64)
 
 
 def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS, integer=None, max_poly_columns=None):
@@ -177,38 +182,88 @@ def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS, integer=No
         lin = max((abs(v) for k, v in p.items() if k), default=0.0)
         return abs(p.get((), 0.0)) / lin if lin > 0 else 0.0
 
+    # Rational values: slot s is polys[s] / dens[s] (no entry: denominator 1). They are only kept
+    # for equality rows, which are cleared of their denominator below (``den_*``).
+    dens = {}
+
+    def den(s):
+        return dens.get(s) if s >= n and np.isnan(cval[s]) else None
+
+    def dmul(p, q):  # product of two denominators (None: 1)
+        return q if p is None else p if q is None else mul(p, q)
+
     worst_offset = 0.0
     for o, a, b, out in zip(prog.op.tolist(), prog.a.tolist(), prog.b.tolist(), prog.out.tolist()):
         name, eqn = prog.opcodes[o][0], prog.opcodes[o][6]
         pa, pb = poly(a), poly(b)
+        da = den(a)
+        db = den(b) if name in ("add", "add_any", "sub", "mul", "div") else None
         if degree > 2 and name in ("mul", "square", "integer_pow"):
             for p in (pa, pb) if name == "mul" else (pa,):
                 if any(len(k) >= 1 for k in p):  # a product of a non-constant factor (x - c): expanded
                     worst_offset = max(worst_offset, offset(p))
-        if name in ("add", "add_any"):
-            r = axpy(pa, pb)
-        elif name == "sub":
-            r = axpy(pa, pb, -1.0)
+        d = None
+        if name in ("add", "add_any", "sub"):
+            sgn = -1.0 if name == "sub" else 1.0
+            if da == db:  # (also both 1)
+                r, d = axpy(pa, pb, sgn), da
+            else:  # pa / da + pb / db = (pa db + pb da) / (da db)
+                ta, tb, d = mul(pa, db or {(): 1.0}), mul(pb, da or {(): 1.0}), dmul(da, db)
+                if ta is None or tb is None or d is None:
+                    return None
+                r = axpy(ta, tb, sgn)
         elif name == "neg":
-            r = {k: -v for k, v in pa.items()}
+            r, d = {k: -v for k, v in pa.items()}, da
         elif name == "mul":
-            r = mul(pa, pb)
-        elif name == "div" and set(pb) == {()}:
+            r, d = mul(pa, pb), dmul(da, db)
+            if (da is not None or db is not None) and d is None:
+                return None
+        elif name == "div" and set(pb) == {()} and db is None:
             exact[0] = exact[0] and abs(pb[()]) == 1.0
-            r = {k: v / pb[()] for k, v in pa.items()}
+            r, d = {k: v / pb[()] for k, v in pa.items()}, da
+        elif name == "div":  # (pa / da) / (pb / db) = (pa db) / (da pb)
+            r, d = mul(pa, db or {(): 1.0}), dmul(da, pb)
+            if d is None:
+                return None
         elif name == "square":
             r = mul(pa, pa)
+            d = None if da is None else mul(da, da)
+            if da is not None and d is None:
+                return None
         elif name == "integer_pow" and 1 <= eqn.params["y"] <= degree:
             r = power(pa, eqn.params["y"])
+            d = None if da is None else power(da, eqn.params["y"])
+            if da is not None and d is None:
+                return None
         else:
             return None
-        if r is None or len(r) > MAX_TERMS:
+        if r is None or len(r) > MAX_TERMS or (d is not None and len(d) > MAX_TERMS):
             return None
         polys[out] = r
+        if d is not None:
+            dens[out] = d
 
     if worst_offset > OFFSET_LIMIT:
         return None
-    rows = [[poly(int(s)) for s in np.asarray(slots).reshape(-1).tolist()] for slots in prog.outs]
+    out_slots = [np.asarray(slots).reshape(-1).tolist() for slots in prog.outs]
+    rows = [[poly(int(s)) for s in slots] for slots in out_slots]
+    # An equality h = p / d = 0 becomes p = 0: at every point where h is defined (d != 0) the two
+    # agree, so the polynomial row is a relaxation (it adds points with d = 0, where h is not
+    # defined and so not feasible). With the tolerance |h| <= tol it holds to |p| <= tol |d|
+    # (``den_*``: the LP bounds |d| over the box). Objective and inequality rows stay polynomial
+    # (clearing an inequality needs the sign of d).
+    if any(den(int(s)) is not None for group in out_slots[:len(out_slots) - (eq is not None)] for s in group):
+        return None
+    den_row, den_coef, den_mono = [], [], []
+    if eq is not None:
+        for r, s in enumerate(out_slots[-1]):
+            d = den(int(s))
+            for k, v in (d or {}).items():
+                if v == 0.0:
+                    continue
+                den_row.append(r)
+                den_coef.append(v)
+                den_mono.append(k)
     flat = [p for group in rows for p in group]
     monos = {k for p in flat for k in p if len(k) >= 2 and p[k] != 0.0}
     if not monos:
@@ -242,8 +297,9 @@ def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS, integer=No
     # the strengthening of the full RLT system).
     rlt, rlt_var = [], []
     prod_vars = sorted({i for k in col for i in k})
-    for p in (rows[-1] if eq is not None else []):
-        if any(len(k) >= 2 for k in p) or not any(len(k) == 1 and v for k, v in p.items()):
+    cleared = set(den_row)
+    for r, p in enumerate(rows[-1] if eq is not None else []):
+        if r in cleared or any(len(k) >= 2 for k in p) or not any(len(k) == 1 and v for k, v in p.items()):
             continue
         for v in prod_vars:
             terms = [(tuple(sorted((k[0], v))), a) for k, a in p.items() if len(k) == 1 and a != 0.0]
@@ -256,10 +312,16 @@ def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS, integer=No
                 rlt_var.append(v)
     rlt = np.asarray(rlt).reshape(-1, n + len(order))
     Q = QuadraticForm(E, c, pairs.reshape(-1, 2), n_g, n_h, rlt, np.asarray(rlt_var, np.int64), level[n:])
+    if den_row:
+        pw = np.zeros((len(den_row), n), np.int64)
+        for t, k in enumerate(den_mono):
+            for i in k:
+                pw[t, i] += 1
+        Q = Q._replace(den_row=np.asarray(den_row, np.int64), den_coef=np.asarray(den_coef, float), den_pow=pw)
     if integer is not None and degree > 2:
         ints = set(np.asarray(integer, np.int64).reshape(-1).tolist())
         Q = Q._replace(**_binary_cuts(col, n, ints), lattice=_lattice(Q, col, n, ints))
-        if exact[0]:
+        if exact[0] and not den_row:  # (the symmetry argument is about the rows as polynomials)
             Q = Q._replace(flip=_flip(rows[0][0], rows[1] if ineq is not None else [],
                                       rows[-1] if eq is not None else [], ints))
     return ineq_rlt(Q, n) if degree == 2 else Q
@@ -727,7 +789,16 @@ def _lp(Q, L, lo, hi, tol, safe, cutoff=None):
     V = jnp.asarray(Q.rlt_var)
     rt = tol * jnp.maximum(jnp.abs(lo[V]), jnp.abs(hi[V]))  # |h(x) x_v| <= tol |x_v| when |h| <= tol
     ok = _binary_ok(Q, lo, hi)
-    b = [rhs.reshape(-1), jnp.asarray(tol - g), jnp.asarray(tol - h), jnp.asarray(tol + h), rt, rt,
+    th = jnp.full(Q.n_h, tol, lo.dtype)
+    if Q.den_row.size:  # a cleared row p = h d holds to |p| <= tol max |d| over the box
+        xmag = vmag[:n]
+        term = jnp.abs(jnp.asarray(Q.den_coef)) * jnp.prod(xmag[None, :] ** jnp.asarray(Q.den_pow), axis=1)
+        dmag = _segsum(term, Q.den_row, Q.n_h)
+        dmag = jnp.where(jnp.isnan(dmag), jnp.inf, dmag)  # (an unbounded variable: the row is dropped)
+        cl = np.zeros(Q.n_h, bool)
+        cl[Q.den_row] = True
+        th = jnp.where(jnp.asarray(cl), tol * dmag * (1 + 1e-12), th)
+    b = [rhs.reshape(-1), jnp.asarray(tol - g), th - h, th + h, rt, rt,
          jnp.where(ok, jnp.asarray(Q.cut_rhs, lo.dtype), jnp.inf)]  # fmt: skip
     if L.n_tan:
         b.append(jnp.full(L.n_tan * P, jnp.inf))
