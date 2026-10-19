@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use jaxglobal in your research, please cite it as below."
+title: "jaxglobal: deterministic global optimization of plain JAX functions"
+abstract: >-
+  jaxglobal is a deterministic global optimizer for continuous and
+  mixed-integer nonlinear problems written as plain JAX functions. It traces
+  the objective and constraints to a jaxpr and re-interprets every primitive
+  as McCormick and alphaBB relaxations, which are jit-compiled and vmapped
+  over boxes in a batched spatial branch-and-bound. It returns a feasible
+  point and a proven lower bound, and reads AMPL .nl models.
+type: software
+authors:
+  - family-names: Kitchin
+    given-names: John R.
+    orcid: "https://orcid.org/0000-0003-2625-9232"
+    affiliation: "Carnegie Mellon University"
+    email: jkitchin@andrew.cmu.edu
+repository-code: "https://github.com/jkitchin/jax-go"
+url: "https://kitchingroup.cheme.cmu.edu/jax-go/"
+license: MIT
+keywords:
+  - global optimization
+  - MINLP
+  - branch-and-bound
+  - McCormick relaxations
+  - JAX
+  - automatic differentiation
+  - convex relaxation
+version: 0.1.0
+date-released: 2026-10-19
