@@ -587,10 +587,15 @@ Status sweep on `main` at 3047be4, after the PRs merged in this loop
 (#60–#67: scheduled FBBT, lifted-LP rational rows, symmetry pruning,
 pseudo-Boolean variable elimination, gap-weighted pseudocosts, the
 "unproven" status after incumbent repair, and the symmetry cost budget).
-PASS means solved within max(2 x SCIP time, 10 s). There were two warm rounds
-per bucket, with load recorded, and both rounds gave the same verdicts.
+PASS means solved within max(2 x SCIP time, 10 s). There were two rounds per
+bucket, with load recorded: a cold first round (compilation included) and a
+warm second round (compile caches reused).
 
-**74 of 79 fast targets PASS.** These targets pass now and were open in
+**74 of 79 fast targets PASS warm, and 68 of 79 cold.** Six fail only cold, at
+10.0-11.9 s against a 10 s cap: launch, ex8_4_4, smallinvDAXr3b010-011,
+ex8_5_3, ex6_2_6 and flay04m. SCIP has no compile step, so the cold count is
+the fair comparison. On instances held out from development the pass rate is
+lower; see the README's Status section. These targets pass now and were open in
 earlier rounds: hadamard_5 (7.0 s), autocorr_bern20-10 and 30-04, kall_diffcircles_8 (18.7 s, cap 64.5),
 ex8_4_4 (8.9 s), ex8_4_5, ex6_2_6, flay04m, csched1a, batch and launch.
 ex8_4_4 and smallinvDAXr3b010-011 (9.7 s) are within 15% of the 10 s cap.
