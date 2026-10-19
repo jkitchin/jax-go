@@ -230,9 +230,9 @@ for label, kw in configs.items():
 
 # %% [markdown]
 # Every configuration returns the same certified optimum; only the amount of
-# work changes. Dropping the univariate envelopes and αBB costs about six times
-# as many nodes (1781 vs 303), and dropping bound tightening about twice as
-# many (569). All of these are options of `minimize`, and none of them asks
+# work changes. Dropping the univariate envelopes and αBB costs about five times
+# as many nodes (1471 vs 277), and dropping bound tightening about twice as
+# many (555). All of these are options of `minimize`, and none of them asks
 # anything more of the user than the Python function.
 #
 # ## Summary

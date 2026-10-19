@@ -269,10 +269,10 @@ fail[(fail != "solved").any(axis=1)]
 # * **Coverage.** BARON does not accept trigonometric functions, so it rejects
 #   every problem containing `sin` or `cos` (8 of 21).
 # * **Speed.** From a cold start jaxglobal is the slowest solver here, with a
-#   median of about 4 s against 0.1–0.4 s for the others. Nearly all of that
+#   median of about 2.4 s against 0.1–0.4 s for the others. Nearly all of that
 #   is tracing and XLA compilation of the bounding kernels and the local solver
 #   for a new function. Solved again with the compiled code, the median is
-#   below 0.1 s, and the slowest problem (the reactor network) takes under 3 s.
+#   below 0.1 s, and the slowest problem (the reactor network) takes under 0.5 s.
 #   For one-off solves of small problems, compile time is therefore the main
 #   cost to reduce.
 # * **Expressiveness.** jaxglobal takes the function as written, including

@@ -53,17 +53,18 @@
    {
     "solver": "jax.nn.softplus",
     "obj": 0.7731076007300555,
-    "bound": 0.7730778822612531,
-    "time": 3.7860358329489827,
+    "bound": 0.7730585416177287,
+    "time": 2.016327291727066,
     "status": "optimal",
-    "nodes": 59
+    "nodes": 69
    },
    {
     "solver": "jax.scipy.stats.norm.cdf",
-    "obj": NaN,
-    "bound": NaN,
-    "time": NaN,
-    "status": "unsupported (KeyError)"
+    "obj": -664.4590207496797,
+    "bound": -664.5252208587162,
+    "time": 2.0662672920152545,
+    "status": "optimal",
+    "nodes": 2421
    }
   ],
   "note": "Pyomo cannot call jnp functions; jaxglobal works if primitives are supported"

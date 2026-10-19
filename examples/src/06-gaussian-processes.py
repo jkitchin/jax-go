@@ -35,8 +35,10 @@
 #
 # The paper's chemical datasets (N-benzylation, layer-by-layer membranes) are
 # not public in a form we can load here, so case 3 uses a synthetic two-output
-# process with the same structure. The membrane case also needs an integer
-# variable (number of layers), which jaxglobal does not support.
+# process with the same structure. The membrane case also has an integer
+# variable (number of layers); jaxglobal supports integer variables
+# (`minimize(..., integer=...)`), but without the data that case is not
+# repeated here.
 #
 # Like the paper, jaxglobal relaxes each kernel as one convex, decreasing
 # function of the squared distance (`jaxglobal.kernels`, see below). It has
@@ -315,7 +317,7 @@ scaling
 # term-by-term relaxation cannot see the cancellation between them. αBB, which
 # works on the whole sum, recovers it on small boxes. With the `jnp` formula
 # the same series took 1,079 to 91,289 nodes and several minutes at
-# $N = 400$; now the largest solve takes about 18 s. The times include JIT
+# $N = 400$; now the largest solve takes about 16 s. The times include JIT
 # compilation, which happens once for every new $N$, since the shapes change.
 
 # %%
@@ -616,15 +618,15 @@ plt.show()
 # uses the GP's own structure; and the EI and PI primitives, relaxed from
 # their convexity and monotonicity. With them every problem here is
 # certified to a $10^{-3}$ gap: GP means with up to 400 training points
-# (18 s), all four kernels, LCB, EI and PI (with and without a margin), a
+# (about 16 s), all four kernels, LCB, EI and PI (with and without a margin), a
 # chance constraint built from a second GP's standard deviation, and every
 # step of the Bayesian-optimization loop.
 #
 # What is still missing:
 #
-# * The integer number of layers in the paper's membrane case has no
-#   counterpart, since jaxglobal has no integer variables. For a small
-#   integer range one would solve one continuous problem per value.
+# * The paper's membrane case, with its integer number of layers, is not
+#   repeated, because its data are not available. jaxglobal accepts integer
+#   variables, so it could be posed directly with `integer=`.
 # * `gp_std`'s lower bound is constant on each box. A convex, non-constant
 #   one would tighten EI and PI further.
 #

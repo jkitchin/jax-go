@@ -16,7 +16,14 @@ separately:
 Claim 2 is the publishable niche. Claim 1 is what makes reviewers take it
 seriously.
 
-## Where the prototype stands
+## Where the prototype stood (historical)
+
+This table is the starting point of the roadmap, kept as written; "today"
+means the prototype before phase 0. Integers, pseudocost and strong
+branching, the Mehrotra IPM, lifted quadratic and polynomial LPs, symmetry
+pruning, pseudo-Boolean elimination and convex outer approximation have
+been added since. For the current state see *Status* and *How it works* in
+the [README](../README.md).
 
 | area | today | state of the art (BARON, SCIP, Couenne, MAiNGO, EAGO) |
 |---|---|---|

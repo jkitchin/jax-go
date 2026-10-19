@@ -130,21 +130,21 @@ ax2.set_title("Call time and the fit $t_0 + ck$", loc="left")
 fig.tight_layout()
 
 # %% [markdown]
-# For Hartmann-6 the bounder is cheap: about 0.05 ms of fixed cost per call
-# and about 5 µs per box. Batching pays off accordingly. Throughput rises from
-# roughly 25,000 boxes/s at one box per call to 150,000–180,000 at 64 boxes, and
-# to over 300,000 at 4096, more than ten times the unbatched rate (exact figures
+# For Hartmann-6 the bounder is cheap: about 0.02 ms of fixed cost per call
+# and about 3 µs per box. Batching pays off accordingly. Throughput rises from
+# roughly 55,000 boxes/s at one box per call to about 280,000 at 64 boxes, and
+# to over 400,000 at 4096, nearly eight times the unbatched rate (exact figures
 # vary by 10–20% from run to run). The
 # straight-line model is only approximate: the measured rate dips at 256 boxes
 # and then rises past the fitted $1/c$, because the per-box cost itself depends
 # on the batch size (memory traffic, vectorization). The overall shape is as
-# predicted: overhead dominates for $k \lesssim t_0/c \approx 10$, and the
+# predicted: overhead dominates for $k \lesssim t_0/c \approx 5$, and the
 # per-box cost dominates beyond that.
 #
-# For Haverly the per-box cost is about 1.5 ms, some three hundred times larger,
+# For Haverly the per-box cost is about 1.4 ms, some four hundred times larger,
 # because each box also solves an LP relaxation of the constraints. The fixed
 # cost is negligible next to that ($t_0/c \approx 1$), and batching gains only a
-# factor of two, from about 370 to about 720 boxes/s. The LP solve, not the
+# factor of two, from about 370 to 720–770 boxes/s. The LP solve, not the
 # call overhead, sets the speed of constrained bounding on this CPU.
 #
 # ## Compilation
@@ -163,7 +163,7 @@ ax.set_ylim(bottom=0)
 fig.tight_layout()
 
 # %% [markdown]
-# Compiling the bounder takes about 0.2 s for Hartmann-6 and about 0.8 s for
+# Compiling the bounder takes about 0.1–0.2 s for Hartmann-6 and about 0.5–0.7 s for
 # Haverly, roughly independent of the batch size. It is paid once per shape and
 # then amortized over every later call with that shape.
 #
