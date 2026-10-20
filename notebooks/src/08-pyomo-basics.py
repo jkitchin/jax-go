@@ -182,7 +182,7 @@ camel_rows = rows
 # %% [markdown]
 # Every solver that ran finds $-1.031628$. Notes on the columns:
 #
-# * *obj* is the best feasible value found; *bound* is the proven lower bound. Couenne's `.nl` interface does not return its final bound to Pyomo, so it is blank. Whether SCIP's appears depends on the SCIP build: some report the dual bound through the `.nl` solution message, others (such as the AMPL module build) do not, and then it is blank too.
+# * *obj* is the best feasible value found; *bound* is the proven lower bound. Couenne's `.nl` interface does not return its final bound to Pyomo, so it is blank. SCIP's comes back through the `.nl` solution, as part of the solve message for the classic SCIP binary and as a `bestbound` suffix for the AMPL MP build (`nbutil.solve_pyomo` handles both).
 # * Times are wall-clock for the whole call: for Pyomo solvers that includes writing the model file and starting the solver process; for jaxglobal the first call includes tracing and XLA compilation (the second call reuses the compiled kernels). The machine is loaded by other work, so only large ratios mean anything.
 # * `status` is whatever each solver reports. For SCIP we map "gap limit reached" (when that build reports it) to `optimal`, since the $10^{-4}$ relative gap is the stopping criterion we set.
 #
