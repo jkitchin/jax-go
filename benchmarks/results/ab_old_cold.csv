@@ -1,0 +1,8 @@
+solver,name,status,time,primal,dual,nodes,message,load
+jaxglobal,ex9_2_5,unsupported,16.137478970998927,,,,"unbounded variables: no finite bounds found for variables [3, 4, 5]",0.02
+jaxglobal,ex8_4_4,time_limit,69.34888268299983,0.21245983869020416,-0.20897303049376192,1,time_limit,0.54
+jaxglobal,himmel16,time_limit,60.25003158100117,-0.8660254036644128,-0.9530597451429269,3567,time_limit,2.75
+jaxglobal,launch,time_limit,63.55673577699963,2257.7975576307645,nan,0,time_limit,2.05
+jaxglobal,nvs09,time_limit,60.00096741299967,nan,nan,0,time_limit,3.30
+jaxglobal,tspn05,time_limit,60.20889060900117,191.25520780834475,189.55532241952739,1177,time_limit,2.99
+jaxglobal,flay03m,optimal,25.840300844000012,48.98979485579355,48.98903495609186,83,optimal,3.13
