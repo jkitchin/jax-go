@@ -575,14 +575,14 @@ P_ticks = [2, 3, 4, 5, 10, 20, 40, 60]
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.3), gridspec_kw={"width_ratios": [1.1, 1]})
 cs = ax1.contourf(PG, AG, cost_b / 1e3, levels=30, cmap="viridis")
 fig.colorbar(cs, ax=ax1, label="annual cost (k\\$/yr)")
-ax1.contourf(PG, AG, infeas, levels=[0.5, 1.5], colors=["#d9d8d2"])
 pb = np.linspace(P_min + 0.05, 60, 400)
 ab = a_min(pb)
 ok = ab <= 400
-ax1.plot(pb[ok], ab[ok], color=INK, lw=1.5, label="duty boundary $A_{min}(P)$")
+ax1.fill_between(np.r_[2.0, P_min, pb], 5, np.r_[400, 400, np.minimum(ab, 400)], color="#d9d8d2", lw=0, zorder=2)
+ax1.plot(pb[ok], ab[ok], color=INK, lw=1.5, zorder=3, label="duty boundary $A_{min}(P)$")
 ax1.axvline(P_min, color=MUTED, lw=1, ls="--", label=f"$T_{{sat}} = T_{{proc}}$ (P = {P_min:.2f} bar)")
 xb = rows_b[-1]["x"]
-ax1.plot(*xb, "*", color=ORANGE, ms=15, mec=INK, label="jaxglobal optimum")
+ax1.plot(*xb, "*", color=ORANGE, ms=15, mec=INK, zorder=4, label="jaxglobal optimum")
 ax1.set_xscale("log")
 ax1.set_xticks(P_ticks, [str(t) for t in P_ticks])
 ax1.minorticks_off()
@@ -593,13 +593,17 @@ ax1.legend(frameon=False, fontsize=8, loc="upper right")
 ax1.grid(False)
 
 P_400 = float(np.interp(TPROC + QREQ / (UCOEF * 400), T_TAB, P_TAB))  # where A_min(P) = 400 m2, the area bound
-pb2 = np.linspace(P_400, 12, 1000)
+pb2 = np.linspace(P_400, 7, 1000)
 ab2 = a_min(pb2)
 cb = np.asarray(jax.vmap(steam)(jnp.asarray(np.stack([pb2, ab2], 1))))
 hx = 600.0 * ab2**0.65
 ax2.plot(pb2, cb / 1e3, color=INK, lw=2, label="total on the boundary")
 ax2.plot(pb2, (cb - hx) / 1e3, color=BLUE, lw=1.5, label="steam bill")
-ax2.plot(pb2, hx / 1e3, color=AQUA, lw=1.5, label="exchanger $600A_{min}^{0.65}$")
+ax2b = ax2.twinx()
+ax2b.plot(pb2, hx / 1e3, color=AQUA, lw=1.5)
+ax2b.set_ylabel("exchanger $600A_{min}^{0.65}$ (k\\$/yr)", color=AQUA)
+ax2b.spines["right"].set_visible(True)
+ax2b.grid(False)
 for p in P_TAB[(P_TAB > pb2[0]) & (P_TAB < pb2[-1])]:
     ax2.axvline(p, color=MUTED, lw=0.8, ls=":")
 for r in rows_b:
@@ -647,9 +651,15 @@ names = [*SOLVERS, "jaxglobal"]
 w = 0.8 / len(names)
 for k, s in enumerate(names):
     t = [r["time"] if np.isfinite(r["obj"]) else np.nan for rr in (rows, rows_b) for r in rr if r["solver"] == s]
-    axes[0].bar(np.arange(2) + (k - (len(names) - 1) / 2) * w, t, w, color=COLOR[s], label=s)
+    xpos = np.arange(2) + (k - (len(names) - 1) / 2) * w
+    axes[0].bar(xpos, t, w, color=COLOR[s], label=s)
+    for xp, tt in zip(xpos, t):
+        if not np.isfinite(tt):
+            axes[0].text(xp, 0.12, "not run", rotation=90, ha="center", va="bottom", fontsize=8, color=MUTED)
 axes[0].set_yscale("log")
-axes[0].set_ylabel("wall time (s)")
+axes[0].set_ylabel("wall time (s, log scale)")
+axes[0].yaxis.set_major_formatter(plt.ScalarFormatter())
+axes[0].set_ylim(0.1, None)
 for ax in axes:
     ax.set_xticks([0, 1], ["A: pipe", "B: steam"])
 for k, (lab, vals, c) in enumerate([("Pyomo", [loc_a[0], loc_b[0]], BLUE), ("jaxglobal", [loc_a[1], loc_b[1]], ORANGE)]):
@@ -658,6 +668,8 @@ axes[1].set_ylabel("lines of model code")
 axes[2].bar(np.arange(2) - 0.175, [bin_a, bin_b], 0.35, color=BLUE, label="Pyomo")
 axes[2].bar(np.arange(2) + 0.175, [0, 0], 0.35, color=ORANGE, label="jaxglobal")
 axes[2].set_ylabel("binary variables")
+for i in range(2):
+    axes[2].text(i + 0.175, 0.2, "0", ha="center", color=ORANGE)
 for ax, title in zip(axes, ["Solve time", "Model size", "Binaries"]):
     ax.set_title(title, loc="left")
     ax.legend(frameon=False, fontsize=8)

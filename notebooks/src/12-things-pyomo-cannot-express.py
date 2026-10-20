@@ -221,9 +221,10 @@ rows_pipe = [solve_pyomo(pipe_pyomo(), s) for s in ("scip", "couenne", "baron")]
 table(rows_pipe)
 
 # %% [markdown]
-# **Reading the result.** The objectives agree to the accuracy of the 4-iteration approximation: the relative
-# difference between the jaxglobal and SCIP objectives, printed below, is of the same order as the error of $f$ after
-# 4 iterations at the optimum's Reynolds number. Pyomo's version has a different (arguably better) property, an exact friction factor, at the price of an
+# **Reading the result.** The objectives agree to the accuracy of the 4-iteration approximation. The friction
+# factor enters only the pumping term, so the relative difference between the jaxglobal and SCIP objectives (printed
+# below) should be about the error of $f$ after 4 iterations at the optimum's Reynolds number, scaled down by the
+# ratio of pumping cost to the objective. Pyomo's version has a different (arguably better) property, an exact friction factor, at the price of an
 # additional nonconvex constraint for the solver to branch on. In jaxglobal the iteration count is a modelling
 # choice you control.
 #
@@ -662,8 +663,8 @@ ax1.set_yscale("log")
 ax1.set_xticks(range(len(cases)), list(cases))
 ax1.set_ylabel("wall time (s)")
 ax1.set_title("Solve time per case", loc="left")
-handles = [plt.Rectangle((0, 0), 1, 1, color=STYLE[s][0]) for s in STYLE]
-ax1.legend(handles, list(STYLE), frameon=False, fontsize=8)
+ran = [s for s in STYLE if any(r["solver"] == s and np.isfinite(r["time"]) for rows in cases.values() for r in rows)]
+ax1.legend([plt.Rectangle((0, 0), 1, 1, color=STYLE[s][0]) for s in ran], ran, frameon=False, fontsize=8)
 for i, (case, (lp, lj)) in enumerate(loc_cases.items()):
     ax2.bar(i - 0.15, lp, 0.3, color=BLUE)
     ax2.bar(i + 0.15, lj, 0.3, color=ORANGE)
