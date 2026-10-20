@@ -11,7 +11,7 @@
 # ---
 
 # %% [markdown]
-# # 01. The basics: two problems where both tools are easy
+# # 08. The basics: two problems where both tools are easy
 #
 # Before looking at cases where the two approaches differ, we need a baseline.
 # Here are two problems that a Pyomo user would write without any trouble:
@@ -331,7 +331,8 @@ for a, b, lab in [("A", "pool", "$A$"), ("B", "pool", "$B$"), ("pool", "x", "$P_
                 arrowprops=dict(arrowstyle="-|>", color=ORANGE if a == "pool" else MUTED, lw=1.5, mutation_scale=12,
                                 patchA=txt[a].get_bbox_patch(), patchB=txt[b].get_bbox_patch(), shrinkA=2, shrinkB=2))
     (x0, y0), (x1, y1) = nodes_xy[a], nodes_xy[b]
-    ax.text(0.45 * x0 + 0.55 * x1, 0.45 * y0 + 0.55 * y1 + 0.13, lab, ha="center", fontsize=10, color=INK)
+    w, dx = (0.7, -0.2) if lab == "$C_x$" else (0.45, 0)  # keep the C_x label clear of the P_y arrow
+    ax.text(w * x0 + (1 - w) * x1 + dx, w * y0 + (1 - w) * y1 + 0.13, lab, ha="center", fontsize=10, color=INK)
 ax.set_title("Haverly's pooling network; orange flows carry the unknown pool quality $p$")
 plt.tight_layout()
 plt.show()

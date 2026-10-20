@@ -266,8 +266,7 @@ Re_opt = RHO * 4 * xj[0] / (np.pi * MU * xj[1])
 print(f"grid minimum {float(grid.min()):.1f}  (coarse; jaxglobal {rows[-1]['obj']:.1f})")
 print(f"jaxglobal optimum: Q = {xj[0]:.5f} m3/s, D = {xj[1]:.4f} m, Re = {Re_opt:.0f} "
       f"({'laminar' if Re_opt < 2300 else 'turbulent'} side of the switch)")  # fmt: skip
-pyomo_xa = {s: (pyo.value(mm.Q), pyo.value(mm.D)) for s, mm in models_a.items() if np.isfinite(r["obj"])
-            for r in [rows[SOLVERS.index(s)]]}  # fmt: skip
+pyomo_xa = {s: (pyo.value(models_a[s].Q), pyo.value(models_a[s].D)) for s, r in zip(SOLVERS, rows) if np.isfinite(r["obj"])}
 for s, (q, d) in pyomo_xa.items():
     print(f"{s:>9}: Q = {q:.5f} m3/s, D = {d:.4f} m, Re = {4 * RHO * q / (np.pi * MU * d):.0f}")
 
@@ -368,24 +367,22 @@ print(f"root-box interval of the objective: [{float(f_root.lo)}, {float(f_root.h
 
 # %%
 def plot_history(ax, res, ref, title):
-    h = np.array(res.history, dtype=float)  # (iteration, nodes, lower bound, upper bound, open boxes)
-    ax.plot(h[:, 0], h[:, 3] - ref, "o-", color=ORANGE, lw=2, ms=4, label="upper bound (incumbent)")
+    h = np.array(res.history, dtype=float)  # rows: (iteration, nodes so far, lower bound, upper bound, open boxes)
+    ax.plot(h[:, 1], h[:, 3] - ref, "o-", color=ORANGE, lw=2, ms=4, label="upper bound (incumbent)")
     fin = np.isfinite(h[:, 2])
-    ax.plot(h[fin, 0], h[fin, 2] - ref, "s--", color=ORANGE, lw=1.5, ms=4, mfc="white", label="lower bound")
+    ax.plot(h[fin, 1], h[fin, 2] - ref, "s--", color=ORANGE, lw=1.5, ms=4, mfc="white", label="lower bound")
     if (~fin).any():
-        ax.axvspan(h[0, 0] - 0.5, h[~fin, 0].max() + 0.5, color=MUTED, alpha=0.12, lw=0, label="lower bound $= -\\infty$")
+        ax.axvspan(0, h[~fin, 1].max(), color=MUTED, alpha=0.12, lw=0, label="lower bound $= -\\infty$")
     tol = 1e-4 * abs(ref)
     ax.axhspan(-tol, tol, color=AQUA, alpha=0.2, lw=0, label="± rel. tolerance 1e-4")
     ax.set_yscale("symlog", linthresh=tol)
-    ax.set_xlabel("iteration")
+    ax.set_xlabel("nodes explored")
     ax.set_title(title, loc="left")
-    for it, nodes in h[:: max(1, len(h) // 6), :2]:
-        ax.annotate(f"{int(nodes)}", (it, ax.get_ylim()[0]), fontsize=7, color=MUTED, ha="center", va="bottom")
 
 
 ref_a = np.nanmin([r["obj"] for r in rows])
 fig, ax = plt.subplots(figsize=(6.5, 3.8))
-plot_history(ax, res_a, ref_a, "A: jaxglobal bounds (grey numbers: nodes so far)")
+plot_history(ax, res_a, ref_a, "A: jaxglobal bounds per iteration")
 ax.set_ylabel("bound − best objective found by any solver (\\$/yr)")
 ax.legend(frameon=False, fontsize=8)
 fig.tight_layout()
@@ -394,9 +391,9 @@ print(f"{res_a.iterations} iterations, {res_a.nodes} nodes, final gap {res_a.gap
       f"(tolerance {1e-4 * abs(res_a.fun):.3g})")  # fmt: skip
 
 # %% [markdown]
-# The incumbent is close to the optimum almost from the start (the local solver finds it). The work is in the lower bound:
-# it stays at $-\infty$ until the boxes that reach the pole have been split away, and once it is finite it closes within a
-# few iterations. Pyomo avoids this particular trap because $Re$ is a variable with tight hand-made bounds, which is the
+# Read the plot from left to right: the upper bound only moves when a better point is found, while the lower bound is $-\infty$ as long as some open box still reaches the pole.
+# Once those boxes are split small enough that the computed range of $Re$ stays clear of the pole, the bound becomes finite
+# and the gap closes to the tolerance band. Pyomo avoids this particular trap because $Re$ is a variable with tight hand-made bounds, which is the
 # kind of reformulation a modeler adds for exactly this reason; the price is that the modeler must think of it.
 #
 # ## B. Steam-heated exchanger with property tables
@@ -476,8 +473,8 @@ def steam_ineq(x):
 
 # %% [markdown]
 # The three tables and their hinge-sum interpolants, with `jnp.interp` evaluated (as plain JAX, outside the solver) on top
-# as a check. $T_{sat}(P)$ is concave, so its chords lie below the true curve between table points. The vertical line marks
-# the pressure jaxglobal chooses below.
+# as a check. $T_{sat}(P)$ is concave, so its chords lie below the true curve between table points: the interpolant
+# slightly underestimates the driving temperature difference.
 
 # %%
 Pp = np.linspace(2, 60, 600)
@@ -495,7 +492,6 @@ for ax, (tab, lab) in zip(axes, tabs):
     print(f"{lab.split(' (')[0]:>32}: max |pwl - interp| = {np.abs(yh - yi).max():.2e}")
 axes[0].axhline(TPROC, color=MUTED, lw=1, ls="--", label="$T_{proc}$")
 axes[0].legend(frameon=False, fontsize=8)
-TAB_AXES = axes
 fig.tight_layout()
 plt.show()
 
@@ -544,8 +540,7 @@ lp, lj = loc(steam_pyomo), loc(pwl, steam, steam_ineq)
 save_results("09", "B: steam tables (interp, max)", lp, lj, size_b, rows_b, note=f"{n_binary(m)} binaries from Piecewise")
 print(f"lines of model code: Pyomo {lp}, jaxglobal {lj} (including the pwl helper)")
 print("jaxglobal optimum: P = %.2f bar, A = %.1f m2" % tuple(rows_b[-1]["x"]))
-pyomo_xb = {s: (pyo.value(mm.P), pyo.value(mm.A)) for s, mm in models_b.items() if np.isfinite(r["obj"])
-            for r in [rows_b[SOLVERS.index(s)]]}  # fmt: skip
+pyomo_xb = {s: (pyo.value(models_b[s].P), pyo.value(models_b[s].A)) for s, r in zip(SOLVERS, rows_b) if np.isfinite(r["obj"])}
 for s, (p, a) in pyomo_xb.items():
     print(f"{s:>9}: P = {p:.2f} bar, A = {a:.1f} m2")
 loc_b, bin_b = (lp, lj), n_binary(m)
@@ -617,7 +612,7 @@ plt.show()
 
 # %%
 fig, ax = plt.subplots(figsize=(6.5, 3.8))
-plot_history(ax, res_b, np.nanmin([r["obj"] for r in rows_b]), "B: jaxglobal bounds (grey numbers: nodes so far)")
+plot_history(ax, res_b, np.nanmin([r["obj"] for r in rows_b]), "B: jaxglobal bounds per iteration")
 ax.set_ylabel("bound − best objective found by any solver (\\$/yr)")
 ax.legend(frameon=False, fontsize=8)
 fig.tight_layout()
@@ -636,9 +631,7 @@ fig, axes = plt.subplots(1, 3, figsize=(13, 3.6))
 names = ["scip", "couenne", "baron", "jaxglobal"]
 w = 0.2
 for k, s in enumerate(names):
-    t = [next(r["time"] for r in rr if r["solver"] == s) for rr in (rows, rows_b)]
-    ok = [r for rr in (rows, rows_b) for r in rr if r["solver"] == s]
-    t = [r["time"] if np.isfinite(r["obj"]) else np.nan for r in ok]
+    t = [r["time"] if np.isfinite(r["obj"]) else np.nan for rr in (rows, rows_b) for r in rr if r["solver"] == s]
     axes[0].bar(np.arange(2) + (k - 1.5) * w, t, w, color=COLOR[s], label=s)
 axes[0].set_yscale("log")
 axes[0].set_ylabel("wall time (s)")
@@ -673,7 +666,7 @@ for rr, case in ((rows, "A"), (rows_b, "B")):
 # * `where`, `clip` and `maximum` are traced as ordinary primitives; no auxiliary variables, no bounds on intermediates, no binaries.
 # * `jnp.interp` is **not supported yet** (no rule for the `lt_to` comparison inside its `searchsorted`). The hinge-sum workaround above works but is something the user must know about.
 # * jaxglobal is slower here: compare the times printed above. Its wall time includes tracing and compiling the bounding
-#   kernels on the first call (notebook 08 measures that cost separately), and the machine these notebooks run on is shared,
+#   kernels on the first call (notebook 05 measures that cost separately), and the machine these notebooks run on is shared,
 #   so only large ratios mean anything. Branch-and-bound over a discontinuous function (`where`) relies on interval tests and is not tuned.
 # * The discontinuous friction switch is handled by hulling the two branches in boxes that straddle $Re=2300$. Because both
 #   branches are bounded on such boxes, a branch that is never selected can still spoil the bound, as the Swamee-Jain pole
