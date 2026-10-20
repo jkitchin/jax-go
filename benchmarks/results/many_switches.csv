@@ -11,3 +11,5 @@ scip,logic,motor_lines_26,optimal,unknown,25.980788,129894.00519784183,129887.02
 scip,logic,water_main_26,optimal,correct,0.484616,173876.83521391673,173860.6108293987,3,173876.835214,6,21,pyscipopt 6.3.0: gaplimit [pyomo build 0.3s]
 scip,logic,motor_lines_104,optimal,unknown,28.735559,129810.44242781334,129810.44242781334,11509,,6,20,pyscipopt 6.3.0: optimal [pyomo build 0.2s]
 scip,logic,water_main_104,optimal,correct,0.473145,171820.19076765288,171813.86250171837,3,171820.190768,6,21,pyscipopt 6.3.0: gaplimit [pyomo build 0.2s]
+scip,logic,motor_lines_416,time_limit,unknown,600.000197,129804.41149593802,116960.89511390057,274931,,6,20,pyscipopt 6.3.0: timelimit [pyomo build 0.2s]
+scip,logic,water_main_416,optimal,correct,0.7383109999999999,171703.73353223136,171691.06668251826,1,171703.733532,6,21,pyscipopt 6.3.0: gaplimit [pyomo build 0.2s]
