@@ -183,28 +183,30 @@ reach f\*, which shows how multimodal each problem is.
 
 | problem | n | f\* (lit.) | found | proven LB | root LB | mstart | nodes | time |
 |---|---|---|---|---|---|---|---|---|
-| gramacy_lee | 1 | −0.869011 | −0.869011 | −0.869011 | −1 | 15% | 5 | 2.4s |
-| six_hump_camel | 2 | −1.031628 | −1.031628 | −1.031632 | −156 | 95% | 21 | 2.3s |
-| mccormick | 2 | −1.913223 | −1.913223 | −1.913224 | −13.5 | 55% | 11 | 1.1s |
-| goldstein_price | 2 | 3.000000 | 3.000000 | 2.999998 | −8.79e7 | 60% | 1441 | 2.9s |
-| shubert | 2 | −186.730909 | −186.730909 | −186.731070 | −225 | 0% | 277 | 2.3s |
-| michalewicz_2d | 2 | −1.801303 | −1.801303 | −1.801303 | −2 | 5% | 11 | 2.2s |
-| holder_table | 2 | −19.208503 | −19.208503 | −19.208518 | −33.2 | 0% | 279 | 2.4s |
-| eggholder | 2 | −959.640663 | −959.640663 | −959.640711 | −1.07e3 | 0% | 41 | 1.5s |
-| hartmann3 | 3 | −3.862782 | −3.862780 | −3.862789 | −8.4 | 50% | 91 | 1.6s |
-| styblinski_tang_3d | 3 | −117.498497 | −117.498497 | −117.498551 | −638 | 15% | 9 | 1.5s |
-| shekel10_4d | 4 | −10.536443† | −10.536443 | −10.536453 | −35.4 | 25% | 67 | 1.8s |
-| hartmann6 | 6 | −3.322368 | −3.322368 | −3.322377 | −8.4 | 55% | 1035 | 1.6s |
-| piecewise_2d (where/abs/max) | 2 | — | −0.823199 | −0.823202 | −3.7 | 25% | 29 | 1.8s |
-| tanh_net_2d (16-unit MLP) | 2 | — | −0.553102 | −0.553105 | −2.8 | 30% | 239 | 1.3s |
+| gramacy_lee | 1 | −0.869011 | −0.869011 | −0.869011 | −1 | 15% | 5 | 10.7s |
+| six_hump_camel | 2 | −1.031628 | −1.031628 | −1.031629 | −156 | 95% | 23 | 7.5s |
+| mccormick | 2 | −1.913223 | −1.913223 | −1.913224 | −13.5 | 55% | 11 | 7.0s |
+| goldstein_price | 2 | 3.000000 | 3.000000 | 2.999998 | −8.79e7 | 60% | 1447 | 18.1s |
+| shubert | 2 | −186.730909 | −186.730909 | −186.731070 | −225 | 0% | 277 | 18.0s |
+| michalewicz_2d | 2 | −1.801303 | −1.801301 | −1.801303 | −2 | 5% | 9 | 14.9s |
+| holder_table | 2 | −19.208503 | −19.208503 | −19.208518 | −33.2 | 0% | 279 | 18.5s |
+| eggholder | 2 | −959.640663 | −959.640663 | −959.640711 | −1.07e3 | 0% | 41 | 12.6s |
+| hartmann3 | 3 | −3.862782 | −3.862780 | −3.862786 | −8.4 | 50% | 89 | 11.3s |
+| styblinski_tang_3d | 3 | −117.498497 | −117.498497 | −117.498551 | −638 | 15% | 9 | 9.6s |
+| shekel10_4d | 4 | −10.536443† | −10.536443 | −10.536453 | −35.4 | 25% | 67 | 11.1s |
+| hartmann6 | 6 | −3.322368 | −3.322368 | −3.322377 | −8.4 | 55% | 1035 | 11.2s |
+| piecewise_2d (where/abs/max) | 2 | — | −0.823199 | −0.823202 | −3.7 | 25% | 31 | 16.8s |
+| tanh_net_2d (16-unit MLP) | 2 | — | −0.553102 | −0.553105 | −2.8 | 30% | 239 | 8.6s |
 
 † The usual −10.5364 is f(4,4,4,4); the true minimizer is slightly off that point.
 Times are wall-clock on a laptop CPU for a first (cold) call, so they are
 mostly JIT compilation; a second solve of the same function reuses the
 compiled kernels and takes a small fraction of that (see notebook 04). For the two
 problems without a published optimum, the tests check the certificate against
-a 401×401 brute-force grid. Measured at 2ae4c39 (2026-10-18), before PR #76;
-re-run pending.
+a 401×401 brute-force grid. Re-run on 2026-10-20 on current `main` (after PRs
+#76, #77 and #81) on a 4-core 2.1 GHz cloud VM; the node counts are within a few
+nodes of the earlier laptop run at 2ae4c39, and the times are 4–8× longer, most of
+it compilation on the slower machine.
 
 ![convergence](figures/convergence.png)
 
@@ -245,13 +247,13 @@ relaxations.
 
 | problem | n | f\* | found | proven LB | nodes | time |
 |---|---|---|---|---|---|---|
-| G06 | 2 | −6961.813876 | −6961.813876 | −6961.817313 | 11 | 2.7s |
-| G08 | 2 | −0.095825 | −0.095825 | −0.095828 | 19 | 4.8s |
-| G11 (equality) | 2 | 0.750000 | 0.750000 | 0.749999 | 7 | 0.8s |
-| G24 (disconnected feasible set) | 2 | −5.508013 | −5.508013 | −5.508016 | 43 | 1.5s |
-| G04 | 5 | −30665.538672 | −30665.538672 | −30665.561787 | 13 | 5.0s |
-| Haverly pooling | 9 | −400.000000 | −400.000019 | −400.000115 | 17 | 4.9s |
-| Reactor network | 6 | −0.388811 | −0.388811 | −0.388821 | 159 | 5.0s |
+| G06 | 2 | −6961.813876 | −6961.813876 | −6961.817327 | 11 | 18.0s |
+| G08 | 2 | −0.095825 | −0.095825 | −0.095830 | 15 | 28.2s |
+| G11 (equality) | 2 | 0.750000 | 0.750000 | 0.749999 | 7 | 6.2s |
+| G24 (disconnected feasible set) | 2 | −5.508013 | −5.508013 | −5.508016 | 43 | 8.7s |
+| G04 | 5 | −30665.538672 | −30665.538672 | −30665.540938 | 19 | 28.3s |
+| Haverly pooling | 9 | −400.000000 | −400.000000 | −400.000076 | 17 | 11.3s |
+| Reactor network | 6 | −0.388811 | −0.388811 | −0.388821 | 159 | 19.7s |
 
 Equality optima can sit slightly below f\* because of `feas_tol` (1e-6).
 
@@ -324,16 +326,17 @@ the peaks function (Matérn 5/2, abs/rel gap 1e-3), same answers:
 
 | training points | nodes, `jnp` formula | nodes, `kernels.matern52` | time |
 |---:|---:|---:|---|
-| 20 | 1079\* | 89 | — |
-| 50 | 3489 | 425 | 10.8 s → 1.4 s |
-| 100 | 6165\* | 665 | — |
-| 200 | 23191 | 2343 | 77.8 s → 8.3 s |
+| 20 | 1079\* | 81 | — |
+| 50 | 3477 | 411 | 13.8 s → 1.2 s |
+| 100 | 6165\* | 647 | — |
+| 200 | 22449 | 2253 | 56.4 s → 11.9 s |
 
-Nodes and times are the stored outputs of notebook 06 (one session; the
-`kernels` solve at N = 50 reuses kernels compiled earlier in it). \*Not
+Nodes and times are the stored outputs of notebook 06, re-run on 2026-10-20 on
+current `main` (after PRs #76, #77 and #81) on a 4-core cloud VM (one session;
+the `kernels` solve at N = 50 reuses kernels compiled earlier in it). \*Not
 reproduced by the stored notebook: from runs on or before 2026-10-17, as is
 the `jnp` count for Matérn 3/2 at N = 50, 1917 nodes (429 with
-`kernels.matern32`, as in the notebook). All before PR #76; re-run pending.
+`kernels.matern32`, as in the notebook).
 SE and Matérn 1/2 are unchanged: their `jnp` formulas were already relaxed
 exactly.
 
@@ -344,7 +347,7 @@ value, and its relaxation uses the GP's structure: the quadratic form as a sum
 of squares, and the bound `|σ(x) − σ(c)| ≤ sd_prior(f(x) − f(c))`, which holds
 because the posterior is itself a Gaussian process and does not involve
 `K⁻¹`. On a 95% chance constraint (`mean + 1.96 std ≤ c`) the solve is now
-certified in 2807 nodes and 15.0 s (notebook 06's stored output), where the
+certified in 2759 nodes and 31.0 s (notebook 06's stored output), where the
 formula did not close in 120 s (140k nodes; a run on or before 2026-10-17,
 not reproduced by the stored notebook). `gp_mean` is the matching mean.
 
@@ -354,8 +357,8 @@ monotone function it is (the perspective of `zΦ(z) + φ(z)`), with the concave
 envelope over the `(mu, sigma)` box, and
 `probability_of_improvement(mu, sigma, target)` from its monotonicity plus the
 exact envelopes of `Φ`, instead of `Φ`, `φ` and the division one by one. On
-the 20-point GP of notebook 06, with `gp_std`: EI 1401 → 765 nodes, PI 727 →
-451. The 765 and 451 are in the notebook's stored outputs; the formula counts
+the 20-point GP of notebook 06, with `gp_std`: EI 1401 → 683 nodes, PI 727 →
+491. The 683 and 491 are in the notebook's stored outputs; the formula counts
 (1401, 727) and the warm times measured with them (EI 0.9 s → 0.4 s, PI
 0.55 s → 0.4 s) are from runs on or before 2026-10-17 and are not reproduced
 by the stored notebook. [`notebooks/06-gaussian-processes.ipynb`](notebooks/06-gaussian-processes.ipynb)

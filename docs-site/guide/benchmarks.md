@@ -108,28 +108,30 @@ reach f\*, which shows how multimodal each problem is.
 
 | problem | n | f\* (lit.) | found | proven LB | root LB | mstart | nodes | time |
 |---|---|---|---|---|---|---|---|---|
-| gramacy_lee | 1 | −0.869011 | −0.869011 | −0.869011 | −1 | 15% | 5 | 2.4s |
-| six_hump_camel | 2 | −1.031628 | −1.031628 | −1.031632 | −156 | 95% | 21 | 2.3s |
-| mccormick | 2 | −1.913223 | −1.913223 | −1.913224 | −13.5 | 55% | 11 | 1.1s |
-| goldstein_price | 2 | 3.000000 | 3.000000 | 2.999998 | −8.79e7 | 60% | 1441 | 2.9s |
-| shubert | 2 | −186.730909 | −186.730909 | −186.731070 | −225 | 0% | 277 | 2.3s |
-| michalewicz_2d | 2 | −1.801303 | −1.801303 | −1.801303 | −2 | 5% | 11 | 2.2s |
-| holder_table | 2 | −19.208503 | −19.208503 | −19.208518 | −33.2 | 0% | 279 | 2.4s |
-| eggholder | 2 | −959.640663 | −959.640663 | −959.640711 | −1.07e3 | 0% | 41 | 1.5s |
-| hartmann3 | 3 | −3.862782 | −3.862780 | −3.862789 | −8.4 | 50% | 91 | 1.6s |
-| styblinski_tang_3d | 3 | −117.498497 | −117.498497 | −117.498551 | −638 | 15% | 9 | 1.5s |
-| shekel10_4d | 4 | −10.536443† | −10.536443 | −10.536453 | −35.4 | 25% | 67 | 1.8s |
-| hartmann6 | 6 | −3.322368 | −3.322368 | −3.322377 | −8.4 | 55% | 1035 | 1.6s |
-| piecewise_2d (where/abs/max) | 2 | — | −0.823199 | −0.823202 | −3.7 | 25% | 29 | 1.8s |
-| tanh_net_2d (16-unit MLP) | 2 | — | −0.553102 | −0.553105 | −2.8 | 30% | 239 | 1.3s |
+| gramacy_lee | 1 | −0.869011 | −0.869011 | −0.869011 | −1 | 15% | 5 | 10.7s |
+| six_hump_camel | 2 | −1.031628 | −1.031628 | −1.031629 | −156 | 95% | 23 | 7.5s |
+| mccormick | 2 | −1.913223 | −1.913223 | −1.913224 | −13.5 | 55% | 11 | 7.0s |
+| goldstein_price | 2 | 3.000000 | 3.000000 | 2.999998 | −8.79e7 | 60% | 1447 | 18.1s |
+| shubert | 2 | −186.730909 | −186.730909 | −186.731070 | −225 | 0% | 277 | 18.0s |
+| michalewicz_2d | 2 | −1.801303 | −1.801301 | −1.801303 | −2 | 5% | 9 | 14.9s |
+| holder_table | 2 | −19.208503 | −19.208503 | −19.208518 | −33.2 | 0% | 279 | 18.5s |
+| eggholder | 2 | −959.640663 | −959.640663 | −959.640711 | −1.07e3 | 0% | 41 | 12.6s |
+| hartmann3 | 3 | −3.862782 | −3.862780 | −3.862786 | −8.4 | 50% | 89 | 11.3s |
+| styblinski_tang_3d | 3 | −117.498497 | −117.498497 | −117.498551 | −638 | 15% | 9 | 9.6s |
+| shekel10_4d | 4 | −10.536443† | −10.536443 | −10.536453 | −35.4 | 25% | 67 | 11.1s |
+| hartmann6 | 6 | −3.322368 | −3.322368 | −3.322377 | −8.4 | 55% | 1035 | 11.2s |
+| piecewise_2d (where/abs/max) | 2 | — | −0.823199 | −0.823202 | −3.7 | 25% | 31 | 16.8s |
+| tanh_net_2d (16-unit MLP) | 2 | — | −0.553102 | −0.553105 | −2.8 | 30% | 239 | 8.6s |
 
 † The usual −10.5364 is f(4,4,4,4); the true minimizer is slightly off that point.
 Times are wall-clock on a laptop CPU for a first (cold) call, so they are
 mostly JIT compilation; a second solve of the same function reuses the
 compiled kernels and takes a small fraction of that (see [notebook 04](../notebooks/04-equation-based-solvers.ipynb)). For the two
 problems without a published optimum, the tests check the certificate against
-a 401×401 brute-force grid. Measured at 2ae4c39 (2026-10-18), before PR #76;
-re-run pending.
+a 401×401 brute-force grid. Re-run on 2026-10-20 on current `main` (after PRs
+#76, #77 and #81) on a 4-core 2.1 GHz cloud VM; the node counts are within a few
+nodes of the earlier laptop run at 2ae4c39, and the times are 4–8× longer, most of
+it compilation on the slower machine.
 
 ![Convergence of the bounds](../assets/figures/convergence.png)
 
