@@ -924,7 +924,7 @@ nodes, univariate_sum_20 513 → 201 (97 → 71 iterations), reactor 1053 →
 654, hartmann6 1099 → 634 (runs on 2026-10-17; data not checked in). Runs on
 2026-10-18, after `"auto"` became the default, gave other counts, quoted in
 the README: hartmann6 634 against 1081, univariate_sum_20 205 against 665,
-nn_tanh_5x8x2 575k against 244k. To be re-measured. Wall time, warm and with configurations
+nn_tanh_5x8x2 575k against 244k. Re-measured on 2026-10-20 on current main (`benchmarks/branching_2026_10.sh`, data in `benchmarks/results/branch_*`): against `width`, `strong` 0.83 nodes (geometric mean, fewer on 15 of 25), hartmann3 157 → 42, hartmann6 1099 → 634, univariate_sum_20 495 → 191, nn_tanh_5x8x2 251k → 575k; `pseudocost` 1.00. Wall time, warm and with configurations
 interleaved on a loaded machine (median of 2), on six problems: 0.84 of
 the default, with no problem more than 4% slower. In an earlier version
 that filled the whole batch, `_Q` = 3 cut iterations further than `_Q` = 2
@@ -1304,7 +1304,9 @@ stage 3 profile set:
   written here as 36 against 34; the README's 2026-10-18 correction, data not
   checked in); ex6_2_6
   and ex8_4_1 are the gains. On the int50 regression instances it lost
-  flay04m and slowed nous1 three times.)
+  flay04m and slowed nous1 three times. Re-measured on 2026-10-20 on current
+  main, warm: start50 pseudocost 40, width and strong 38; int50 width and
+  pseudocost 43 each, strong 41; `benchmarks/results/branch_*`.)
 * *Plunging* (item 6) is covered by the dives from the best children; it is
   not implemented as a node selection rule.
 * *Coefficient tightening* (item 7) is not done: the model is code, so
