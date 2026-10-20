@@ -187,7 +187,7 @@ print(f"lines of model code: Pyomo {lp}, jaxglobal {lj}")
 # %% [markdown]
 # The flow split sits at its bound: the shorter line carries 90%. Each pump runs just below a standard rating (the shortfall printed
 # above is a few hundredths of a percent, the size of the solver tolerance), so each motor is fully loaded. Which solver is faster
-# at 26 ratings depends on the SCIP build and the machine: in the benchmark file read below (SCIP 6.3 through `pyscipopt`), SCIP
+# at 26 ratings depends on the SCIP build and the machine: in the benchmark file read below (SCIP 10.0 through `pyscipopt` 6.3), SCIP
 # proved the optimum in 26 s against jaxglobal's 76 s; compare the live table above, which uses whatever `scip` binary is installed.
 #
 # ## Where the optimum sits, and what each solver sees

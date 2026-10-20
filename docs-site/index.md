@@ -34,12 +34,16 @@ solvers on general problems (see [Limitations](guide/correctness.md#limitations)
 * **Correct answers so far:** 0 wrong answers on the MINLPLib sets below, all
   checked against the library's reference bounds. Every returned point is
   re-checked in float64, and an opt-in `safe=True` mode rounds the bounds
-  outward.
+  outward. Outside MINLPLib, before PR #76 the solver certified a wrong
+  optimum on an application model (two parallel lines with motor price
+  lists: reported optimal 130186.35 while 130000.6 is attainable), caused by
+  invalid subgradients at near-ties; this is now fixed.
 * **MINLPLib against SCIP, October 2026** (`main` at 58bb551). An instance
   passes if jaxglobal proves it optimal within max(2 x SCIP's time, 10 s).
   "Cold" includes JAX compilation; "warm" reuses the compile caches from a
   previous run. SCIP has no compile step, so the cold numbers are the fair
-  comparison.
+  comparison. Measured at 58bb551 (2026-10-19), before PR #76 (relaxation
+  subgradient fix); re-run pending.
 
   | set | instances | pass, cold | pass, warm | where SCIP takes ≥ 0.5 s (warm) |
   |---|---:|---:|---:|---:|
@@ -72,7 +76,8 @@ solvers on general problems (see [Limitations](guide/correctness.md#limitations)
 * **global50, 60 s limit** (the 50-instance BARON comparison panel from
   discopt, `discopt_benchmarks/config/baron_global50.txt`). All solvers ran on
   the same machine. 48 of the 50 ran; casctanks and hda are missing from this
-  repo's MINLPLib tables.
+  repo's MINLPLib tables. Measured at 58bb551 (2026-10-19), before PR #76;
+  re-run pending.
 
   | | solved in 60 s | wrong answers | not solved in 60 s |
   |---|---:|---:|---|
@@ -92,7 +97,7 @@ solvers on general problems (see [Limitations](guide/correctness.md#limitations)
     tspn05, which SCIP leaves unsolved, but BARON solves all three faster.
 
 * **MINLPLib, 60 s limit, cold start (compilation included)**, measured on
-  2026-10-17, before the SCIP-gap work, and not re-run since:
+  2026-10-17, before the SCIP-gap work and PR #76, and not re-run since:
 
   | set | jaxglobal | SCIP |
   |---|---:|---:|
@@ -105,12 +110,13 @@ solvers on general problems (see [Limitations](guide/correctness.md#limitations)
   Branching comparisons ([Solver options](guide/solver-options.md#branch_var-which-variable-to-split)) were separate runs, so their counts differ.
 * **What it is for:** problems defined by code, which equation-based solvers
   cannot read at all or need rewritten by hand: `jnp.where` logic,
-  neural-network and Gaussian-process surrogates, ODE kinetics written as
-  Python loops.
+  neural-network and Gaussian-process surrogates, ODE kinetics integrated by
+  fixed-step loops (Python loops or `lax.scan`).
 
 Narrated, executed [notebooks](notebooks/index.md) walk through
 the relaxations, branch and bound, the test problems, the comparison with
-equation-based solvers, batched throughput and Gaussian-process surrogates.
+equation-based solvers, batched throughput and Gaussian-process surrogates
+(01–06), then compare jaxglobal with Pyomo model by model (07–13).
 
 ## How it works
 

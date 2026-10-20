@@ -4,7 +4,8 @@ Written 2026-10-17. Each workstream below is meant to be carried out by one
 agent on its own branch, with an independent reviewer agent per PR (section 9).
 
 Baseline (cold, 60 s, 4 jobs): start50 31/50 vs SCIP 44; int50 29/50 vs SCIP
-45; SGM 32.6 s vs 1.9 s and 35.9 s vs 1.35 s; 0 wrong answers
+45; SGM 30.7 s vs 1.9 s and 31.8 s vs 1.35 s at a 60 s cap (first written
+as 32.6 s and 35.9 s, capped at the longest recorded time); 0 wrong answers
 (`benchmarks/results/issue14_start50_cold.csv`, `issue14_int50_cold.csv`,
 `int50_scip.csv`).
 

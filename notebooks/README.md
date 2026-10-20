@@ -50,8 +50,8 @@ notebooks/run_all.sh                   # all of them, in order, 07 last; deletes
 ```
 
 Requirements: `jaxglobal` (imported from this repository), `jupytext`, `jupyter`/`nbconvert`, `matplotlib`; for 04 and 07–13 also
-`pyomo`, `pandas` and the solvers SCIP (`/opt/homebrew/bin/scip`), Couenne (`/Applications/AMPL/couenne`) and BARON via GAMS
-(paths in `nbutil.py`); 04 also uses LindoGlobal via GAMS (stored results are used unless `RUN_SOLVERS = True`); 11 needs `optax`
+`pyomo`, `pandas` and the solvers SCIP and Couenne, found on `PATH` (the classic SCIP binary or the AMPL MP build, e.g.
+`python -m amplpy.modules install scip coin`; see `nbutil.py`), and BARON via GAMS (without GAMS the BARON rows read "not run"); 04 also uses LindoGlobal via GAMS (stored results are used unless `RUN_SOLVERS = True`); 11 needs `optax`
 and `omlt`. The Pyomo comparisons use relative gap 1e-4 and at most 60 s per solve unless a notebook says otherwise.
 
 Most of the run time is JIT compilation: the first `minimize` call on a new function compiles the bounding kernels and the local

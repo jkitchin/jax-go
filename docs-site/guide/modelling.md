@@ -142,12 +142,16 @@ the peaks function (Matérn 5/2, abs/rel gap 1e-3), same answers:
 
 | training points | nodes, `jnp` formula | nodes, `kernels.matern52` | time |
 |---:|---:|---:|---|
-| 20 | 1079 | 89 | 28 s → 19 s |
-| 50 | 3489 | 425 | 22 s → 11 s |
-| 100 | 6165 | 665 | 44 s → 17 s |
-| 200 | 23191 | 2343 | 67 s → 8.7 s |
+| 20 | 1079\* | 89 | — |
+| 50 | 3489 | 425 | 10.8 s → 1.4 s |
+| 100 | 6165\* | 665 | — |
+| 200 | 23191 | 2343 | 77.8 s → 8.3 s |
 
-(cold solves, compilation included.) Matérn 3/2 at N = 50: 1917 → 429 nodes.
+Nodes and times are the stored outputs of notebook 06 (one session; the
+`kernels` solve at N = 50 reuses kernels compiled earlier in it). \*Not
+reproduced by the stored notebook: from runs on or before 2026-10-17, as is
+the `jnp` count for Matérn 3/2 at N = 50, 1917 nodes (429 with
+`kernels.matern32`, as in the notebook). All before PR #76; re-run pending.
 SE and Matérn 1/2 are unchanged: their `jnp` formulas were already relaxed
 exactly.
 
@@ -158,8 +162,9 @@ value, and its relaxation uses the GP's structure: the quadratic form as a sum
 of squares, and the bound `|σ(x) − σ(c)| ≤ sd_prior(f(x) − f(c))`, which holds
 because the posterior is itself a Gaussian process and does not involve
 `K⁻¹`. On a 95% chance constraint (`mean + 1.96 std ≤ c`) the solve is now
-certified in 2807 nodes and 11 s, where the formula did not close in 120 s
-(140k nodes). `gp_mean` is the matching mean.
+certified in 2807 nodes and 15.0 s (notebook 06's stored output), where the
+formula did not close in 120 s (140k nodes; a run on or before 2026-10-17,
+not reproduced by the stored notebook). `gp_mean` is the matching mean.
 
 The acquisition functions are primitives too:
 `expected_improvement(mu, sigma, fmin)` is relaxed as the jointly convex,
@@ -167,9 +172,11 @@ monotone function it is (the perspective of `zΦ(z) + φ(z)`), with the concave
 envelope over the `(mu, sigma)` box, and
 `probability_of_improvement(mu, sigma, target)` from its monotonicity plus the
 exact envelopes of `Φ`, instead of `Φ`, `φ` and the division one by one. On
-the 20-point GP of notebook 06, with `gp_std`: EI 1401 → 765 nodes (warm solve
-0.9 s → 0.4 s), PI 727 → 451 (0.55 s → 0.4 s; PI's first, compiling solve is
-slower). [Notebook 06](../notebooks/06-gaussian-processes.ipynb)
+the 20-point GP of notebook 06, with `gp_std`: EI 1401 → 765 nodes, PI 727 →
+451. The 765 and 451 are in the notebook's stored outputs; the formula counts
+(1401, 727) and the warm times measured with them (EI 0.9 s → 0.4 s, PI
+0.55 s → 0.4 s) are from runs on or before 2026-10-17 and are not reproduced
+by the stored notebook. [Notebook 06](../notebooks/06-gaussian-processes.ipynb)
 repeats the paper's case studies: GP means, acquisition functions, a chance
 constraint and a Bayesian-optimization loop.
 
