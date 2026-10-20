@@ -117,7 +117,7 @@ def sj(Re, D):  # Swamee-Jain, numpy version for plotting
     return 0.25 / np.log10(EPS / (3.7 * D) + 5.74 / Re**0.9) ** 2
 
 
-Re_plot = np.geomspace(20, 1e5, 400)
+Re_plot = np.geomspace(7.2, 1e5, 600)
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.5, 3.9))
 lam_side = Re_plot < 2300
 ax1.loglog(Re_plot[lam_side], 64 / Re_plot[lam_side], color=INK, lw=2, label="laminar $64/Re$")
@@ -129,16 +129,17 @@ ax1.axvspan(2300, 4000, color=YELLOW, alpha=0.15, lw=0, label="transition zone (
 ax1.axvline(2300, color=ORANGE, lw=1.2)
 ax1.set_xlabel("Reynolds number $Re$")
 ax1.set_ylabel("Darcy friction factor $f$")
-ax1.set_ylim(5e-3, 5)
+ax1.set_ylim(5e-3, 300)
 ax1.set_title("Friction factor: the `where` switch", loc="left")
 ax1.legend(frameon=False, fontsize=8)
 
-Qp = np.linspace(0, QHI, 400)
+Qp = np.geomspace(QLO, QHI, 400)
 ax2.plot(Qp * 1e3, np.clip(0.2 + 600 * Qp, 0.35, 0.75), color=BLUE, lw=2, label="clip(0.2 + 600 Q, 0.35, 0.75)")
 ax2.plot(Qp * 1e3, 0.2 + 600 * Qp, color=MUTED, lw=1, ls="--", label="unclipped 0.2 + 600 Q")
 pw_pts = [QLO, 2.5e-4, 0.55 / 600, QHI]
 ax2.plot(np.array(pw_pts) * 1e3, [0.35, 0.35, 0.75, 0.75], "o", color=ORANGE, mec=INK, label="Piecewise breakpoints")
 ax2.set_ylim(0.2, 0.9)
+ax2.set_xscale("log")
 ax2.set_xlabel("flow $Q$ (L/s)")
 ax2.set_ylabel(r"pump efficiency $\eta$")
 ax2.set_title("Pump efficiency: the `clip`", loc="left")
@@ -146,12 +147,13 @@ ax2.legend(frameon=False, fontsize=8, loc="lower right")
 fig.tight_layout()
 plt.show()
 for D in (0.03, 0.1, 0.3):
-    print(f"D = {D:4} m: f jumps from {64 / 2300:.4f} (laminar) to {sj(2300.0, D):.4f} (turbulent) at Re = 2300")
+    print(f"D = {D:4} m: f jumps from {64 / 2300:.4f} (laminar) to {sj(2300.0, D):.4f} (turbulent) at Re = 2300; "
+          f"Swamee-Jain pole at Re = {(5.74 / (1 - EPS / (3.7 * D))) ** (1 / 0.9):.2f}")
 
 # %% [markdown]
 # At $Re = 2300$ the turbulent correlation gives a friction factor well above the laminar one, so crossing the line from the
-# laminar side raises the pressure drop at once. Note also how the discarded turbulent branch (dashed) climbs steeply at low
-# $Re$: the argument of the logarithm approaches 1 and $f$ has a pole there. A `where` evaluates both branches, so this
+# laminar side raises the pressure drop at once. Note also how the discarded turbulent branch (dashed) shoots up at the
+# left edge: as $Re$ falls the argument of the logarithm approaches 1, and $f$ has a pole there (printed below). A `where` evaluates both branches, so this
 # matters for the bounds, as we will see.
 #
 # ### Pyomo
