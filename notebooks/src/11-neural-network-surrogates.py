@@ -518,7 +518,7 @@ for r in rows_omlt:
 # %% [markdown]
 # ## All runs at a glance
 #
-# Left: where each run ended, on the network over the whole box (runs that returned no point are absent; the colour is the
+# Left: where each run ended, on the network over the whole box, for jaxglobal and the exp-form and OMLT runs (runs that returned no point are absent; the colour is the
 # solver, the marker the formulation). Right: wall-clock time of every run, coloured by what it returned: a certified optimum (finite proven
 # bound, status `optimal`), a point without a certificate, or nothing. The times come from a shared machine and include writing the model (Pyomo)
 # or compiling (jaxglobal); read them as orders of magnitude.
@@ -567,7 +567,8 @@ ax2.text(TL, y[0] + 0.8, " time limit", fontsize=8, color=INK)
 ax2.set_yticks(y, [r["solver"] for r in rows_all], fontsize=8)
 ax2.set_xlabel("wall-clock time (s)")
 ax2.set_title("time per run, coloured by result", loc="left", fontsize=10)
-ax2.legend(handles=[Patch(color=c, label=v) for v, c in VERDICT_COLOR.items()], frameon=True, fontsize=8, loc="lower right")
+ax2.legend(handles=[Patch(color=c, label=v) for v, c in VERDICT_COLOR.items()], frameon=False, fontsize=8, ncol=4,
+           loc="upper center", bbox_to_anchor=(0.4, -0.08))
 ax2.grid(axis="y", visible=False)
 plt.show()
 
