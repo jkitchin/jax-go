@@ -274,6 +274,8 @@ plt.show()
 
 re_opt = float(pipe_parts(jnp.asarray(r_pipe_jax["x"]))[3])
 print(f"jaxglobal optimum: Q = {xq * 1e3:.2f} L/s, D = {xd:.4f} m, Re = {re_opt:.0f}")
+pump_share = float(pipe_parts(jnp.asarray(r_pipe_jax["x"]))[1] / abs(r_pipe_jax["obj"]))
+print(f"pumping cost / |objective| = {pump_share:.3f}")
 print(f"relative error of f after 4 iterations at this point: {abs(f_iterate(re_opt, xd, 4) / f_colebrook(re_opt, xd) - 1):.1e}")
 if np.isfinite(rows_pipe[0]["obj"]):
     print(f"relative difference of the objectives, jaxglobal vs SCIP: {abs(r_pipe_jax['obj'] / rows_pipe[0]['obj'] - 1):.1e}")
