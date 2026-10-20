@@ -205,8 +205,9 @@ plt.show()
 #   less from the dependency problem than layer-by-layer propagation. jaxglobal's `crown=True` computes it on every node and keeps the larger of
 #   the CROWN bound and its usual bound.
 #
-# The left panel shows the CROWN lines for one $\tanh$ on an interval that contains 0, together with the McCormick relaxation of $\tanh$ that
-# jaxglobal uses on the same interval. The right panel compares the three bounds on $f$ on square boxes centred at the global minimizer found
+# The left panel shows the CROWN lines for one $\tanh$ on an interval that contains 0, together with the relaxation that `jaxglobal.relax`
+# builds for a lone $\tanh$ on the same interval. On an interval this wide that relaxation is much looser than the two lines; it tightens as the
+# interval shrinks (notebook 01 shows how). The right panel compares the three bounds on $f$ on square boxes centred at the global minimizer found
 # below, as the half-width shrinks: it plots the gap between the smallest value of $f$ on a $101\times101$ grid in the box and each lower bound.
 # The "McCormick" curve is the larger of the interval bound and 20 Frank-Wolfe steps on the convex relaxation (`jaxglobal.make_bounder`);
 # the solver adds bound tightening and cuts on top, so this shows the building blocks, not the solver's exact node bound.
@@ -240,11 +241,12 @@ l, u = -2.5, 1.5
 zs = np.linspace(l, u, 301)
 al, cl, au, cu = (float(v) for v in UNARY["tanh"](jnp.asarray(l), jnp.asarray(u)))
 mc = jax.vmap(relax(lambda z: jnp.tanh(z[0])), in_axes=(0, None, None))(jnp.asarray(zs[:, None]), jnp.array([l]), jnp.array([u]))
-ax1.fill_between(zs, np.asarray(mc.cv), np.asarray(mc.cc), color=BLUE, alpha=0.12, lw=0, label="McCormick relaxation (jaxglobal)")
+ax1.fill_between(zs, np.asarray(mc.cv), np.asarray(mc.cc), color=BLUE, alpha=0.12, lw=0, label="convex/concave relaxation from relax(tanh)")
 ax1.plot(zs, np.tanh(zs), color=INK, lw=1.6, label=r"$\tanh z$")
 ax1.plot(zs, al * zs + cl, color=ORANGE, lw=1.3, label="CROWN lower line")
 ax1.plot(zs, au * zs + cu, color=ORANGE, lw=1.3, ls="--", label="CROWN upper line")
 ax1.set_xlabel("pre-activation $z$")
+ax1.set_ylabel("activation")
 ax1.set_title(f"bounds on one neuron, $z \\in [{l}, {u}]$", loc="left", fontsize=10)
 ax1.legend(frameon=False, fontsize=8, loc="upper left")
 for k, (lab, col) in enumerate((("interval", MUTED), ("McCormick", BLUE), ("CROWN", ORANGE))):
@@ -307,7 +309,7 @@ table(rows_jax)
 # relaxation of $\tanh(z_j)$ is only as good as the bounds on $z_j$. The model below gives $z_j$ no bounds; the solver has to derive them
 # from $x \in B$ by bound propagation before it can relax anything.
 #
-# **The activation.** `pyo.tanh` is the obvious choice for the activation. It does not work with the two solvers that return certified bounds here, as the next cells show.
+# **The activation.** `pyo.tanh` is the obvious choice for the activation. With it, none of the solvers here certifies the optimum within the time limit, as the next cells show.
 # We therefore also write tanh as
 #
 # $$ \tanh z = \frac{e^{2z} - 1}{e^{2z} + 1} = 1 - \frac{2}{e^{2z}+1}, $$
@@ -409,8 +411,12 @@ for name, builder in (("reduced", reduced), ("full", full)):
 table(rows_tanh)
 
 # %% [markdown]
-# SCIP's `.nl` reader rejects `tanh`, BARON (through GAMS) returns no solution, and Couenne accepts it but does not close the gap in the time limit (its status is a limit stop, and through `.nl` it reports no bound).
-# This is a solver limitation, not a modelling error. (BARON is only run where GAMS is installed; otherwise its rows say so.)
+# No run certifies the optimum. The SCIP build used here (SCIP 10 through AMPL's `.nl` interface) reads `tanh` but stops at the time limit.
+# Its reduced-space bound of $-10^{20}$ means no bound at all, its full-space bound is far below the optimum, and its reduced-space point can be
+# a local minimum rather than the global one (compare `obj` with jaxglobal's). Older SCIP `.nl` readers rejected `tanh` outright.
+# Couenne accepts it but does not close the gap in the time limit either (its status is a limit stop, and through `.nl` it reports no bound).
+# BARON (through GAMS), in an earlier run where it was installed, returned no solution for `tanh`; here it is not installed and its rows say so.
+# This is a solver limitation, not a modelling error: the relaxation of `tanh` is what the solvers lack, as the exponential form shows next.
 #
 # ### Exponential form of tanh
 #
@@ -512,12 +518,14 @@ for r in rows_omlt:
 # %% [markdown]
 # ## All runs at a glance
 #
-# Left: where each run ended, on a close-up of the network around the global minimizer (runs that returned no point are absent; the colour is the
+# Left: where each run ended, on the network over the whole box (runs that returned no point are absent; the colour is the
 # solver, the marker the formulation). Right: wall-clock time of every run, coloured by what it returned: a certified optimum (finite proven
 # bound, status `optimal`), a point without a certificate, or nothing. The times come from a shared machine and include writing the model (Pyomo)
 # or compiling (jaxglobal); read them as orders of magnitude.
 
 # %%
+from matplotlib.patches import Patch
+
 rows_all = rows_jax + rows_tanh + rows_exp + rows_omlt
 
 
@@ -531,12 +539,8 @@ SOLVER_COLOR = {"jaxglobal": BLUE, "scip": AQUA, "couenne": ORANGE, "baron": YEL
 VERDICT_COLOR = {"certified": BLUE, "point, not certified": YELLOW, "no solution": ORANGE, "not run": MUTED}
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13.5, 6.2), layout="constrained", gridspec_kw=dict(width_ratios=[1, 1.25]))
 
-xc = np.asarray(rows_jax[0]["x"])
 pts = [(r, np.asarray(r.get("x"))) for r in rows_all if r.get("x") is not None]
-half = max(0.02, 1.3 * max(np.abs(p - xc).max() for _, p in pts))
-zg = np.linspace(-half, half, 121)
-ZX = np.stack(np.meshgrid(xc[0] + zg, xc[1] + zg), -1).reshape(-1, 2)
-cs = ax1.contourf(xc[0] + zg, xc[1] + zg, np.asarray(surrogate(jnp.asarray(ZX))).reshape(121, 121), levels=25, cmap="viridis")
+cs = ax1.contourf(gg, gg, Fn, levels=25, cmap="viridis")
 fig.colorbar(cs, ax=ax1, shrink=0.8, label="$f(x)$")
 for r, p in pts:
     name = r["solver"]
@@ -563,9 +567,7 @@ ax2.text(TL, y[0] + 0.8, " time limit", fontsize=8, color=INK)
 ax2.set_yticks(y, [r["solver"] for r in rows_all], fontsize=8)
 ax2.set_xlabel("wall-clock time (s)")
 ax2.set_title("time per run, coloured by result", loc="left", fontsize=10)
-for v, c in VERDICT_COLOR.items():
-    ax2.barh([], [], color=c, label=v)
-ax2.legend(frameon=False, fontsize=8, loc="lower right")
+ax2.legend(handles=[Patch(color=c, label=v) for v, c in VERDICT_COLOR.items()], frameon=True, fontsize=8, loc="lower right")
 ax2.grid(axis="y", visible=False)
 plt.show()
 
@@ -583,10 +585,10 @@ print(f"lines of model code: Pyomo reduced {lp}, Pyomo full {lp_full}, jaxglobal
 # **In Pyomo**
 #
 # * Choosing the formulation. Reduced space has 2 variables but a deeply nested expression; full space has 34 variables and 32 constraints, with the nonconvexity pushed into simple univariate equations that solvers handle better, provided they can bound the pre-activations (see the pre-activation figure).
-# * The activation function. A solver that does not know `tanh` (SCIP, BARON here) needs a rewritten activation, and you only find this out by running it.
+# * The activation function. With native `tanh` no solver here certified the optimum (BARON returned nothing in the earlier run, SCIP and Couenne stop at the limit with no useful bound); the rewritten exponential form is what makes the model solvable, and you only find this out by running it.
 # * Every weight is re-entered as a Pyomo coefficient. A change of architecture means rewriting the builder (or using OMLT).
-# * Solver behaviour differs a lot on the same model (see the exp-form table and the summary figure). In an earlier run with GAMS installed, BARON proved the reduced-space model in a few seconds and stopped on the full-space form as `locallyOptimal` with a very weak bound; SCIP did better on the full-space form than on the reduced one, where it may hit the time limit; and
-#   Couenne did not converge on either in the limit.
+# * Solver behaviour differs a lot on the same model (see the exp-form table and the summary figure). SCIP's results depend on its version: the SCIP 10 build used here certifies both exp-form models (see the table), while an older build did better on the full-space form and could hit the time limit on the reduced one.
+#   In an earlier run with GAMS installed, BARON proved the reduced-space model in a few seconds and stopped on the full-space form as `locallyOptimal` with a very weak bound. Couenne did not converge on either in the limit.
 # * Strengths: where a solver does converge it gives a certified bound, and the full-space form carries into a MINLP (for example, choosing among discrete designs together with the surrogate).
 #
 # **In jaxglobal**

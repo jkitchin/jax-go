@@ -30,11 +30,15 @@
 #
 # The models are pipe networks whose pump motors are bought from a price list. In code, a price list is one line.
 #
-# Solver limits for the live comparison: relative gap 1e-4, at most 300 s (not the 60 s of the other notebooks: jaxglobal needs
-# about 75 s here, most of it compiling on the first call). The scaling runs use 600 s and are read from
+# Solver limits for the live comparison: relative gap 1e-4, at most 300 s (not the 60 s of the other notebooks: jaxglobal needed
+# about 75 s in the benchmark runs, most of it compiling on the first call). The scaling runs use 600 s and are read from
 # `benchmarks/results/many_switches.csv` (the command that regenerates it is given below).
 
 # %%
+import os
+
+os.environ.setdefault("RUST_LOG", "warn")  # keep the local NLP solver's info messages out of the output
+
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -182,8 +186,9 @@ print(f"lines of model code: Pyomo {lp}, jaxglobal {lj}")
 
 # %% [markdown]
 # The flow split sits at its bound: the shorter line carries 90%. Each pump runs just below a standard rating (the shortfall printed
-# above is a few hundredths of a percent, the size of the solver tolerance), so each motor is fully loaded. With 26 ratings, SCIP is
-# the faster solver here.
+# above is a few hundredths of a percent, the size of the solver tolerance), so each motor is fully loaded. Which solver is faster
+# at 26 ratings depends on the SCIP build and the machine: in the benchmark file read below (SCIP 6.3 through `pyscipopt`), SCIP
+# proved the optimum in 26 s against jaxglobal's 76 s; compare the live table above, which uses whatever `scip` binary is installed.
 #
 # ## Where the optimum sits, and what each solver sees
 #
