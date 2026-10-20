@@ -40,7 +40,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pyomo.environ as pyo
 
-from nbutil import loc, model_size, save_results, solve_jax, solve_pyomo, table  # jaxglobal itself is imported later (it enables float64)
+from nbutil import loc, model_size, save_results, solve_jax, solve_pyomo, table  # jaxglobal is imported after the training (it enables float64)
 
 import jax
 import jax.numpy as jnp
@@ -125,6 +125,7 @@ print(f"training MSE {float(l):.2e}; parameters: {sum(W.size + b.size for W, b i
 # Adam overshooting and recovering, which is common at a fixed learning rate of this size.
 
 # %%
+import jaxglobal  # noqa: F401  (switches JAX to float64 from here on; the training above is done)
 from scipy.optimize import minimize as sp_minimize
 
 surr_vg = jax.jit(jax.value_and_grad(lambda x: net(P, x)))
