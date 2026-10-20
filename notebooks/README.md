@@ -11,6 +11,7 @@ certified bound, time and status. Pyomo's strengths (integers, mature solvers, s
 | `03-ode-models.ipynb` | Kinetic parameter estimation: explicit RK4 and `pyomo.dae` vs a Python loop |
 | `04-neural-network-surrogates.ipynb` | Optimizing a trained tanh MLP: jaxglobal (with and without `crown`), hand-written Pyomo, OMLT |
 | `05-things-pyomo-cannot-express.ipynb` | `fori_loop`, library functions, einsum, parametric families, including what failed |
+| `06-many-switches.ipynb` | Motor price lists (one `jnp.where`) vs one binary per rating: scaling with the list length, a counterexample, and switches inside a time loop |
 
 ## Layout
 

@@ -15,10 +15,22 @@ with binaries.
 * ``tariff_blend``: buying four raw materials with volume-discount tariffs
   (``jnp.minimum`` of two linear schedules) and an overage surcharge
   (``jnp.maximum``) subject to demand and a blend-quality constraint.
+* ``motor_lines_<K>``: two parallel water lines share a flow; the flow split and
+  the two diameters are chosen, and each line's pump motor is bought from a price
+  list of ``K`` standard ratings, written as one ``jnp.where`` line. The Pyomo
+  twin picks one rating per line with ``K`` binaries each. ``K = 26`` is the IEC
+  60034 rating list; larger ``K`` are finer lists over the same range, to show
+  how each side scales with the number of switches.
+* ``water_main_<K>``: the same price list for the single pump of a branched water
+  main (a trunk feeding two users at different elevations). The static lift
+  bounds the pump power from below, and SCIP's presolve removes most of the
+  binaries, so here the equation-based solver stays fast as ``K`` grows.
 
 ``fstar`` for the first two is a dense grid followed by a local polish
 (``fstar_by_grid``); for ``tariff_blend`` it is exact (enumeration of the 2^4
-tariff choices, one LP each).
+tariff choices, one LP each). For ``motor_lines_<K>`` and ``water_main_<K>`` it is
+the best point found by jaxglobal or SCIP (Pyomo twin); see
+each entry's ``source`` for which solvers proved it optimal.
 """
 
 from __future__ import annotations
@@ -218,6 +230,136 @@ def _tariff_exact():
     return best
 
 
+# ----------------------------------------------------------------- water_main
+_W_RHO, _W_MU, _W_EPS, _W_G = 1000.0, 1e-3, 4.5e-5, 9.81  # water kg/m3, Pa s; commercial steel roughness, m
+_W_Q = np.array([0.20, 0.12, 0.08])  # m3/s: trunk, branch 1, branch 2
+_W_L = np.array([1500.0, 1000.0, 2500.0])  # m
+_W_Z = np.array([15.0, 5.0])  # m, delivery elevation of the two users
+_W_ETA, _W_EC, _W_CAP = 0.7, 0.8, 100.0  # pump efficiency; $/yr per W; $/yr per m * m^1.5 of diameter
+_W_IEC = np.array([0.37, 0.55, 0.75, 1.1, 1.5, 2.2, 3, 4, 5.5, 7.5, 11, 15, 18.5, 22, 30, 37, 45, 55, 75, 90, 110,
+                   132, 160, 200, 250, 315])  # kW, IEC 60034 standard motor ratings  # fmt: skip
+_W_LO, _W_HI = np.full(3, 0.15), np.full(3, 0.6)
+
+
+def _water_ratings(k):
+    return _W_IEC if k == len(_W_IEC) else np.geomspace(_W_IEC[0], _W_IEC[-1], k)
+
+
+def _water_price(kw):
+    return 900.0 * kw**0.75 + 300.0  # $/yr, illustrative annualized motor cost
+
+
+def _water_power(x):
+    """Pump power in W: Darcy-Weisbach with Swamee-Jain friction; the pump serves the harder branch."""
+    h = _water_heads(x)
+    return _W_RHO * _W_G * _W_Q[0] * (h[0] + jnp.maximum(h[1] + _W_Z[0], h[2] + _W_Z[1])) / _W_ETA
+
+
+def water_main(k):
+    kw = _water_ratings(k)
+    step = np.diff(_water_price(kw))
+
+    def f(x):
+        w = _water_power(x)
+        motor = _water_price(kw[0]) + jnp.sum(jnp.where(w / 1000 > kw[:-1], step, 0.0))  # smallest motor that covers w
+        return motor + _W_EC * w + _W_CAP * jnp.sum(_W_L * x**1.5)
+
+    def ineq(x):
+        return jnp.array([_water_power(x) / 1000 - kw[-1]])  # the largest motor must cover the load
+
+    return f, ineq
+
+
+def water_main_pyomo(k):
+    def build():
+        import pyomo.environ as pe
+
+        kw = _water_ratings(k)
+        m = pe.ConcreteModel()
+        m.x = pe.Var(range(3), bounds=(_W_LO[0], _W_HI[0]), initialize=0.35)
+        m.H = pe.Var(bounds=(0, 1e4))  # pump head, m
+        m.y = pe.Var(range(k), domain=pe.Binary)  # motor rating chosen
+        v = [4 * _W_Q[i] / (np.pi * m.x[i] ** 2) for i in range(3)]
+        re = [_W_RHO * v[i] * m.x[i] / _W_MU for i in range(3)]
+        h = [0.25 / pe.log10(_W_EPS / (3.7 * m.x[i]) + 5.74 / re[i] ** 0.9) ** 2 * _W_L[i] / m.x[i] * v[i] ** 2 / (2 * _W_G)
+             for i in range(3)]  # fmt: skip
+        m.c = pe.ConstraintList()
+        m.c.add(m.H >= h[0] + h[1] + _W_Z[0])  # max() of the two branches: the cost increases with H, so >= is exact
+        m.c.add(m.H >= h[0] + h[2] + _W_Z[1])
+        w = _W_RHO * _W_G * _W_Q[0] * m.H / _W_ETA
+        m.c.add(sum(m.y[j] for j in range(k)) == 1)
+        m.c.add(w / 1000 <= sum(kw[j] * m.y[j] for j in range(k)))  # the chosen motor covers the load
+        price = _water_price(kw)
+        m.obj = pe.Objective(expr=sum(price[j] * m.y[j] for j in range(k)) + _W_EC * w
+                             + _W_CAP * sum(_W_L[i] * m.x[i] ** 1.5 for i in range(3)))  # fmt: skip
+        return m
+
+    return build
+
+
+def _water_heads(x):
+    v = 4 * _W_Q / (np.pi * x**2)
+    re = _W_RHO * v * x / _W_MU
+    return 0.25 / jnp.log10(_W_EPS / (3.7 * x) + 5.74 / re**0.9) ** 2 * _W_L / x * v**2 / (2 * _W_G)
+
+
+# ----------------------------------------------------------------- motor_lines
+_M_QT = 0.3  # m3/s, total flow split over the two lines
+_M_L = np.array([2000.0, 3000.0])  # m
+_M_LO, _M_HI = np.array([0.1, 0.15, 0.15]), np.array([0.9, 0.6, 0.6])  # each line carries at least 10% of the flow
+
+
+def _motor_lines_power(x):
+    """Pump power of each line in W (Darcy-Weisbach with Swamee-Jain friction)."""
+    q = _M_QT * jnp.array([x[0], 1.0 - x[0]])
+    d = x[1:]
+    v = 4 * q / (np.pi * d**2)
+    re = _W_RHO * v * d / _W_MU
+    f = 0.25 / jnp.log10(_W_EPS / (3.7 * d) + 5.74 / re**0.9) ** 2
+    return f * _M_L / d * _W_RHO * v**2 / 2 * q / _W_ETA
+
+
+def motor_lines(k):
+    kw = _water_ratings(k)
+    step = np.diff(_water_price(kw))
+
+    def f(x):
+        w = _motor_lines_power(x)
+        motors = _water_price(kw[0]) + jnp.sum(jnp.where(w[:, None] / 1000 > kw[:-1], step, 0.0), axis=1)
+        return jnp.sum(motors + _W_EC * w) + _W_CAP * jnp.sum(_M_L * x[1:] ** 1.5)
+
+    def ineq(x):
+        return _motor_lines_power(x) / 1000 - kw[-1]  # the largest motor must cover each load
+
+    return f, ineq
+
+
+def motor_lines_pyomo(k):
+    def build():
+        import pyomo.environ as pe
+
+        kw, price = _water_ratings(k), _water_price(_water_ratings(k))
+        m = pe.ConcreteModel()
+        m.x = pe.Var(range(3), bounds=lambda m, i: (_M_LO[i], _M_HI[i]), initialize=[0.6, 0.4, 0.3])
+        m.y = pe.Var(range(2), range(k), domain=pe.Binary)  # motor rating chosen for each line
+        m.c = pe.ConstraintList()
+        w = []
+        for i in range(2):
+            q = _M_QT * (m.x[0] if i == 0 else 1 - m.x[0])
+            d = m.x[1 + i]
+            v = 4 * q / (np.pi * d**2)
+            re = _W_RHO * v * d / _W_MU
+            f = 0.25 / pe.log10(_W_EPS / (3.7 * d) + 5.74 / re**0.9) ** 2
+            w.append(f * _M_L[i] / d * _W_RHO * v**2 / 2 * q / _W_ETA)
+            m.c.add(sum(m.y[i, j] for j in range(k)) == 1)
+            m.c.add(w[i] / 1000 <= sum(kw[j] * m.y[i, j] for j in range(k)))  # the chosen motor covers the load
+        m.obj = pe.Objective(expr=sum(price[j] * m.y[i, j] for i in range(2) for j in range(k)) + _W_EC * sum(w)
+                             + _W_CAP * sum(_M_L[i] * m.x[1 + i] ** 1.5 for i in range(2)))  # fmt: skip
+        return m
+
+    return build
+
+
 def fstar_by_grid(f, lo, hi, n=121, top=20, chunk=200_000):
     """Dense grid over the box, then a bounded Powell polish of the best ``top`` grid points."""
     from scipy.optimize import minimize
@@ -243,3 +385,17 @@ PROBLEMS = [
     AppProblem("tariff_blend", tariff_blend, np.zeros(4), np.full(4, 80.0), tariff_blend_ineq, None,
                708.3333333, "Synthetic tariffs; fstar exact by enumerating the 2^4 tariff choices as LPs", tariff_blend_pyomo, "minimum()/maximum() tariffs with demand and quality constraints"),
 ]
+
+_PRICE_LISTS = (26, 104, 416, 1664)  # 26 = the IEC 60034 ratings; the rest are finer lists over 0.37 .. 315 kW
+# SCIP proved 26 and 104 (gap 1e-4) and hit 600 s on 416 and 1664; jaxglobal proved all four (benchmarks/results/many_switches.csv)
+_FSTAR_MOTOR_LINES = {26: 129894.005198, 104: 129810.442428, 416: 129804.411496, 1664: 129807.050554}
+_FSTAR_WATER_MAIN = {26: 173876.835214, 104: 171820.190768, 416: 171703.733532, 1664: 171702.402915}
+for _k in _PRICE_LISTS:
+    _f, _g = motor_lines(_k)
+    PROBLEMS.append(AppProblem(f"motor_lines_{_k}", _f, _M_LO, _M_HI, _g, None, _FSTAR_MOTOR_LINES[_k],
+                               "Illustrative costs; fstar = best point of jaxglobal and SCIP (Pyomo twin)",
+                               motor_lines_pyomo(_k), f"price list of {_k} motor ratings per line (jnp.where); 2 x {_k} binaries in Pyomo"))  # fmt: skip
+    _f, _g = water_main(_k)
+    PROBLEMS.append(AppProblem(f"water_main_{_k}", _f, _W_LO, _W_HI, _g, None, _FSTAR_WATER_MAIN[_k],
+                               "Illustrative costs; fstar = SCIP on the Pyomo twin, proved to relative gap 1e-4",
+                               water_main_pyomo(_k), f"price list of {_k} motor ratings (jnp.where), max() over branches; {_k} binaries in Pyomo"))  # fmt: skip

@@ -27,6 +27,7 @@
 # | 03-ode-models | Kinetic parameter estimation with an ODE; explicit RK4 and `pyomo.dae` |
 # | 04-neural-network-surrogates | Minimizing a trained tanh MLP; hand-written Pyomo and OMLT |
 # | 05-things-pyomo-cannot-express | `fori_loop`, library functions, einsum, parametric families |
+# | 06-many-switches | Motor price lists as one `jnp.where`: when many switches favor jaxglobal, and when they do not |
 #
 # **Conditions.** All solvers use relative gap 1e-4 (absolute 1e-6) and at most 60 s per solve. Timings are wall-clock on a loaded laptop and include
 # the model-writing time for Pyomo solvers and JIT compilation for jaxglobal; treat them as rough. All data are either published problem data or synthetic (labeled in each notebook).
@@ -58,12 +59,12 @@ print(inspect.getsource(loc))
 # %% [markdown]
 # ## Results of all comparisons
 #
-# Filled in from the results saved by notebooks 01 to 05 (`notebooks/results/*.json`). Run those notebooks first.
+# Filled in from the results saved by notebooks 01 to 06 (`notebooks/results/*.json`). Run those notebooks first.
 # Model size is the Pyomo model's unfixed variables and active constraints (the jaxglobal model has no explicit constraints beyond optional `ineq`/`eq` functions).
 
 # %%
 here = os.path.dirname(os.path.abspath(nbutil.__file__))
-NAMES = {"01": "01-basics", "02": "02-control-flow", "03": "03-ode-models", "04": "04-neural-network-surrogates", "05": "05-things-pyomo-cannot-express"}
+NAMES = {"01": "01-basics", "02": "02-control-flow", "03": "03-ode-models", "04": "04-neural-network-surrogates", "05": "05-things-pyomo-cannot-express", "06": "06-many-switches"}
 cases = []
 for nb in sorted(NAMES):
     path = os.path.join(here, "results", f"{nb}.json")
