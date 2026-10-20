@@ -86,8 +86,31 @@ def as_mc(v):
     return v if is_mc(v) else const_mc(v)
 
 
+def cvmax(a, b):
+    """``max(a, b)`` for a convex relaxation (``cv``): NaN-propagating like ``jnp.maximum``, but
+    its derivative is that of the one operand selected by a single comparison.
+
+    ``jnp.maximum``'s JVP weighs the two operands by two separate comparisons
+    (``x > y`` / ``x == y`` and ``y > x`` / ``y == x``). Under ``jit`` XLA may compute an operand
+    more than once (CSE / loop-invariant code motion re-fuse it, and FMA contraction makes the
+    copies differ in the last bit), so at a near-tie both comparisons can say "the other one":
+    the weights then sum to 0 (or 2) and ``jax.grad`` returns a vector that is not a
+    subgradient. The Frank-Wolfe and Kelley cuts and duality-based range reduction trust that
+    gradient, and an invalid cut prunes points with ``f`` below the incumbent. One predicate
+    always picks exactly one operand; at a near-tie both are active up to rounding, so either
+    gradient gives a valid cut."""
+    return jnp.where((a >= b) | jnp.isnan(a), a, b)
+
+
+def ccmin(a, b):
+    """``min(a, b)`` for a concave relaxation (``cc``); see ``cvmax``."""
+    return jnp.where((a <= b) | jnp.isnan(a), a, b)
+
+
 def tighten(m: MC) -> MC:
-    return MC(m.lo, m.hi, jnp.maximum(m.cv, m.lo), jnp.minimum(m.cc, m.hi))
+    # at a tie the box bound wins: its zero gradient gives the cut cv >= lo (cc <= hi), valid
+    # whatever cv's own gradient there; cv's gradient is a subgradient only if cv is convex
+    return MC(m.lo, m.hi, cvmax(m.lo, m.cv), ccmin(m.hi, m.cc))
 
 
 def select_mc(cond, a: MC, b: MC) -> MC:
@@ -288,11 +311,11 @@ def mc_mul(a: MC, b: MC, multivariate: bool = False) -> MC:
     def mx(c, m):
         return jnp.where(c >= 0, c * m.cc, c * m.cv)
 
-    cv = jnp.maximum(
+    cv = cvmax(
         mn(yL, a) + mn(xL, b) - xL * yL,
         mn(yU, a) + mn(xU, b) - xU * yU,
     )
-    cc = jnp.minimum(
+    cc = ccmin(
         mx(yL, a) + mx(xU, b) - xU * yL,
         mx(yU, a) + mx(xL, b) - xL * yU,
     )
@@ -330,9 +353,9 @@ def mc_mul(a: MC, b: MC, multivariate: bool = False) -> MC:
         return mx(rx, a) + mx(ry, b) + c
 
     for lam in (frac(yU, yU - yL), frac(xU, xU - xL)):  # rho_x = 0, rho_y = 0
-        cv = jnp.maximum(cv, jnp.where(fin, facet_lo(lam), -jnp.inf))
+        cv = cvmax(cv, jnp.where(fin, facet_lo(lam), -jnp.inf))
     for mu in (frac(yU, yU - yL), frac(xL, xL - xU)):
-        cc = jnp.minimum(cc, jnp.where(fin, facet_hi(mu), jnp.inf))
+        cc = ccmin(cc, jnp.where(fin, facet_hi(mu), jnp.inf))
     return tighten(MC(lo, hi, cv, cc))
 
 
@@ -552,7 +575,7 @@ def mc_monomial(coef, factors, safe=False, nround=0):
 
 def intersect_mc(a: MC, b: MC) -> MC:
     """Both relaxations at once: the larger lower bounds and the smaller upper bounds."""
-    return tighten(MC(jnp.maximum(a.lo, b.lo), jnp.minimum(a.hi, b.hi), jnp.maximum(a.cv, b.cv), jnp.minimum(a.cc, b.cc)))
+    return tighten(MC(jnp.maximum(a.lo, b.lo), jnp.minimum(a.hi, b.hi), cvmax(a.cv, b.cv), ccmin(a.cc, b.cc)))
 
 
 class Monomials:
@@ -844,7 +867,7 @@ def mc_abs(x: MC) -> MC:
 def mc_max(a, b) -> MC:
     a, b = as_mc(a), as_mc(b)
     lo, hi = jnp.maximum(a.lo, b.lo), jnp.maximum(a.hi, b.hi)
-    cv = jnp.maximum(a.cv, b.cv)
+    cv = cvmax(a.cv, b.cv)
     # max(a, b) = (a + b + |a - b|) / 2 gives a concave overestimator
     cc = 0.5 * (a.cc + b.cc + mc_abs(mc_sub(a, b)).cc)
     cc = jnp.where(a.hi <= b.lo, b.cc, jnp.where(b.hi <= a.lo, a.cc, cc))
@@ -991,7 +1014,7 @@ def mc_frac(a: MC, b: MC, base: MC) -> MC:
     den = jnp.where(ok & (sl + su > 0), sl + su, 1.0)
     num = (jnp.where(ok, a.cv, 0.0) + sl * su) / den
     env = num**2 / jnp.where(ok, b.cc, 1.0)
-    cv = jnp.where(ok, jnp.maximum(base.cv, env), base.cv)
+    cv = jnp.where(ok, cvmax(base.cv, env), base.cv)
     return tighten(MC(base.lo, base.hi, cv, base.cc))
 
 

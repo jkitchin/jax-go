@@ -798,7 +798,7 @@ def wrap(fn, base, safe=False, sides=("cv", "cc"), conditional=False):
     ``conditional`` that holds for conditional verdicts too (``exact_certificate``): on a box
     where a condition fails the relaxation is then -inf/+inf."""
     from .fbbt import tape_cache
-    from .relax import MC, tighten
+    from .relax import MC, ccmin, cvmax, tighten
     from .univariate import Relaxer
 
     if not ENABLED:
@@ -838,8 +838,8 @@ def wrap(fn, base, safe=False, sides=("cv", "cc"), conditional=False):
         shp = jnp.shape(m.cv)
         vcv, vcc = values(flat, cert, x, lo, hi, data[1], safe)
         vcv, vcc = jnp.reshape(vcv, shp), jnp.reshape(vcc, shp)
-        cv = jnp.where(jnp.isnan(m.cv), vcv, jnp.maximum(m.cv, vcv))
-        cc = jnp.where(jnp.isnan(m.cc), vcc, jnp.minimum(m.cc, vcc))
+        cv = jnp.where(jnp.isnan(m.cv), vcv, cvmax(m.cv, vcv))
+        cc = jnp.where(jnp.isnan(m.cc), vcc, ccmin(m.cc, vcc))
         return tighten(MC(m.lo, m.hi, cv, cc))
 
     return Relaxer(prep, call)
