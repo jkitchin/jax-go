@@ -567,9 +567,9 @@ def test_product_expansion_is_lifted():
 
 def test_asinh_large_negative():
     with pytest.warns(export.ExportBigMWarning):  # sign(x) log(|x| + sqrt(x^2 + 1)), |x| up to 1e8
-        m = export.to_scip(lambda x: jnp.arcsinh(x[0]), [-1e8], [1.0])
+        m = export.to_scip(lambda x: jnp.arcsinh(x[0]), [-2e8], [1.0])
     _, x, obj = _solve(m)
-    assert abs(obj - np.arcsinh(-1e8)) < 1e-6
+    assert abs(obj - np.arcsinh(-2e8)) < 1e-6
 
 
 # exp overflow: SCIP treats values >= 1e20 as invalid evaluations and cuts those points off
@@ -684,3 +684,34 @@ def test_variable_power_overflow_refused(tmp_path):
     m = read_nl(str(path))
     assert abs(float(m.f(jnp.array([1e3, 6.0]))) + 1e5) < 1e-6
     assert not export.inspect(lambda x: x[0] ** x[1], [0.0, -1.0], [2.0, 1.0], target="nl").refused
+
+
+def test_select_chain_bigm_not_epsilon_scale():
+    """Nested jnp.where on 0/1 values: big-M constants that are exactly 0 must not be padded to 1e-9 .. 2e-6
+    (SCIP's epsilon / feastol), or SCIP's presolve fixes binaries wrongly and cuts off valid points."""
+    T = 12
+    hrs = np.arange(T)
+    dem = 40 + 25 * np.sin(2 * np.pi * (hrs - 8) / 24) ** 2 + 10 * (hrs % 7 == 3)
+    tou = np.where((hrs >= 8) & (hrs < 20), 0.25, 0.08)
+
+    def f(x):
+        V, Qp, lo_f, hi_f = x[0], x[1], x[2], x[3]
+        h, on, cost = 0.5 * V, 0.0, 0.0
+        for t in range(T):
+            on = jnp.where(h < lo_f * V, 1.0, jnp.where(h > hi_f * V, 0.0, on))
+            h = h + on * Qp - dem[t]
+            short = jnp.maximum(-h, 0.0)
+            h = jnp.clip(h, 0.0, V)
+            cost = cost + on * Qp * 0.4 * tou[t] + 5.0 * short
+        return cost
+
+    lo, hi = np.array([50.0, 40.0, 0.05, 0.1]), np.array([500.0, 150.0, 0.9, 0.95])
+    rng = np.random.default_rng(1)
+    for _ in range(4):
+        x = lo + (hi - lo) * rng.uniform(size=4)
+        m = export.to_scip(f, lo, hi)
+        for v, xv in zip(m.data.x, x):
+            m.fixVar(v, xv)
+        status, _, obj = _solve(m)
+        assert status == "optimal", status
+        _check(f, x, obj)
