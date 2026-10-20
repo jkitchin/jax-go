@@ -46,9 +46,9 @@ import numpy as np
 import pandas as pd
 import pyomo.environ as pyo
 
-from nbutil import loc, model_size, save_results, solve_jax, solve_pyomo, table  # imports jaxglobal first (x64 enabled)
+from nbutil import loc, model_size, save_results, solve_jax, solve_pyomo, table
 
-from jaxglobal.applications import logic
+from jaxglobal.applications import logic  # importing jaxglobal enables float64, before any JAX computation
 
 INK, MUTED, BLUE, ORANGE = "#1a1a19", "#77766f", "#2a78d6", "#eb6834"
 plt.rcParams.update({"axes.spines.top": False, "axes.spines.right": False, "axes.edgecolor": MUTED,

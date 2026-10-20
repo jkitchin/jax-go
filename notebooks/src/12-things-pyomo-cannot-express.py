@@ -38,14 +38,14 @@
 import numpy as np
 import pyomo.environ as pyo
 
-from nbutil import loc, model_size, save_results, solve_jax, solve_pyomo, table  # imports jaxglobal first (x64 enabled)
+from nbutil import loc, model_size, save_results, solve_jax, solve_pyomo, table
 
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from scipy.optimize import brentq
 
-from jaxglobal import export, relax
+from jaxglobal import export, relax  # importing jaxglobal enables float64, before any JAX computation
 
 INK, MUTED, BLUE, ORANGE, AQUA, YELLOW = "#1a1a19", "#77766f", "#2a78d6", "#eb6834", "#1baf7a", "#eda100"
 plt.rcParams.update({"axes.spines.top": False, "axes.spines.right": False, "axes.edgecolor": MUTED,
