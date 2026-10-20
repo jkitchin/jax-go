@@ -343,13 +343,15 @@ gaps on small boxes. Node counts against phase 1, with no regressions:
   with four jobs; about 30 s of that is the root fix-and-solve of the
   infeasible assignments, the next cost to remove. Cold, 60 s, baseline
   (`ace5724`) against this change, each started at 15-minute load below 8:
-  `start50` 25 to 31 solved, SGM 40.9 to 32.6 s, all four pooling
+  `start50` 25 to 31 solved, SGM 40.9 to 30.7 s, all four pooling
   instances solved (`rt2tp` 21 s, `adhya1stp` 39 s, `foulds2tp` 16 s,
-  `haverly2stp` 13 s); `int50` 25 to 29, SGM 49.2 to 35.9 s (`nous1`,
+  `haverly2stp` 13 s); `int50` 25 to 29, SGM 40.1 to 31.8 s (`nous1`,
   `ex4`, `tloss`, `meanvarx`, `spring` newly solved; `batch` timed out at
   the limit under four parallel jobs, 23.5 s alone against 24.8 s for the
   baseline, and does not take the quadratic path); 0 wrong on both
-  (`results/issue14_*_cold.csv`).
+  (`results/issue14_*_cold.csv`). The SGMs count every unsolved instance at
+  60 s; this note first gave 32.6 and 35.9 s (and 49.2 s for the int50
+  baseline), computed with the longest recorded time, 66-92 s, as the cap.
 - *Trilinear envelopes* (Meyer–Floudas facets): not implemented. No test
   problem has a trilinear term to validate against; trilinear terms are
   relaxed as nested bilinear McCormick (and lifted, with `lifted=True`).
@@ -765,14 +767,18 @@ What this means for Workstream A's design items:
 
 Re-baseline first: the `issue14` cold CSVs were taken under heavy load. Run
 start50 and int50 cold again, with load recorded, before using them to measure
-A.
+A. (This contradicts the issue #14 note above, which says each run started at
+a 15-minute load below 8. The CSVs have no load column, so neither statement
+can be checked.)
 
 #### R0 baseline
 
 R0 of `docs/PLAN-scip-gap-v2.md`: the reference numbers every later item of the
-plan is measured against. **Pending**: the machine has stayed at load 10-16
-(other projects benchmarking), above the plan's gate of 10, so no run has been
-made yet. Everything is scripted:
+plan is measured against. **Not run**: the machine stayed at load 10-16
+(other projects benchmarking), above the plan's gate of 10, and R0 was
+superseded by the status sweep in `docs/PLAN-scip-gap-v2.md` §10 (cold and
+warm rounds, load recorded). No `scipgap_r0_*` results exist. The script is
+kept:
 
 ```
 python benchmarks/scipgap_r0.py run       # all of R0, resumable, ~2.5-3 h at low load
@@ -915,7 +921,10 @@ Against the default on the same 25 problems (all certified): nodes 0.80,
 iterations 0.82 (fewer or equal on 23; styblinski_tang_3d 5 → 7 and
 nn_tanh_5x8x2 +6% are the exceptions). Largest gains: hartmann3 157 → 46
 nodes, univariate_sum_20 513 → 201 (97 → 71 iterations), reactor 1053 →
-654, hartmann6 1099 → 634. Wall time, warm and with configurations
+654, hartmann6 1099 → 634 (runs on 2026-10-17; data not checked in). Runs on
+2026-10-18, after `"auto"` became the default, gave other counts, quoted in
+the README: hartmann6 634 against 1081, univariate_sum_20 205 against 665,
+nn_tanh_5x8x2 575k against 244k. To be re-measured. Wall time, warm and with configurations
 interleaved on a loaded machine (median of 2), on six problems: 0.84 of
 the default, with no problem more than 4% slower. In an earlier version
 that filled the whole batch, `_Q` = 3 cut iterations further than `_Q` = 2
@@ -1285,12 +1294,15 @@ stage 3 profile set:
   squared relative width, and score integer candidates with them. On `nvs05`
   `pseudocost` and `reliability` solve in 6.5 s and about 350 nodes against
   33.7 s and 1,277 nodes for `width`, but over `int50` (warm) `width` stays
-  best: 31 solved against 27 (`pseudocost`, 0.94 of the time on the 27
+  best: 31 solved (`int50_probe_warm.csv`) against 27 (`pseudocost`,
+  `int50_pseudocost_warm.csv`, 0.94 of the time on the 27
   both solve) and 23 (`reliability`, 3.9 times slower: strong-branching trials
   cost kernel calls). `width`, fractional integers first, remains the default.
   (Later: the default became `branch_var="auto"`, which keeps `width` for
   problems with integers and uses `pseudocost` for continuous ones. On
-  start50 at 60 s pseudocost solves 36 against 34 and loses none; ex6_2_6
+  start50 at 60 s pseudocost solves 38 against 36 and loses none (first
+  written here as 36 against 34; the README's 2026-10-18 correction, data not
+  checked in); ex6_2_6
   and ex8_4_1 are the gains. On the int50 regression instances it lost
   flay04m and slowed nous1 three times.)
 * *Plunging* (item 6) is covered by the dives from the best children; it is

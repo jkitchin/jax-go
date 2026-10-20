@@ -5,13 +5,18 @@ compiling the bounding kernels, which dominate small problems.
 
 ## MINLPLib
 
-All answers are checked against the library's reference bounds.
+All answers are checked against the library's reference bounds. Outside
+MINLPLib, before PR #76 the solver certified a wrong optimum on an
+application model (two parallel lines with motor price lists: reported
+optimal 130186.35 while 130000.6 is attainable), caused by invalid
+subgradients at near-ties; this is now fixed.
 
 * **MINLPLib against SCIP, October 2026** (`main` at 58bb551). An instance
   passes if jaxglobal proves it optimal within max(2 x SCIP's time, 10 s).
   "Cold" includes JAX compilation; "warm" reuses the compile caches from a
   previous run. SCIP has no compile step, so the cold numbers are the fair
-  comparison.
+  comparison. Measured at 58bb551 (2026-10-19), before PR #76 (relaxation
+  subgradient fix); re-run pending.
 
   | set | instances | pass, cold | pass, warm | where SCIP takes ≥ 0.5 s (warm) |
   |---|---:|---:|---:|---:|
@@ -44,7 +49,8 @@ All answers are checked against the library's reference bounds.
 * **global50, 60 s limit** (the 50-instance BARON comparison panel from
   discopt, `discopt_benchmarks/config/baron_global50.txt`). All solvers ran on
   the same machine. 48 of the 50 ran; casctanks and hda are missing from this
-  repo's MINLPLib tables.
+  repo's MINLPLib tables. Measured at 58bb551 (2026-10-19), before PR #76;
+  re-run pending.
 
   | | solved in 60 s | wrong answers | not solved in 60 s |
   |---|---:|---:|---|
@@ -64,7 +70,7 @@ All answers are checked against the library's reference bounds.
     tspn05, which SCIP leaves unsolved, but BARON solves all three faster.
 
 * **MINLPLib, 60 s limit, cold start (compilation included)**, measured on
-  2026-10-17, before the SCIP-gap work, and not re-run since:
+  2026-10-17, before the SCIP-gap work and PR #76, and not re-run since:
 
   | set | jaxglobal | SCIP |
   |---|---:|---:|
@@ -77,7 +83,8 @@ All answers are checked against the library's reference bounds.
   Branching comparisons ([Solver options](solver-options.md#branch_var-which-variable-to-split)) were separate runs, so their counts differ.
 
 On 328 mixed-integer MINLPLib instances with up to 100 variables (60 s, cold,
-measured on 2026-10-17, before the SCIP-gap work), jaxglobal solved 72 of the
+measured on 2026-10-17, before the SCIP-gap work and PR #76; re-run pending),
+jaxglobal solved 72 of the
 220 with at most 50 variables and 1 of the 108 with 51 to 100.
 
 ### Running the MINLPLib benchmark
@@ -121,7 +128,8 @@ Times are wall-clock on a laptop CPU for a first (cold) call, so they are
 mostly JIT compilation; a second solve of the same function reuses the
 compiled kernels and takes a small fraction of that (see [notebook 04](../notebooks/04-equation-based-solvers.ipynb)). For the two
 problems without a published optimum, the tests check the certificate against
-a 401×401 brute-force grid.
+a 401×401 brute-force grid. Measured at 2ae4c39 (2026-10-18), before PR #76;
+re-run pending.
 
 ![Convergence of the bounds](../assets/figures/convergence.png)
 
@@ -149,7 +157,7 @@ basic and pooling problems, `where`/`clip`/table lookups, RK4 kinetics, NN
 surrogates, and things Pyomo cannot express directly.
 
 **Flagship benchmark.** `jaxglobal.applications` holds code-defined models
-(ODE kinetics, regime-switching engineering models, tanh NN surrogates after
+(RK4 ODE kinetics stepped with `lax.scan`, regime-switching engineering models, tanh NN surrogates after
 [Schweidtmann & Mitsos 2018](../references.md#ref-schweidtmann2019deterministic)), each with a hand-written Pyomo twin.
 `benchmarks/flagship.py` runs jaxglobal, SCIP, Couenne and BARON on them and
 judges each answer against the best known optimum.

@@ -46,7 +46,7 @@ cache (`JAXGLOBAL_CACHE_DIR`), so it measures search without compilation.
 
 | run | solved | wrong | unsolved | unsupported | SGM time (s) |
 |---|---:|---:|---:|---:|---:|
-| phase-0 baseline (`baseline.csv`) | 12 | 0 | 26 | 12 | 40.5 |
+| phase-0 baseline (`baseline.csv`) | 12 | 6 | 20 | 12 | 40.5 |
 | jax 0.11, loaded machine (`start50.csv`) | 12 | 0 | 36 | 2 | 53.5 |
 | cold (`start50_cold.csv`) | 12 | 0 | 36 | 2 | 50.5 |
 | warm (`start50_warm.csv`) | 18 | 0 | 30 | 2 | 32.1 |
