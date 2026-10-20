@@ -13,7 +13,7 @@
 # %% [markdown]
 # # 06. Many switches, few variables: motor price lists
 #
-# Notebook 02 showed that a `jnp.where` in Python is a disjunction in an algebraic model. There the equation-based solvers were still
+# Notebook 09 showed that a `jnp.where` in Python is a disjunction in an algebraic model. There the equation-based solvers were still
 # much faster, because the models had only a handful of switches. This notebook looks for the case where representing a switch
 # natively pays off: **few continuous variables and many switches.** It also shows a closely related model where it does not, and a
 # kind of switching model where jaxglobal is the one that fails.
@@ -155,7 +155,7 @@ for i in range(2):
 
 # %%
 lp, lj = loc(lines_pyomo), loc(power, cost, big_enough)
-save_results("06", "A: two lines, 26 motor ratings", lp, lj, size, rows, note=f"{2 * len(KW)} binaries, one per rating and line")
+save_results("13", "A: two lines, 26 motor ratings", lp, lj, size, rows, note=f"{2 * len(KW)} binaries, one per rating and line")
 print(f"lines of model code: Pyomo {lp}, jaxglobal {lj}")
 
 # %% [markdown]

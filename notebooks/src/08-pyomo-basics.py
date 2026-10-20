@@ -78,7 +78,7 @@ t = table(rows)
 t
 
 # %%
-save_results("01", "six-hump camel", loc(camel_pyomo), loc(camel), size, rows)
+save_results("08", "six-hump camel", loc(camel_pyomo), loc(camel), size, rows)
 print(f"lines of model code: Pyomo {loc(camel_pyomo)}, jaxglobal {loc(camel)};  Pyomo model size: {size[0]} vars, {size[1]} constraints")
 print("jaxglobal minimizer:", rows[3]["x"], " (literature: +-(0.0898, -0.7126))")
 
@@ -151,7 +151,7 @@ table(rows)
 
 # %%
 lp, lj = loc(haverly_pyomo), loc(haverly, haverly_ineq, haverly_eq)
-save_results("01", "Haverly pooling", lp, lj, size, rows)
+save_results("08", "Haverly pooling", lp, lj, size, rows)
 print(f"lines of model code: Pyomo {lp}, jaxglobal {lj};  Pyomo model size: {size[0]} vars, {size[1]} constraints")
 
 # %% [markdown]

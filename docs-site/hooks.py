@@ -14,7 +14,7 @@ import shutil
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs-site"
 
-NOTEBOOKS = {"examples": ROOT / "examples", "pyomo": ROOT / "notebooks"}
+NOTEBOOKS = {"notebooks": ROOT / "notebooks"}
 FIGURES = ["logo.svg", "logo-square.svg", "relaxations.png", "convergence.png", "benchmark.png", "g24.png"]
 
 # Local absolute paths: /Users/<name>/..., /home/<name>/..., /private/tmp/..., /private/var/...

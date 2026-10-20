@@ -108,7 +108,7 @@ solvers on general problems (see [Limitations](guide/correctness.md#limitations)
   neural-network and Gaussian-process surrogates, ODE kinetics written as
   Python loops.
 
-Narrated, executed [example notebooks](examples/index.md) walk through
+Narrated, executed [notebooks](notebooks/index.md) walk through
 the relaxations, branch and bound, the test problems, the comparison with
 equation-based solvers, batched throughput and Gaussian-process surrogates.
 

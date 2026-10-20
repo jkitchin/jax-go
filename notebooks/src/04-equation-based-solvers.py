@@ -22,7 +22,7 @@
 # 1. how a JAX function is turned into a Pyomo model, and where that breaks;
 # 2. whether every solver finds the certified optimum, and how fast.
 #
-# The model-building code lives in `examples/compare.py`; this notebook imports
+# The model-building code lives in `notebooks/compare.py`; this notebook imports
 # it, so the notebook and the command-line script cannot drift apart.
 
 # %%
@@ -34,7 +34,7 @@ import sys
 os.environ.setdefault("RUST_LOG", "warn")  # keep the local NLP solver's info messages out of the output
 ROOT = pathlib.Path.cwd().resolve().parent
 sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "examples"))
+sys.path.insert(0, str(ROOT / "notebooks"))
 
 import inspect
 
@@ -54,7 +54,7 @@ P = {p.name: p for p in list(PROBLEMS) + list(CONSTRAINED_PROBLEMS)}
 
 # Set to True to rerun all solvers on all problems (several minutes, needs
 # SCIP, Couenne and a GAMS installation with BARON and LindoGlobal licences).
-# By default the stored results in examples/compare_results.json are used.
+# By default the stored results in notebooks/results/compare_results.json are used.
 RUN_SOLVERS = False
 
 # %% [markdown]
@@ -106,7 +106,7 @@ print(inspect.getsource(compare._max))
 print(inspect.getsource(compare.piecewise_manual))
 
 # %% [markdown]
-# `jaxglobal.export` now does these rewrites automatically: `export.to_scip(P["piecewise_2d"].f, lo, hi)` rewrites the `max` as above and reformulates the `where` with a binary, and `export.to_scip(P["tanh_net_2d"].f, lo, hi)` rewrites `tanh` as $1 - 2/(e^{2z} + 1)$ (or an overflow-free form for large arguments); see `examples/export_scip.py`. The comparison below keeps the hand-written versions, so its stored numbers are unchanged.
+# `jaxglobal.export` now does these rewrites automatically: `export.to_scip(P["piecewise_2d"].f, lo, hi)` rewrites the `max` as above and reformulates the `where` with a binary, and `export.to_scip(P["tanh_net_2d"].f, lo, hi)` rewrites `tanh` as $1 - 2/(e^{2z} + 1)$ (or an overflow-free form for large arguments); see `notebooks/export_scip.py`. The comparison below keeps the hand-written versions, so its stored numbers are unchanged.
 
 # %% [markdown]
 # These are small examples, but they are the general situation: every
@@ -151,7 +151,7 @@ if pyo.SolverFactory("scip").available(exception_flag=False):
 # are in fact the global optimum.
 
 # %%
-RESULTS = ROOT / "examples" / "compare_results.json"
+RESULTS = ROOT / "notebooks" / "results" / "compare_results.json"
 SOLVERS = ["jaxglobal", "jaxglobal_compiled", "scip", "couenne", "baron", "lindoglobal"]
 EXTERNAL = ["scip", "couenne", "baron", "lindoglobal"]
 

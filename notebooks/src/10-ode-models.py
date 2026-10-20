@@ -122,7 +122,7 @@ print(f"jaxglobal objective at the BARON optimum: {float(sse(np.array([pyo.value
 
 # %%
 lp, lj = loc(rk4_pyomo, rk4_step), loc(sse, rk4_step)
-save_results("03", "RK4 kinetics (explicit)", lp, lj, size, rows, note="same RK4 discretization")
+save_results("10", "RK4 kinetics (explicit)", lp, lj, size, rows, note="same RK4 discretization")
 print(f"lines of model code (including the shared rk4_step): Pyomo {lp}, jaxglobal {lj}")
 
 # %% [markdown]
@@ -167,7 +167,7 @@ table(rows_dae)
 md = dae_pyomo()
 solve_pyomo(md, "baron")
 print(f"pyomo.dae (BARON) k1, k2 = {pyo.value(md.k1):.4f}, {pyo.value(md.k2):.4f}  vs RK4 {pyo.value(mm.k1):.4f}, {pyo.value(mm.k2):.4f}")
-save_results("03", "pyomo.dae (collocation)", loc(dae_pyomo), loc(sse, rk4_step), size_dae, rows_dae, note="different discretization")
+save_results("10", "pyomo.dae (collocation)", loc(dae_pyomo), loc(sse, rk4_step), size_dae, rows_dae, note="different discretization")
 
 # %% [markdown]
 # The estimates differ in the third decimal, which is the discretization difference (RK4 with $h=1$ versus Radau collocation), not a solver disagreement.
