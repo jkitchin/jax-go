@@ -11,7 +11,7 @@
 # ---
 
 # %% [markdown]
-# # Pyomo and jaxglobal, side by side
+# # 07. Pyomo and jaxglobal, side by side
 #
 # This series writes the same optimization problems twice: once as a [Pyomo](https://www.pyomo.org) model [hart2011pyomo, bynum2021pyomo], and once as a plain Python/JAX function for jaxglobal,
 # a global optimizer that traces the function and bounds it with McCormick/alphaBB relaxations inside a branch-and-bound [mccormick1976computability]. Every notebook solves both and
@@ -29,7 +29,7 @@
 # | 12-things-pyomo-cannot-express | `fori_loop`, library functions, einsum, parametric families |
 # | 13-many-switches | Motor price lists as one `jnp.where`: when many switches favor jaxglobal, and when they do not |
 #
-# **Conditions.** All solvers use relative gap 1e-4 (absolute 1e-6) and at most 60 s per solve. Timings are wall-clock on a loaded laptop and include
+# **Conditions.** All solvers use relative gap 1e-4 (absolute 1e-6) and at most 60 s per solve (300 s in 13). Timings are wall-clock on a loaded laptop and include
 # the model-writing time for Pyomo solvers and JIT compilation for jaxglobal; treat them as rough. All data are either published problem data or synthetic (labeled in each notebook).
 #
 # **Reading the tables.** `obj` is the best objective found, `bound` the certified lower bound the solver reports (NaN means the solver did not return one;
