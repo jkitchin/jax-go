@@ -11,12 +11,51 @@ application model (two parallel lines with motor price lists: reported
 optimal 130186.35 while 130000.6 is attainable), caused by invalid
 subgradients at near-ties; this is now fixed.
 
+* **MINLPLib re-run on current code, 2026-10-20** (`main` at 9812f39: after
+  PRs #76, #77 and #81). Every instance list is checked in under
+  [`benchmarks/sets/`](https://github.com/jkitchin/jax-go/tree/main/benchmarks/sets), every row is in
+  `benchmarks/results/rerun_*.csv`, and
+  [`benchmarks/rerun_report.py`](https://github.com/jkitchin/jax-go/blob/main/benchmarks/rerun_report.py) prints this table
+  (`benchmarks/rerun_2026_10.sh` reproduces the runs). Same pass rule as below.
+  Machine: a 4-core 2.1 GHz Xeon cloud VM, two solves at a time, 60 s limit;
+  SCIP 10.0 through `pyscipopt` 6.3; no BARON.
+
+  | set | instances | solved, cold / warm | pass, cold | pass, warm | where SCIP takes ≥ 0.5 s (warm) | jaxglobal faster than SCIP (warm) | wrong: jaxglobal / SCIP | SCIP solved |
+  |---|---:|---:|---:|---:|---:|---:|---:|---:|
+  | global50 | 48 | 40 / 42 | 6 | 33 | 0 / 3 | 0 | 0 / 0 | 44 |
+  | `start50` | 50 | 37 / 40 | 15 | 36 | 7 / 11 | 1 | 0 / 1 | 38 |
+  | `int50` | 50 | 37 / 43 | 9 | 27 | 4 / 14 | 3 | 0 / 0 | 47 |
+  | held out | 209 | 169 / 180 | 66 | 157 | 11 / 41 | 2 | 0 / 1 | 204 |
+
+  - **Wrong answers:** none from jaxglobal in any set or mode. SCIP 10.0
+    returns a wrong optimum on ex8_5_3 (`start50`) and st_qpc-m3b (held out).
+  - **This machine is much slower than the laptop used below, and that, not
+    the code, explains the lower counts.** On seven instances that fail here,
+    the pre-#76 code (58bb551) and current `main` behave the same on this
+    machine: the same six time out, flay03m solves in about 9 s warm, and the
+    warm node counts agree (`results/ab_{old,new}_{cold,warm}.csv`). nvs09,
+    which took 44 s cold and 2.6 s warm on the laptop, does not finish compiling
+    in 60 s here. Cold passes suffer most: compilation alone often exceeds the
+    10 s floor.
+  - **Held-out set.** [`sets/heldout.txt`](https://github.com/jkitchin/jax-go/blob/main/benchmarks/sets/heldout.txt) follows
+    the definition given below, with 209 names instead of 184, because the
+    original also excluded a `check_wrong.py` random sample that cannot be
+    reproduced. The 79-instance development set was never recorded, so it is
+    not re-run; `start50` and `int50`, which it was drawn from, are reported
+    instead.
+  - **global50** is discopt's BARON panel
+    ([`sets/global50.txt`](https://github.com/jkitchin/jax-go/blob/main/benchmarks/sets/global50.txt)); casctanks and hda
+    are not in this repo's MINLPLib tables. jaxglobal does not solve
+    clay0303hfsg, cvxnonsep_psig30, flay03m, nvs09, tanksize or tspn05 (warm);
+    SCIP does not solve cvxnonsep_nsig30, cvxnonsep_psig30, st_e36 or tspn05.
+
 * **MINLPLib against SCIP, October 2026** (`main` at 58bb551). An instance
   passes if jaxglobal proves it optimal within max(2 x SCIP's time, 10 s).
   "Cold" includes JAX compilation; "warm" reuses the compile caches from a
   previous run. SCIP has no compile step, so the cold numbers are the fair
-  comparison. Measured at 58bb551 (2026-10-19), before PR #76 (relaxation
-  subgradient fix); re-run pending.
+  comparison. Measured at 58bb551 (2026-10-19) on a laptop, before PR #76
+  (relaxation subgradient fix); the re-run on current code, on a slower
+  machine, is above.
 
   | set | instances | pass, cold | pass, warm | where SCIP takes ≥ 0.5 s (warm) |
   |---|---:|---:|---:|---:|
@@ -43,14 +82,14 @@ subgradients at near-ties; this is now fixed.
     <list> --time-limit 60` once with `JAXGLOBAL_CACHE=0` (cold) and again on a
     primed cache (warm), then apply the pass rule per instance against SCIP's
     time. `run.py` takes a single time limit, so the rule is applied
-    afterwards. The development and held-out instance lists are not checked
-    in; the held-out set is defined above.
+    afterwards. The development list was not checked in; the held-out set is
+    defined above, and a reconstruction is in `benchmarks/sets/heldout.txt`.
 
 * **global50, 60 s limit** (the 50-instance BARON comparison panel from
   discopt, `discopt_benchmarks/config/baron_global50.txt`). All solvers ran on
   the same machine. 48 of the 50 ran; casctanks and hda are missing from this
-  repo's MINLPLib tables. Measured at 58bb551 (2026-10-19), before PR #76;
-  re-run pending.
+  repo's MINLPLib tables. Measured at 58bb551 (2026-10-19) on a laptop, before
+  PR #76; re-run above (without BARON).
 
   | | solved in 60 s | wrong answers | not solved in 60 s |
   |---|---:|---:|---|
