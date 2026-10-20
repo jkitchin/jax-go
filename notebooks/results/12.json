@@ -9,14 +9,14 @@
     "solver": "scip",
     "obj": -2664.474806596984,
     "bound": -2664.67687606753,
-    "time": 0.1777233719999458,
+    "time": 0.1434318589999748,
     "status": "optimal"
    },
    {
     "solver": "couenne",
     "obj": -2664.4699161200583,
     "bound": NaN,
-    "time": 0.44484904700038896,
+    "time": 0.418164381000679,
     "status": "optimal"
    },
    {
@@ -29,10 +29,10 @@
    {
     "solver": "jaxglobal",
     "obj": -2664.4589804143034,
-    "bound": -2664.592122897193,
-    "time": 6.424971977000041,
+    "bound": -2664.6297216319504,
+    "time": 10.14844495899888,
     "status": "optimal",
-    "nodes": 11
+    "nodes": 13
    }
   ],
   "note": "Pyomo: implicit equation; jaxglobal: 4 fixed iterations"
@@ -45,16 +45,17 @@
   "rows": [
    {
     "solver": "jnp.polyval",
-    "obj": NaN,
-    "bound": NaN,
-    "time": NaN,
-    "status": "unsupported (ValueError)"
+    "obj": -148.49109417649123,
+    "bound": -148.49284999172784,
+    "time": 0.508941213000071,
+    "status": "optimal",
+    "nodes": 1
    },
    {
     "solver": "jax.nn.softplus",
     "obj": 0.7731076007300555,
     "bound": 0.7730356248846317,
-    "time": 0.8696090089997597,
+    "time": 0.8192040799985989,
     "status": "optimal",
     "nodes": 75
    },
@@ -62,7 +63,7 @@
     "solver": "jax.scipy.stats.norm.cdf",
     "obj": -664.4590207496797,
     "bound": -664.5252208587162,
-    "time": 3.9679172209998796,
+    "time": 3.9340179830032866,
     "status": "optimal",
     "nodes": 2421
    }
@@ -79,14 +80,14 @@
     "solver": "scip",
     "obj": -2.7941306973831193,
     "bound": -2.794172423057381,
-    "time": 0.14002171800029828,
+    "time": 0.06857385499824886,
     "status": "optimal"
    },
    {
     "solver": "couenne",
     "obj": -2.794130737988682,
     "bound": NaN,
-    "time": 0.2069604140001502,
+    "time": 0.1495611620011914,
     "status": "optimal"
    },
    {
@@ -100,7 +101,7 @@
     "solver": "jaxglobal",
     "obj": -2.794130737988682,
     "bound": -2.7942663526418663,
-    "time": 0.8543526170001314,
+    "time": 0.7422464770024817,
     "status": "optimal",
     "nodes": 55
    }
@@ -117,28 +118,28 @@
     "solver": "scip p=0.0",
     "obj": -1.0316283126240289,
     "bound": -1.031711156857912,
-    "time": 0.23223875400026373,
+    "time": 0.17096312400099123,
     "status": "optimal"
    },
    {
     "solver": "scip p=0.5",
     "obj": -1.3645691815925063,
     "bound": -1.364628929256042,
-    "time": 0.14427658099975815,
+    "time": 0.12349539500064566,
     "status": "optimal"
    },
    {
     "solver": "scip p=1.0",
     "obj": -1.7395321364470717,
     "bound": -1.73953287884095,
-    "time": 0.13075114699995538,
+    "time": 0.1357967980002286,
     "status": "optimal"
    },
    {
     "solver": "jaxglobal p=0.0",
     "obj": -1.0316284534898774,
     "bound": -1.0316911011132437,
-    "time": 1.2901442540000971,
+    "time": 1.1675124849971326,
     "status": "optimal",
     "nodes": 21
    },
@@ -146,7 +147,7 @@
     "solver": "jaxglobal p=0.5",
     "obj": -1.3645697415487879,
     "bound": -1.3646214511834696,
-    "time": 0.16292711500000223,
+    "time": 0.13418732500213082,
     "status": "optimal",
     "nodes": 15
    },
@@ -154,7 +155,7 @@
     "solver": "jaxglobal p=1.0",
     "obj": -1.7395323548157449,
     "bound": -1.7395839249609828,
-    "time": 0.18819724000013593,
+    "time": 0.1444769859990629,
     "status": "optimal",
     "nodes": 11
    }
