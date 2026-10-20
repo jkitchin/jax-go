@@ -320,7 +320,8 @@ table(rows)
 
 # %% [markdown]
 # **Reading the table.** `obj` is the best SSE found, `bound` the proven lower
-# bound (Couenne's is not reported through the `.nl` interface). All solvers
+# bound; `NaN` means the solver's Pyomo interface did not report one (Couenne
+# never does through the `.nl` interface). All solvers
 # get the same relative gap $10^{-4}$ and absolute gap $10^{-6}$ (see
 # `nbutil.py`), and they stop at whichever is reached first. Here the optimal SSE is
 # itself only a few times $10^{-5}$, so the absolute gap is the one that
