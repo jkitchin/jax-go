@@ -20,5 +20,4 @@ site/
 .cache/
 docs-site/references.md
 docs-site/assets/figures/
-docs-site/examples/*.ipynb
-docs-site/pyomo/*.ipynb
+docs-site/notebooks/*.ipynb

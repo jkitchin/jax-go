@@ -138,7 +138,7 @@ print(f"jaxglobal optimum: Q = {xj[0]:.5f} m3/s, D = {xj[1]:.4f} m, Re = {RHO * 
 
 # %%
 lp, lj = loc(pipe_pyomo), loc(friction, pipe)
-save_results("02", "A: pipe (where, clip)", lp, lj, size, rows,
+save_results("09", "A: pipe (where, clip)", lp, lj, size, rows,
              note=f"{n_binary(m)} binaries after GDP/Piecewise")  # fmt: skip
 print(f"lines of model code: Pyomo {lp}, jaxglobal {lj}")
 
@@ -236,7 +236,7 @@ table(rows_b)
 
 # %%
 lp, lj = loc(steam_pyomo), loc(pwl, steam, steam_ineq)
-save_results("02", "B: steam tables (interp, max)", lp, lj, size_b, rows_b, note=f"{n_binary(m)} binaries from Piecewise")
+save_results("09", "B: steam tables (interp, max)", lp, lj, size_b, rows_b, note=f"{n_binary(m)} binaries from Piecewise")
 print(f"lines of model code: Pyomo {lp}, jaxglobal {lj} (including the pwl helper)")
 print("jaxglobal optimum: P = %.2f bar, A = %.1f m2" % tuple(rows_b[-1]["x"]))
 
@@ -254,7 +254,7 @@ print("jaxglobal optimum: P = %.2f bar, A = %.1f m2" % tuple(rows_b[-1]["x"]))
 #
 # * `where`, `clip`, `maximum` and `abs` are traced as ordinary primitives; no auxiliary variables, no bounds on intermediates, no binaries.
 # * `jnp.interp` is **not supported yet** (missing `lt_to` rule in FBBT). The hinge-sum workaround above works but is something the user must know about.
-# * jaxglobal is slower here. The Pyomo solvers return in 0.3-1.2 s; jaxglobal takes about 20 s, a substantial part of it JIT compilation on a heavily loaded machine (in notebook 01 the first call took 5.2 s and a repeat call 0.03 s; this notebook was not separately profiled). Branch-and-bound over a discontinuous function (`where`) relies on interval tests and is not tuned.
+# * jaxglobal is slower here. The Pyomo solvers return in 0.3-1.2 s; jaxglobal takes about 20 s, a substantial part of it JIT compilation on a heavily loaded machine (in notebook 08 the first call took 5.2 s and a repeat call 0.03 s; this notebook was not separately profiled). Branch-and-bound over a discontinuous function (`where`) relies on interval tests and is not tuned.
 # * The discontinuous friction switch is handled by hulling the two branches in boxes that straddle $Re=2300$. The optimum here is not on the switch, so this costs nodes but not correctness. If the optimum sat exactly on a discontinuity, the infimum might not be attained and all tools (not only jaxglobal) would struggle.
 #
 # **Where Pyomo is better, even here:** the solvers are faster and give no-surprise status codes; the GDP blocks are named, so you can inspect which disjunct is active; the same model can be sent to a MILP/MINLP solver of your choice; and the whole thing extends to integer decisions (for example, a choice among standard pipe diameters), which jaxglobal could pose with `integer=` but which these notebooks do not try.

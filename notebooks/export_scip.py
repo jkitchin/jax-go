@@ -18,7 +18,7 @@ the ``scip`` and ``couenne`` binaries reject those operators; the
 ``portable=True`` one uses only operators both read. When the binaries are on
 PATH they are run on it.
 
-Run:  PYTHONPATH=. python examples/export_scip.py [time_limit_seconds]
+Run:  PYTHONPATH=. python notebooks/export_scip.py [time_limit_seconds]
 """
 
 import re

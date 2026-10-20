@@ -10,7 +10,7 @@ replaced by an exact identity, reformulated with auxiliary variables, or
 refused with an `ExportError` that names it. The report's `approximated` field
 lists the few things that are not exact (see below). Evaluate `f` with JAX at
 the solver's `x` before you trust its objective value.
-`examples/export_scip.py` in the repository exports a model that uses
+`notebooks/export_scip.py` in the repository exports a model that uses
 `where`, `maximum`, `tanh`, `relu`, a `fori_loop` and an integer variable, solves
 it with SCIP, and compares the result with `minimize`.
 

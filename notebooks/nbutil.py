@@ -110,7 +110,7 @@ def table(rows, extra=None):
 
 
 def save_results(nb, case, loc_pyomo, loc_jax, size, rows, note=""):
-    """Append one comparison to results/<nb>.json so 00-index can summarize it.
+    """Append one comparison to results/<nb>.json so 07-pyomo-overview can summarize it.
 
     ``size`` is (#vars, #constraints) of the Pyomo model; ``rows`` are solver result dicts.
     """

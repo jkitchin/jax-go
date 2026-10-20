@@ -93,7 +93,7 @@ python benchmarks/check_wrong.py             # exits nonzero on any wrong or unv
 
 ## Built-in test problems
 
-From [example 03](../examples/03-test-problems.ipynb).
+From [notebook 03](../notebooks/03-test-problems.ipynb).
 
 Tolerance: gap ≤ max(1e-5, 1e-6·|f|). *Root LB* is plain interval arithmetic
 on the whole box. *mstart* is the fraction of 20 random L-BFGS-B starts that
@@ -119,7 +119,7 @@ reach f\*, which shows how multimodal each problem is.
 † The usual −10.5364 is f(4,4,4,4); the true minimizer is slightly off that point.
 Times are wall-clock on a laptop CPU for a first (cold) call, so they are
 mostly JIT compilation; a second solve of the same function reuses the
-compiled kernels and takes a small fraction of that (see [example 04](../examples/04-equation-based-solvers.ipynb)). For the two
+compiled kernels and takes a small fraction of that (see [notebook 04](../notebooks/04-equation-based-solvers.ipynb)). For the two
 problems without a published optimum, the tests check the certificate against
 a 401×401 brute-force grid.
 
@@ -132,18 +132,18 @@ relaxations.
 
 ## Comparison with equation-based solvers
 
-`examples/compare.py` builds Pyomo models from **the same Python functions**,
+`notebooks/compare.py` builds Pyomo models from **the same Python functions**,
 using a `jnp`→Pyomo shim on numpy object arrays. It then runs SCIP and Couenne
 (via `.nl` files) and BARON and LindoGlobal (via GAMS). `where`/`maximum` and
 `tanh` had to be reformulated by hand; [`jaxglobal.export`](export.md)
 now does that automatically. BARON rejects every model containing
 `sin`/`cos` ("Cannot handle function 'sin'"). Results go to
-`examples/compare_results.json`. The notebook
-[example 04](../examples/04-equation-based-solvers.ipynb)
+`notebooks/results/compare_results.json`. The notebook
+[notebook 04](../notebooks/04-equation-based-solvers.ipynb)
 walks through the shim and the reformulations, re-measures jaxglobal (cold,
 including compilation, and compiled), and draws `figures/benchmark.png`.
 
-**Pyomo side by side.** The [Pyomo comparison notebooks](../pyomo/index.md)
+**Pyomo side by side.** The [Pyomo comparison notebooks](../notebooks/index.md#comparison-with-pyomo)
 write each model twice, in Pyomo and as a plain JAX function, and solve both:
 basic and pooling problems, `where`/`clip`/table lookups, RK4 kinetics, NN
 surrogates, and things Pyomo cannot express directly.

@@ -91,22 +91,22 @@ nav:
       - Benchmarks and results: guide/benchmarks.md
       - Correctness and limitations: guide/correctness.md
       - jaxglobal and discopt: guide/discopt.md
-  - Examples:
-      - examples/index.md
-      - "01 Relaxations": examples/01-relaxations.ipynb
-      - "02 Branch and bound": examples/02-branch-and-bound.ipynb
-      - "03 Test problems": examples/03-test-problems.ipynb
-      - "04 Equation-based solvers": examples/04-equation-based-solvers.ipynb
-      - "05 Throughput": examples/05-throughput.ipynb
-      - "06 Gaussian processes": examples/06-gaussian-processes.ipynb
-  - Pyomo comparison:
-      - pyomo/index.md
-      - "00 Overview": pyomo/00-index.ipynb
-      - "01 Basics": pyomo/01-basics.ipynb
-      - "02 Control flow": pyomo/02-control-flow.ipynb
-      - "03 ODE models": pyomo/03-ode-models.ipynb
-      - "04 Neural-network surrogates": pyomo/04-neural-network-surrogates.ipynb
-      - "05 Things Pyomo cannot express": pyomo/05-things-pyomo-cannot-express.ipynb
+  - Notebooks:
+      - notebooks/index.md
+      - How jaxglobal works:
+          - "01 Relaxations": notebooks/01-relaxations.ipynb
+          - "02 Branch and bound": notebooks/02-branch-and-bound.ipynb
+          - "03 Test problems": notebooks/03-test-problems.ipynb
+          - "04 Equation-based solvers": notebooks/04-equation-based-solvers.ipynb
+          - "05 Throughput": notebooks/05-throughput.ipynb
+          - "06 Gaussian processes": notebooks/06-gaussian-processes.ipynb
+      - Comparison with Pyomo:
+          - "07 Overview": notebooks/07-pyomo-overview.ipynb
+          - "08 Basics": notebooks/08-pyomo-basics.ipynb
+          - "09 Control flow": notebooks/09-control-flow.ipynb
+          - "10 ODE models": notebooks/10-ode-models.ipynb
+          - "11 Neural-network surrogates": notebooks/11-neural-network-surrogates.ipynb
+          - "12 Things Pyomo cannot express": notebooks/12-things-pyomo-cannot-express.ipynb
   - API reference:
       - api/index.md
       - jaxglobal: api/jaxglobal.md

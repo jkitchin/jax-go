@@ -108,9 +108,10 @@ solvers on general problems (see [Limitations](#limitations)).
   neural-network and Gaussian-process surrogates, ODE kinetics written as
   Python loops.
 
-Narrated, executed notebooks in [`examples/`](examples/README.md) walk through
+Narrated, executed notebooks in [`notebooks/`](notebooks/README.md) walk through
 the relaxations, branch and bound, the test problems, the comparison with
-equation-based solvers, batched throughput and Gaussian-process surrogates.
+equation-based solvers, batched throughput and Gaussian-process surrogates
+(01–06), then compare jaxglobal with Pyomo model by model (07–13).
 
 ## How it works
 
@@ -169,7 +170,7 @@ equation-based solvers, batched throughput and Gaussian-process surrogates.
 
 ![relaxations](figures/relaxations.png)
 
-## Results ([`examples/03-test-problems.ipynb`](examples/03-test-problems.ipynb))
+## Results ([`notebooks/03-test-problems.ipynb`](notebooks/03-test-problems.ipynb))
 
 Tolerance: gap ≤ max(1e-5, 1e-6·|f|). *Root LB* is plain interval arithmetic
 on the whole box. *mstart* is the fraction of 20 random L-BFGS-B starts that
@@ -336,7 +337,7 @@ envelope over the `(mu, sigma)` box, and
 exact envelopes of `Φ`, instead of `Φ`, `φ` and the division one by one. On
 the 20-point GP of example 06, with `gp_std`: EI 1401 → 765 nodes (warm solve
 0.9 s → 0.4 s), PI 727 → 451 (0.55 s → 0.4 s; PI's first, compiling solve is
-slower). [`examples/06-gaussian-processes.ipynb`](examples/06-gaussian-processes.ipynb)
+slower). [`notebooks/06-gaussian-processes.ipynb`](notebooks/06-gaussian-processes.ipynb)
 repeats the paper's case studies: GP means, acquisition functions, a chance
 constraint and a Bayesian-optimization loop.
 
@@ -375,19 +376,19 @@ above are planned for jaxglobal yet.
 
 ## Comparison with equation-based solvers
 
-`examples/compare.py` builds Pyomo models from **the same Python functions**,
+`notebooks/compare.py` builds Pyomo models from **the same Python functions**,
 using a `jnp`→Pyomo shim on numpy object arrays. It then runs SCIP and Couenne
 (via `.nl` files) and BARON and LindoGlobal (via GAMS). `where`/`maximum` and
 `tanh` had to be reformulated by hand; [`jaxglobal.export`](#export-to-scip-and-nl)
 now does that automatically. BARON rejects every model containing
 `sin`/`cos` ("Cannot handle function 'sin'"). Results go to
-`examples/compare_results.json`. The notebook
-[`examples/04-equation-based-solvers.ipynb`](examples/04-equation-based-solvers.ipynb)
+`notebooks/results/compare_results.json`. The notebook
+[`notebooks/04-equation-based-solvers.ipynb`](notebooks/04-equation-based-solvers.ipynb)
 walks through the shim and the reformulations, re-measures jaxglobal (cold,
 including compilation, and compiled), and draws `figures/benchmark.png`. The
 slides in `slides/jaxglobal.md` summarize this.
 
-**Pyomo side by side.** The notebooks in [`notebooks/`](notebooks/README.md)
+**Pyomo side by side.** Notebooks 07–13 in [`notebooks/`](notebooks/README.md)
 write each model twice, in Pyomo and as a plain JAX function, and solve both:
 basic and pooling problems, `where`/`clip`/table lookups, RK4 kinetics, NN
 surrogates, and things Pyomo cannot express directly.
@@ -410,7 +411,7 @@ replaced by an exact identity, reformulated with auxiliary variables, or
 refused with an `ExportError` that names it. The report's `approximated` field
 lists the few things that are not exact (see below). Evaluate `f` with JAX at
 the solver's `x` before you trust its objective value.
-[`examples/export_scip.py`](examples/export_scip.py) exports a model that uses
+[`notebooks/export_scip.py`](notebooks/export_scip.py) exports a model that uses
 `where`, `maximum`, `tanh`, `relu`, a `fori_loop` and an integer variable, solves
 it with SCIP, and compares the result with `minimize`.
 
@@ -520,7 +521,7 @@ primitive with no relaxation rule.
 ```bash
 pip install -e '.[dev]'
 pytest -q                      # soundness, cut validity, global optima, integers
-cd examples && ./run_nb.sh 03-test-problems && cd ..   # see examples/README.md
+notebooks/run_nb.sh 03-test-problems   # see notebooks/README.md
 
 # MINLPLib benchmark (phase 0 of docs/ROADMAP.md)
 python benchmarks/minlplib/fetch.py          # 322 continuous instances, ≤ 50 variables

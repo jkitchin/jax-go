@@ -231,8 +231,8 @@ table(rows_omlt)
 keep = lambda tag: [r for r in rows_exp if tag in r["solver"] and not r["solver"].startswith("couenne")]
 lp, lj = loc(reduced, tanh_exp), loc(surrogate)
 lp_full = loc(full, tanh_exp)
-save_results("04", "tanh MLP 2-8-8-1 (reduced space)", lp, lj, size_red, rows_jax + keep("reduced"), note="exp-form tanh for Pyomo; Couenne did not converge in the limit")
-save_results("04", "tanh MLP 2-8-8-1 (full space)", lp_full, lj, size_full, rows_jax + keep("full"), note="exp-form tanh for Pyomo; Couenne did not converge in the limit")
+save_results("11", "tanh MLP 2-8-8-1 (reduced space)", lp, lj, size_red, rows_jax + keep("reduced"), note="exp-form tanh for Pyomo; Couenne did not converge in the limit")
+save_results("11", "tanh MLP 2-8-8-1 (full space)", lp_full, lj, size_full, rows_jax + keep("full"), note="exp-form tanh for Pyomo; Couenne did not converge in the limit")
 print(f"lines of model code: Pyomo reduced {lp}, Pyomo full {lp_full}, jaxglobal {lj} (the network function `net` is shared with training and counted separately: {loc(net)})")
 
 # %% [markdown]

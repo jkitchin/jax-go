@@ -281,4 +281,4 @@ print(f"largest constraint violation: {ctable.max_violation.max():.1e}")
 # Save both tables for the README.
 out = {"unconstrained": table.reset_index().to_dict("records"),
        "constrained": ctable.drop(columns="note").reset_index().to_dict("records")}
-(ROOT / "examples" / "test_problems_results.json").write_text(json.dumps(out, indent=1, default=float))
+(ROOT / "notebooks" / "results" / "test_problems_results.json").write_text(json.dumps(out, indent=1, default=float))

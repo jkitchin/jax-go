@@ -250,4 +250,4 @@ fig.tight_layout()
 # gains little from further tuning on this machine.
 
 # %%
-json.dump(dict(throughput=tp, split=split), open(ROOT / "examples" / "throughput_results.json", "w"), indent=1)
+json.dump(dict(throughput=tp, split=split), open(ROOT / "notebooks" / "results" / "throughput_results.json", "w"), indent=1)

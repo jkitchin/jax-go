@@ -66,7 +66,7 @@ The rest of the plan cannot be judged without this.
 - **Benchmark set.** Choose the continuous MINLPLib instances with ≤ 50
   variables (several hundred), and tag them by structure: bilinear, polynomial,
   trigonometric, exp/log.
-- **Runner.** Generalize `examples/compare.py` to run jaxglobal, SCIP,
+- **Runner.** Generalize `notebooks/compare.py` to run jaxglobal, SCIP,
   Couenne, BARON (GAMS), EAGO and MAiNGO with equal tolerances and time limits.
   Report Dolan–Moré performance profiles, shifted geometric mean time, and
   solved/unsolved counts.
@@ -106,7 +106,7 @@ reduction.
 5 rounds per node in a `fori_loop`), duality-based range reduction in both
 bounders (`lp.reduce_ranges`), and batched OBBT (`lp.make_obbt`, root by
 default, `obbt="tree"` for every node). Node counts on the 21 problems
-(defaults, same tolerances as `examples/03-test-problems.ipynb` and the tests):
+(defaults, same tolerances as `notebooks/03-test-problems.ipynb` and the tests):
 
 | problem | before | after | ratio |
 |---|---:|---:|---:|

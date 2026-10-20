@@ -95,10 +95,10 @@ table(rows_pipe)
 # %% [markdown]
 # The two objectives agree to the accuracy of the 4-iteration approximation. Pyomo's version has a different (arguably better) property, an exact friction factor,
 # at the price of an additional nonconvex constraint for the solver to branch on. In jaxglobal the iteration count is a modelling choice you control, but a
-# `lax.scan`/`while` whose behaviour depends on the variables is not supported (see notebook 03).
+# `lax.scan`/`while` whose behaviour depends on the variables is not supported (see notebook 10).
 
 # %%
-save_results("05", "Colebrook fori_loop", loc(pipe_pyomo), loc(pipe, friction), size_pipe, rows_pipe,
+save_results("12", "Colebrook fori_loop", loc(pipe_pyomo), loc(pipe, friction), size_pipe, rows_pipe,
              note="Pyomo: implicit equation; jaxglobal: 4 fixed iterations")
 
 # %% [markdown]
@@ -160,7 +160,7 @@ table(rows_lib)
 # the normal CDF with `pyo.erf`-free approximations or an external function, which no global solver here can then bound.
 
 # %%
-save_results("05", "library functions", None, None, (None, None), rows_lib,
+save_results("12", "library functions", None, None, (None, None), rows_lib,
              note="Pyomo cannot call jnp functions; jaxglobal works if primitives are supported")
 
 # %% [markdown]
@@ -192,7 +192,7 @@ rows_quad = [solve_pyomo(quad_pyomo(), s) for s in ("scip", "couenne", "baron")]
 table(rows_quad)
 
 # %%
-save_results("05", "einsum quadratic + sin", loc(quad_pyomo), loc(quad), size_quad, rows_quad, note="3 variables")
+save_results("12", "einsum quadratic + sin", loc(quad_pyomo), loc(quad), size_quad, rows_quad, note="3 variables")
 print(f"lines of model code: Pyomo {loc(quad_pyomo)}, jaxglobal {loc(quad)}")
 
 # %% [markdown]
@@ -245,7 +245,7 @@ for p in PS:
 table(rows_fam_pyo)
 
 # %%
-save_results("05", "parametric family (3 values)", loc(camel_pyomo_param), loc(camel_p), model_size(camel_pyomo_param()), rows_fam_pyo + rows_fam,
+save_results("12", "parametric family (3 values)", loc(camel_pyomo_param), loc(camel_p), model_size(camel_pyomo_param()), rows_fam_pyo + rows_fam,
              note="loop over parameter values; no batching")
 
 # %% [markdown]
@@ -265,7 +265,7 @@ save_results("05", "parametric family (3 values)", loc(camel_pyomo_param), loc(c
 # * Colebrook: the implicit equation as a constraint (done above).
 # * Library functions: re-express with Pyomo functions, or an `ExternalFunction` (which global solvers cannot bound).
 # * Families: `Param(mutable=True)` and a Python loop (done above), which is as simple as in jaxglobal and does not suffer from the compile cost.
-# * `jaxglobal.export.to_scip` / `to_nl` now write a SCIP or `.nl` model straight from a JAX function (unrolling fixed loops, rewriting `tanh`/`softplus`, reformulating `where`/`max`) and refuse what they cannot represent, such as `erfc` or variable-dependent loops. That removes the hand translation for the supported subset; see `examples/export_scip.py`.
+# * `jaxglobal.export.to_scip` / `to_nl` now write a SCIP or `.nl` model straight from a JAX function (unrolling fixed loops, rewriting `tanh`/`softplus`, reformulating `where`/`max`) and refuse what they cannot represent, such as `erfc` or variable-dependent loops. That removes the hand translation for the supported subset; see `notebooks/export_scip.py`.
 #
 # **Verdict.** The advantage of the function-based approach is real for models written as numerical code, but this notebook shows that it applies to the subset of JAX that
 # the interpreter supports. For models with many integer or logical decisions, many constraints or large sparse structure, Pyomo remains the better choice.
