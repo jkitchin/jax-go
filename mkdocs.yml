@@ -107,6 +107,7 @@ nav:
           - "10 ODE models": notebooks/10-ode-models.ipynb
           - "11 Neural-network surrogates": notebooks/11-neural-network-surrogates.ipynb
           - "12 Things Pyomo cannot express": notebooks/12-things-pyomo-cannot-express.ipynb
+          - "13 Many switches": notebooks/13-many-switches.ipynb
   - API reference:
       - api/index.md
       - jaxglobal: api/jaxglobal.md

@@ -7,32 +7,32 @@
   "rows": [
    {
     "solver": "scip",
-    "obj": -2828.741931947145,
-    "bound": NaN,
-    "time": 0.29120658291503787,
+    "obj": -2828.7419320067597,
+    "bound": -2828.95430846413,
+    "time": 0.5947574370002258,
     "status": "optimal"
    },
    {
     "solver": "couenne",
-    "obj": -2828.7385933384676,
+    "obj": -2828.7385933382125,
     "bound": NaN,
-    "time": 0.9701140830293298,
+    "time": 0.9439863229999901,
     "status": "optimal"
    },
    {
     "solver": "baron",
-    "obj": -2828.738567737351,
-    "bound": -2828.73856773727,
-    "time": 1.0133498748764396,
-    "status": "optimal"
+    "obj": NaN,
+    "bound": NaN,
+    "time": NaN,
+    "status": "not run: GAMS/BARON not installed"
    },
    {
     "solver": "jaxglobal",
-    "obj": -2828.738215833161,
-    "bound": -2828.841751361011,
-    "time": 23.052080917172134,
+    "obj": -2828.730776911432,
+    "bound": -2828.9269328618475,
+    "time": 8.070380045000093,
     "status": "optimal",
-    "nodes": 39
+    "nodes": 47
    }
   ],
   "note": "4 binaries after GDP/Piecewise"
@@ -45,32 +45,32 @@
   "rows": [
    {
     "solver": "scip",
-    "obj": 453289.72791494004,
-    "bound": 453261.833073732,
-    "time": 0.40545616718009114,
+    "obj": 453289.72791494126,
+    "bound": 453249.3808914151,
+    "time": 0.3410453219998999,
     "status": "optimal"
    },
    {
     "solver": "couenne",
     "obj": 453289.7075257055,
     "bound": NaN,
-    "time": 1.176818666048348,
+    "time": 0.7381679019999865,
     "status": "optimal"
    },
    {
     "solver": "baron",
-    "obj": 453289.72806516883,
-    "bound": 453289.72806516883,
-    "time": 1.1529857502318919,
-    "status": "optimal"
+    "obj": NaN,
+    "bound": NaN,
+    "time": NaN,
+    "status": "not run: GAMS/BARON not installed"
    },
    {
     "solver": "jaxglobal",
-    "obj": 453290.1504857959,
-    "bound": 453285.79978744395,
-    "time": 21.418248707894236,
+    "obj": 453289.72806517134,
+    "bound": 453247.3907721487,
+    "time": 1.4663810030001514,
     "status": "optimal",
-    "nodes": 181
+    "nodes": 9
    }
   ],
   "note": "12 binaries from Piecewise"

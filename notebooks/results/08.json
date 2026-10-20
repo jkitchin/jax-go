@@ -8,39 +8,39 @@
    {
     "solver": "scip",
     "obj": -1.0316283126240289,
-    "bound": -1.03171115685791,
-    "time": 0.16587908379733562,
+    "bound": -1.031711156857912,
+    "time": 0.20122967399993286,
     "status": "optimal"
    },
    {
     "solver": "couenne",
     "obj": -1.0316284534898774,
     "bound": NaN,
-    "time": 0.2933306251652539,
+    "time": 0.2227965399997629,
     "status": "optimal"
    },
    {
     "solver": "baron",
-    "obj": -1.0316284534898774,
-    "bound": -1.0316284534898774,
-    "time": 0.9637175831012428,
-    "status": "optimal"
+    "obj": NaN,
+    "bound": NaN,
+    "time": NaN,
+    "status": "not run: GAMS/BARON not installed"
    },
    {
     "solver": "jaxglobal",
     "obj": -1.0316284534898774,
-    "bound": -1.031690958516066,
-    "time": 5.152641499880701,
+    "bound": -1.031691101156541,
+    "time": 1.1387401919996591,
     "status": "optimal",
-    "nodes": 19
+    "nodes": 21
    },
    {
     "solver": "jaxglobal (2nd call, cached)",
     "obj": -1.0316284534898774,
-    "bound": -1.031690958516066,
-    "time": 0.03185462532564998,
+    "bound": -1.031691101156541,
+    "time": 0.19740134799985753,
     "status": "optimal",
-    "nodes": 19
+    "nodes": 21
    }
   ],
   "note": ""
@@ -53,32 +53,32 @@
   "rows": [
    {
     "solver": "scip",
-    "obj": -400.00000193984795,
-    "bound": -400.000001939848,
-    "time": 0.0698564168997109,
+    "obj": -400.00000193984783,
+    "bound": -400.0000019398479,
+    "time": 0.05583911099984107,
     "status": "optimal"
    },
    {
     "solver": "couenne",
     "obj": -400.00005661955254,
     "bound": NaN,
-    "time": 0.3711538342759013,
+    "time": 0.24705354200023066,
     "status": "optimal"
    },
    {
     "solver": "baron",
-    "obj": -400.0,
-    "bound": -400.0000000000001,
-    "time": 0.8449492081999779,
-    "status": "optimal"
+    "obj": NaN,
+    "bound": NaN,
+    "time": NaN,
+    "status": "not run: GAMS/BARON not installed"
    },
    {
     "solver": "jaxglobal",
-    "obj": -399.99999306260236,
-    "bound": -400.0144145605257,
-    "time": 12.014295500237495,
+    "obj": -399.99999999992986,
+    "bound": -400.0022244057358,
+    "time": 2.378105878000042,
     "status": "optimal",
-    "nodes": 105
+    "nodes": 47
    }
   ],
   "note": ""

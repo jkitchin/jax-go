@@ -7,33 +7,33 @@
   "rows": [
    {
     "solver": "jaxglobal",
-    "obj": -0.923083806993036,
-    "bound": -0.9231679542727939,
-    "time": 6.924716624896973,
+    "obj": -0.9387711956554801,
+    "bound": -0.9387722999524618,
+    "time": 1.0661641950000558,
     "status": "optimal",
-    "nodes": 1041
+    "nodes": 359
    },
    {
     "solver": "jaxglobal crown",
-    "obj": -0.923083806993036,
-    "bound": -0.9231679542727939,
-    "time": 4.1455743331462145,
+    "obj": -0.9387711956554801,
+    "bound": -0.9387846485617608,
+    "time": 0.9574784380001802,
     "status": "optimal",
-    "nodes": 219
+    "nodes": 231
    },
    {
     "solver": "scip (reduced, exp)",
-    "obj": -0.9230838069930343,
-    "bound": -0.92317596660219,
-    "time": 18.39158241590485,
+    "obj": -0.9387673468360751,
+    "bound": -0.9388685986476566,
+    "time": 16.862243045000014,
     "status": "optimal"
    },
    {
     "solver": "baron (reduced, exp)",
-    "obj": -0.9230838069930347,
-    "bound": -0.9230838069930606,
-    "time": 4.295033750124276,
-    "status": "optimal"
+    "obj": NaN,
+    "bound": NaN,
+    "time": NaN,
+    "status": "not run: GAMS/BARON not installed"
    }
   ],
   "note": "exp-form tanh for Pyomo; Couenne did not converge in the limit"
@@ -46,33 +46,33 @@
   "rows": [
    {
     "solver": "jaxglobal",
-    "obj": -0.923083806993036,
-    "bound": -0.9231679542727939,
-    "time": 6.924716624896973,
+    "obj": -0.9387711956554801,
+    "bound": -0.9387722999524618,
+    "time": 1.0661641950000558,
     "status": "optimal",
-    "nodes": 1041
+    "nodes": 359
    },
    {
     "solver": "jaxglobal crown",
-    "obj": -0.923083806993036,
-    "bound": -0.9231679542727939,
-    "time": 4.1455743331462145,
+    "obj": -0.9387711956554801,
+    "bound": -0.9387846485617608,
+    "time": 0.9574784380001802,
     "status": "optimal",
-    "nodes": 219
+    "nodes": 231
    },
    {
     "solver": "scip (full, exp)",
-    "obj": -0.9231142384277184,
-    "bound": -0.923205834895438,
-    "time": 4.940765124745667,
+    "obj": -0.9387718203127369,
+    "bound": -0.9388646636175748,
+    "time": 25.882642084000054,
     "status": "optimal"
    },
    {
     "solver": "baron (full, exp)",
-    "obj": -0.9230919725826314,
-    "bound": -4.565767656647584,
-    "time": 31.88670799974352,
-    "status": "locallyOptimal"
+    "obj": NaN,
+    "bound": NaN,
+    "time": NaN,
+    "status": "not run: GAMS/BARON not installed"
    }
   ],
   "note": "exp-form tanh for Pyomo; Couenne did not converge in the limit"
