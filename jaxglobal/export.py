@@ -870,6 +870,17 @@ class _Lowering:
         roots = [prob.obj] + [c[0] for c in prob.cons]
         self.order = _reachable(prob.g, roots)
         self.iv = _intervals(prob.g, self.order, prob.lo, prob.hi)
+        # Nodes whose interval above is exact (no rounding: box bounds, constants, 0/1 logicals, and select / max /
+        # min / neg / abs of exact operands). They are not padded: padding [0, 1] to [-1e-9, 1 + 1e-6 + 1e-9] makes
+        # big-M constants that should be exactly 0 come out as 1e-9 .. 2e-6 (SCIP's epsilon / feastol), and SCIP's
+        # presolve (linear + probing) then derives invalid fixings from them and cuts off valid points.
+        self.exact = set()
+        for i in self.order:
+            op, args, _ = prob.g.nodes[i]
+            if op in ("var", "const") or op in LOGICAL or (
+                op in ("select", "max", "min", "neg", "abs") and all(k in self.exact for k in args)
+            ):
+                self.exact.add(i)
         self.undefined = {}  # node -> why its expression is undefined somewhere on the box
         for i in self.order:
             why = self._domain(i)
@@ -1007,7 +1018,7 @@ class _Lowering:
         if not (np.isfinite(lo) and np.isfinite(hi)):
             raise ExportError(f"{what}: no finite bound on an operand over the box (big-M needs one); "
                               "give the variables finite bounds")  # fmt: skip
-        return _pad(lo, hi)
+        return (lo, hi) if i in self.exact else _pad(lo, hi)
 
     def lin(self, *terms):
         """sum of c * node (node None for a constant c)."""
