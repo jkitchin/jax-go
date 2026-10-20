@@ -315,30 +315,32 @@ continuous relaxation.
 The default, `branch_var="auto"`, branches on pseudocosts (the bound gains
 measured on earlier splits of each variable) when there are no integer
 variables, and on `width` (relative width times the relaxation gap, fractional
-integers first) when there are. Those were the best measured choices in
-branching comparisons on 2026-10-18 (before PR #76; the data are not checked
-in, and these numbers are to be re-measured): on the MINLPLib start50 set (a
-separate run from the cold table above) pseudocost solves 38 instances in 60 s
-against 36 for width and for `strong`, and on the 25 built-in and synthetic
-problems it takes the least total time. On
-int50 pseudocost and `strong` each solve one more instance than width, but each
-loses one that width solves (flay04m and nous1). An earlier, checked-in int50
-comparison (2026-10-17, warm) went the other way: width 31
-(`results/int50_probe_warm.csv`), pseudocost 27 (`int50_pseudocost_warm.csv`).
-Override it when (node counts from the 2026-10-18 runs):
+integers first) when there are. A re-run on current `main` (2026-10-20, after
+PRs #76 and #81; [`benchmarks/branching_2026_10.sh`](benchmarks/branching_2026_10.sh),
+tables from [`benchmarks/branching_report.py`](benchmarks/branching_report.py),
+on a 4-core cloud VM) supports that choice:
+
+| | `width` | `pseudocost` | `strong` |
+|---|---:|---:|---:|
+| MINLPLib start50 solved in 60 s (warm) | 38 | **40** | 38 |
+| MINLPLib int50 solved in 60 s (warm) | **43** | **43** | 41 |
+| 25 built-in and synthetic problems: nodes vs `width` (geometric mean) | 1.00 | 1.00 | **0.83** |
+| the same 25: total warm time | 57 s | **54 s** | 127 s |
+
+No rule gave a wrong answer, and all three certify all 25 problems. On int50
+`pseudocost` ties `width` but not on the same instances: it solves ex1252a and
+tln4 and loses hadamard_5 and smallinvDAXr5b150-165. Override the default when:
 
 * a continuous problem takes more nodes with pseudocost than with width
-  (holder_table 279 vs 191, tanh_net_2d 241 vs 189; the results table above,
-  a separate run, has 239 for tanh_net_2d): try `width`;
+  (holder_table 279 vs 191, tanh_net_2d 241 vs 189, reactor 439 vs 357): try
+  `width`;
 * bounding a box is cheap and the tree is small to medium: `strong` bounds
-  trial children for the candidates and often needs far fewer nodes (hartmann6
-  634 vs 1081, univariate_sum_20 205 vs 665), but on deep trees it can cost
-  more than it saves (nn_tanh_5x8x2: 575k nodes vs 244k). An earlier run on
-  2026-10-17 against `width` ([`docs/ROADMAP.md`](docs/ROADMAP.md)) gave other
-  counts (hartmann6 1099 → 634, univariate_sum_20 513 → 201, nn_tanh_5x8x2
-  +6%);
-* an integer problem stalls with a large gap: try `pseudocost` or `strong`
-  (tln4 and tspn05 are solved by both and not by width).
+  trial children for the candidates and often needs far fewer nodes (hartmann3
+  42 vs 93, hartmann6 634 vs 1081, univariate_sum_20 191 vs 681), but on deep
+  trees it costs more than it saves (nn_tanh_5x8x2: 575k nodes and 114 s
+  against 244k and 37 s);
+* an integer problem stalls with a large gap: try `pseudocost` (tln4) or
+  `strong` (tln4, tspn05), which solve instances that width does not.
 
 ## Gaussian-process surrogates
 

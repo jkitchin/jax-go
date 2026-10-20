@@ -49,23 +49,22 @@ when the dependency tracing cannot follow an equation), are
 branched on in a continuous problem. Integer variables are split at integer
 values.
 
-In branching comparisons on 2026-10-18 (before PR #76; data not checked in,
-to be re-measured), on MINLPLib start50 at 60 s `"pseudocost"` solves 38
-instances against 36 for `"width"` and `"strong"`; on int50 `"pseudocost"` and
-`"strong"` each solve one more than `"width"` but each loses one that `"width"`
-solves (flay04m, nous1). Hence the `"auto"` default. An earlier, checked-in
-int50 comparison (2026-10-17, warm) went the other way: `"width"` 31
-(`int50_probe_warm.csv`), `"pseudocost"` 27 (`int50_pseudocost_warm.csv`).
-In runs on 2026-10-17 against `"width"`, then the default (data not checked
-in), on the 21 built-in problems plus four larger ones (all certified), node
-counts relative to `"width"` as geometric means were 0.97 for `"pseudocost"`,
-0.90 for `"reliability"` and 0.80 for `"strong"` (iterations 0.82). The largest
-gains for `"strong"` were on hartmann3 (157 → 46 nodes), hartmann6
-(1099 → 634) and a reactor network (1053 → 654). On problems with 2 to 6
-variables the choice of variable matters little. `"strong"` can cost more than
-it saves on deep trees: in the 2026-10-18 runs nn_tanh_5x8x2 took 575k nodes
-against 244k (hartmann6 634 against 1081, univariate_sum_20 205 against 665),
-while the 2026-10-17 runs had it only 6% above `"width"`. `"reliability"` can be
+In a re-run of the branching comparison on current `main` (2026-10-20, after
+PRs #76 and #81, warm, on a 4-core cloud VM), on MINLPLib start50 at 60 s
+`"pseudocost"` solves 40 instances against 38 for `"width"` and `"strong"`; on
+int50 `"width"` and `"pseudocost"` each solve 43 (not the same ones:
+pseudocost gains ex1252a and tln4 and loses hadamard_5 and
+smallinvDAXr5b150-165) and `"strong"` 41. Hence the `"auto"` default. On the 21
+built-in problems plus univariate_sum_10/20, nn_tanh_5x8x2 and qcqp_10_5 (all
+certified by every rule), node counts relative to `"width"` as geometric means
+are 1.00 for `"pseudocost"` and 0.83 for `"strong"`, which needs fewer nodes on
+15 of the 25. The largest gains for `"strong"` are on hartmann3 (157 → 42
+nodes), hartmann6 (1099 → 634) and univariate_sum_20 (495 → 191). On problems
+with 2 to 6 variables the choice of variable matters little. `"strong"` can
+cost more than it saves on deep trees: nn_tanh_5x8x2 takes 575k nodes and
+114 s against 251k and 40 s with `"width"`, and over the 25 problems its total
+warm time is 127 s against 57 s. The data are in
+`benchmarks/results/branch_*`. `"reliability"` can be
 several times slower in wall time on integer problems, because each
 strong-branching trial is a bounded box. `Result.evaluations` counts every box
 bounded, including strong-branching trials, so compare `evaluations` as well
