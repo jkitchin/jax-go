@@ -34,7 +34,7 @@ from jax import lax
 from jax.custom_derivatives import SymbolicZero
 
 from .fbbt_interp import layout, scalarize, tape_size, use_interpreter
-from .relax import MC, apply_rule, apply_xlogx, is_mc
+from .relax import MC, apply_rule, apply_xlogx, ccmin, cvmax, is_mc
 
 F64 = jnp.float64
 
@@ -161,9 +161,9 @@ def _put(c, v, start):
 
 def _combine(cv, cc, cvh, cch, lo, hi):
     """``relax_with``'s use of a hull: intersect, then tighten."""
-    cv = jnp.where(jnp.isnan(cv), cvh, jnp.maximum(cv, cvh))
-    cc = jnp.where(jnp.isnan(cc), cch, jnp.minimum(cc, cch))
-    return jnp.stack([jnp.maximum(cv, lo), jnp.minimum(cc, hi)])
+    cv = jnp.where(jnp.isnan(cv), cvh, cvmax(cv, cvh))
+    cc = jnp.where(jnp.isnan(cc), cch, ccmin(cc, cch))
+    return jnp.stack([cvmax(cv, lo), ccmin(cc, hi)])
 
 
 def _hull_rows(prog, tape, blocks, K):

@@ -37,7 +37,7 @@ import jax.numpy as jnp
 from jax.extend import core as jcore
 
 from .fbbt import Const, _has_tracer, make_tape, tape_cache
-from .relax import MC, SAFE_K, Ctx, eval_jaxpr_mc, is_mc
+from .relax import MC, SAFE_K, Ctx, ccmin, cvmax, eval_jaxpr_mc, is_mc
 
 INTERVAL_CTX = Ctx(interval_only=True)
 SAFE_INTERVAL_CTX = Ctx(interval_only=True, safe=True)
@@ -304,8 +304,8 @@ def make_alphabb(fn, eigen=True, safe=False, interpret="auto"):
             cc = cc + sg(fhi - fx) + sg(pad * (jnp.abs(fx) + sb))
             ecv = ecv + sg(flo - fx) - sg(pad * (jnp.abs(fx) + se))
             ecc = ecc + sg(fhi - fx) + sg(pad * (jnp.abs(fx) + sc))
-        cv = jnp.maximum(jnp.where(jnp.isnan(cv), -jnp.inf, cv), jnp.where(jnp.isnan(ecv), -jnp.inf, ecv))
-        cc = jnp.minimum(jnp.where(jnp.isnan(cc), jnp.inf, cc), jnp.where(jnp.isnan(ecc), jnp.inf, ecc))
+        cv = cvmax(jnp.where(jnp.isnan(cv), -jnp.inf, cv), jnp.where(jnp.isnan(ecv), -jnp.inf, ecv))
+        cc = ccmin(jnp.where(jnp.isnan(cc), jnp.inf, cc), jnp.where(jnp.isnan(ecc), jnp.inf, ecc))
         return cv, cc
 
     def path(lo):

@@ -35,7 +35,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from .fbbt import Const, _has_tracer, make_tape, tape_cache
-from .relax import (AUTO_UNIVARIATE, MC, RULES, SAFE_K, STRUCTURAL, Ctx, Unknown, apply_rule, apply_xlogx, eval_jaxpr_mc, LogTerms, Monomials, lin_consumed, mul_consumed,
+from .relax import (AUTO_UNIVARIATE, MC, RULES, SAFE_K, STRUCTURAL, Ctx, Unknown, apply_rule, ccmin, cvmax, apply_xlogx, eval_jaxpr_mc, LogTerms, Monomials, lin_consumed, mul_consumed,
                     is_mc, tighten, xlogx_pair)
 
 INTERVAL_CTX = Ctx(interval_only=True)
@@ -396,8 +396,8 @@ def make_univariate(f, K=65, multivariate=False, safe=False, interpret="auto"):
                     std = MC(*(jnp.reshape(jnp.broadcast_to(c, shp), (-1,)) for c in o))
                     lo_ = jnp.maximum(std.lo, data.lo[sl])
                     hi_ = jnp.minimum(std.hi, data.hi[sl])
-                    cv = jnp.where(jnp.isnan(std.cv), cv, jnp.maximum(std.cv, cv))
-                    cc = jnp.where(jnp.isnan(std.cc), cc, jnp.minimum(std.cc, cc))
+                    cv = jnp.where(jnp.isnan(std.cv), cv, cvmax(std.cv, cv))
+                    cc = jnp.where(jnp.isnan(std.cc), cc, ccmin(std.cc, cc))
                     o = tighten(MC(*(jnp.reshape(c, shp) for c in (lo_, hi_, cv, cc))))
                 vals[s] = o
         out = tape.outs[0]
@@ -477,8 +477,8 @@ def make_relaxer(fn, univariate=True, alphabb=False, K=65, multivariate=False, s
         shp = jnp.shape(m.cv)
         acv, acc = aapply(x, lo, hi, data[1])
         acv, acc = jnp.reshape(acv, shp), jnp.reshape(acc, shp)
-        cv = jnp.where(jnp.isnan(m.cv), acv, jnp.maximum(m.cv, acv))
-        cc = jnp.where(jnp.isnan(m.cc), acc, jnp.minimum(m.cc, acc))
+        cv = jnp.where(jnp.isnan(m.cv), acv, cvmax(m.cv, acv))
+        cc = jnp.where(jnp.isnan(m.cc), acc, ccmin(m.cc, acc))
         return tighten(MC(m.lo, m.hi, cv, cc))
 
     return Relaxer(prepare, call)
