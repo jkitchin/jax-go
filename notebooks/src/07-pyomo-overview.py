@@ -214,7 +214,8 @@ plt.show()
 # * **Where Pyomo is better.** Integer and logical structure, a choice of mature solvers, named constraints and duals, sparse large-scale models, and a large
 #   ecosystem (`pyomo.dae`, GDP, OMLT).
 # * **Current jaxglobal limits found while writing these notebooks.** Compile time grows quickly with the length of an unrolled loop (notebook 10);
-#   `jnp.interp` has no relaxation rule yet (notebook 09); loops written with `lax.scan` / `lax.fori_loop` need care (notebooks 10 and 12 say what works today),
-#   while Python `for` loops of fixed length are always traced correctly.
+#   `jnp.interp` has no relaxation rule yet (notebook 09); `lax.scan` and fixed-count `lax.fori_loop` are unrolled like Python loops (since
+#   PR #81; before that they were bounded as a single iteration), and `lax.while_loop` and a `lax.cond` on a model value are refused (notebooks 10, 12).
+#   Python `for` loops of fixed length are always traced correctly.
 # * **Solvers on the machine that ran these notebooks.** BARON needs GAMS and a license; where it is missing its rows read `not run`, and the comparison rests
 #   on SCIP and Couenne.
