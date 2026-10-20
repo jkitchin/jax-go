@@ -23,13 +23,18 @@ can use:
 * array operations: indexing, slicing, reshape, broadcast, concatenate,
   reductions, `dot`/`matmul`/`einsum` with constant matrices, and 1-D inner
   products between two variable-dependent arrays;
-* Python loops and helper functions, `jax.lax.fori_loop` and `scan` with a
-  static trip count, and `jit`/`custom_jvp` sub-calls: tracing removes them.
+* Python loops and helper functions, and `jit`/`custom_jvp` sub-calls:
+  tracing removes them;
+* `jax.lax.scan`, and `jax.lax.fori_loop` with Python `int` bounds (it lowers
+  to a scan): the bounding interpreters unroll the loop (at most 10,000
+  iterations per scan), so trace and compile time grow with the trip count,
+  as with a Python loop; `lax.cond`/`switch` on a constant index.
 
-Not supported: `lax.cond`, `while_loop` and `scan` whose control flow depends
-on `x`, and `dot_general` between two variable-dependent arrays beyond 1-D
-inner products. An unsupported primitive raises `NotImplementedError` naming
-the primitive. Python control flow on static values is fine.
+Not supported: `lax.while_loop` (and `fori_loop` with traced bounds, which
+lowers to one), `lax.cond` whose predicate depends on `x` (use `jnp.where`),
+and `dot_general` between two variable-dependent arrays beyond 1-D inner
+products. An unsupported primitive raises `NotImplementedError` naming the
+primitive. Python control flow on static values is fine.
 
 ```python
 import jax

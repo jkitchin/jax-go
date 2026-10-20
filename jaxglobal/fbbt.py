@@ -34,7 +34,7 @@ import numpy as np
 from jax import lax
 from jax.extend import core as jcore
 
-from .relax import MC, RULES, SUBJAXPR_PARAMS, Ctx, Unknown, _same_var, apply_rule, is_mc
+from .relax import MC, RULES, Ctx, inline_call, Unknown, _same_var, apply_rule, is_mc
 
 INF = jnp.inf
 CTX = Ctx(interval_only=True)
@@ -77,9 +77,11 @@ def _flatten(jaxpr, consts, in_atoms, nodes, shapes, seen):
     for eqn in jaxpr.eqns:
         ins = tuple(read(v) for v in eqn.invars)
         name = eqn.primitive.name
-        sub = next((eqn.params[p] for p in SUBJAXPR_PARAMS if p in eqn.params), None)
-        if name not in RULES and sub is not None:
-            outs = _flatten(getattr(sub, "jaxpr", sub), getattr(sub, "consts", ()), ins, nodes, shapes, seen)
+        # calls are inlined, scans unrolled, a cond on a constant index is its branch (as
+        # ``relax.eval_jaxpr_mc`` does); other loops and branches raise NotImplementedError
+        call = None if name in RULES else inline_call(eqn, ins, _const_value)
+        if call is not None:
+            outs = _flatten(*call, nodes, shapes, seen)
             for v, o in zip(eqn.outvars, outs):
                 env[v] = o
             continue
@@ -99,6 +101,13 @@ def _flatten(jaxpr, consts, in_atoms, nodes, shapes, seen):
         if key is not None:
             seen[key] = tuple(slots)
     return [read(v) for v in jaxpr.outvars]
+
+
+def _const_value(a):
+    """The value of the tape atom ``a`` if it is a constant known at trace time, else None."""
+    if isinstance(a, Const) and not isinstance(a.val, jax.core.Tracer):
+        return a.val
+    return None
 
 
 def _cse_key(eqn, ins):
