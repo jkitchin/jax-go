@@ -1,0 +1,13 @@
+solver,cls,name,status,verdict,time,primal,dual,nodes,fstar,loc_jax,loc_pyomo,message
+jaxglobal,logic,motor_lines_26,optimal,unknown,76.09498551800002,129895.85773950668,129883.2074315693,413,,6,20,optimal
+jaxglobal,logic,water_main_26,optimal,correct,72.23007765900002,173881.28235816403,173864.21805654114,77,173876.835214,6,21,optimal
+jaxglobal,logic,motor_lines_104,optimal,unknown,74.12751038300001,129818.96220245735,129806.00973693734,955,,6,20,optimal
+jaxglobal,logic,water_main_104,optimal,correct,94.54288815399997,171822.52896313483,171805.61403799063,369,171820.190768,6,21,optimal
+jaxglobal,logic,motor_lines_416,optimal,unknown,78.07579899500001,129807.38819972267,129794.46396831611,3517,,6,20,optimal
+jaxglobal,logic,water_main_416,optimal,correct,100.33995623600003,171704.12007784582,171686.94999442337,635,171703.733532,6,21,optimal
+jaxglobal,logic,motor_lines_1664,optimal,unknown,100.18375919099992,129807.05055374993,129794.084464235,6181,,6,20,optimal
+jaxglobal,logic,water_main_1664,optimal,correct,102.45014597400007,171705.57537763854,171688.5012855035,1171,171702.402915,6,21,optimal
+scip,logic,motor_lines_26,optimal,unknown,25.980788,129894.00519784183,129887.02489841763,13681,,6,20,pyscipopt 6.3.0: gaplimit [pyomo build 0.2s]
+scip,logic,water_main_26,optimal,correct,0.484616,173876.83521391673,173860.6108293987,3,173876.835214,6,21,pyscipopt 6.3.0: gaplimit [pyomo build 0.3s]
+scip,logic,motor_lines_104,optimal,unknown,28.735559,129810.44242781334,129810.44242781334,11509,,6,20,pyscipopt 6.3.0: optimal [pyomo build 0.2s]
+scip,logic,water_main_104,optimal,correct,0.473145,171820.19076765288,171813.86250171837,3,171820.190768,6,21,pyscipopt 6.3.0: gaplimit [pyomo build 0.2s]
