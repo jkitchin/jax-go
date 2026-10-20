@@ -29,7 +29,7 @@ with binaries.
 ``fstar`` for the first two is a dense grid followed by a local polish
 (``fstar_by_grid``); for ``tariff_blend`` it is exact (enumeration of the 2^4
 tariff choices, one LP each). For ``motor_lines_<K>`` and ``water_main_<K>`` it is
-the best point found by jaxglobal or SCIP (Pyomo twin), evaluated in JAX; see
+the best point found by jaxglobal or SCIP (Pyomo twin); see
 each entry's ``source`` for which solvers proved it optimal.
 """
 
@@ -387,12 +387,13 @@ PROBLEMS = [
 ]
 
 _PRICE_LISTS = (26, 104, 416, 1664)  # 26 = the IEC 60034 ratings; the rest are finer lists over 0.37 .. 315 kW
-_FSTAR_MOTOR_LINES = dict.fromkeys(_PRICE_LISTS)
+# SCIP proved 26 and 104 (gap 1e-4) and hit 600 s on 416 and 1664; jaxglobal proved all four (benchmarks/results/many_switches.csv)
+_FSTAR_MOTOR_LINES = {26: 129894.005198, 104: 129810.442428, 416: 129804.411496, 1664: 129807.050554}
 _FSTAR_WATER_MAIN = {26: 173876.835214, 104: 171820.190768, 416: 171703.733532, 1664: 171702.402915}
 for _k in _PRICE_LISTS:
     _f, _g = motor_lines(_k)
     PROBLEMS.append(AppProblem(f"motor_lines_{_k}", _f, _M_LO, _M_HI, _g, None, _FSTAR_MOTOR_LINES[_k],
-                               "Illustrative costs; fstar = best point of jaxglobal and SCIP (Pyomo twin), evaluated in JAX",
+                               "Illustrative costs; fstar = best point of jaxglobal and SCIP (Pyomo twin)",
                                motor_lines_pyomo(_k), f"price list of {_k} motor ratings per line (jnp.where); 2 x {_k} binaries in Pyomo"))  # fmt: skip
     _f, _g = water_main(_k)
     PROBLEMS.append(AppProblem(f"water_main_{_k}", _f, _W_LO, _W_HI, _g, None, _FSTAR_WATER_MAIN[_k],

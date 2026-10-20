@@ -27,7 +27,8 @@
 #
 # The models are pipe networks whose pump motors are bought from a price list. In code, a price list is one line.
 #
-# Solver limits for the live comparison: relative gap 1e-4, at most 60 s. The scaling runs use 600 s and are read from
+# Solver limits for the live comparison: relative gap 1e-4, at most 300 s (not the 60 s of the other notebooks: jaxglobal needs
+# about 75 s here, most of it compiling on the first call). The scaling runs use 600 s and are read from
 # `benchmarks/results/many_switches.csv` (the command that regenerates it is given below).
 
 # %%
@@ -140,8 +141,9 @@ assert np.allclose(jax.vmap(big_enough)(X), jax.vmap(g26)(X), rtol=1e-12)
 m = lines_pyomo()
 size = model_size(m)
 print(f"Pyomo: {size[0]} variables ({2 * len(KW)} binary), {size[1]} constraints")
-rows = [solve_pyomo(lines_pyomo(), s) for s in ("scip", "couenne", "baron")]
-rows.append(solve_jax(cost, LO, HI, ineq=big_enough))
+TLIM = 300
+rows = [solve_pyomo(lines_pyomo(), s, tlim=TLIM) for s in ("scip", "couenne", "baron")]
+rows.append(solve_jax(cost, LO, HI, ineq=big_enough, tlim=TLIM))
 table(rows)
 
 # %%
@@ -157,8 +159,8 @@ save_results("06", "A: two lines, 26 motor ratings", lp, lj, size, rows, note=f"
 print(f"lines of model code: Pyomo {lp}, jaxglobal {lj}")
 
 # %% [markdown]
-# The flow split sits at its bound: the shorter line carries 90%. Each pump runs at exactly a standard rating, so each motor is fully
-# loaded. With 26 ratings, SCIP is the faster solver here.
+# The flow split sits at its bound: the shorter line carries 90%. Each pump runs at a standard rating (to within 0.02%), so each
+# motor is fully loaded. With 26 ratings, SCIP is the faster solver here.
 #
 # ## Scaling with the number of switches
 #
@@ -233,8 +235,9 @@ plot("water_main", "branched main, one motor")
 # `on = where(h < lo * V, 1, where(h > hi * V, 0, on))` inside a loop over hours, is natural code, and the decision variables (tank
 # volume, pump capacity, two set points) are few. But the controller state after a few steps depends on every earlier branch, and
 # interval bounds on it soon cover both branches everywhere. In runs made while writing this notebook (12 hourly steps, 4
-# variables), jaxglobal found the optimum but its lower bound did not rise above the capital-cost term: the gap was still 29-37%
-# after 120 s. SCIP, on the exported model with one binary per comparison, proved the same optimum in 2.3 s.
+# variables), jaxglobal's best point after 120 s cost 98.60 against an optimum of 96.79, and its lower bound never rose above the
+# capital-cost term (60.59), a 38% gap. SCIP, on the model from `jaxglobal.export` with one binary per comparison, proved 96.79 in
+# 2.5 s.
 #
 # ## Summary
 #
