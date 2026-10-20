@@ -31,6 +31,7 @@ sparse structure, duals, ecosystem) are discussed alongside jaxglobal's.
 | [10 ODE models](10-ode-models.ipynb) | Kinetic parameter estimation: explicit RK4 and `pyomo.dae` vs a Python loop |
 | [11 Neural-network surrogates](11-neural-network-surrogates.ipynb) | Optimizing a trained tanh MLP: jaxglobal (with and without `crown`), hand-written Pyomo, OMLT |
 | [12 Things Pyomo cannot express](12-things-pyomo-cannot-express.ipynb) | `fori_loop`, library functions, einsum, parametric families, including what failed |
+| [13 Many switches](13-many-switches.ipynb) | Motor price lists as one `jnp.where` vs one binary per rating: when many switches favor jaxglobal, and when they do not |
 
 ## Re-running
 

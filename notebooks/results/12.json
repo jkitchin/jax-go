@@ -7,30 +7,30 @@
   "rows": [
    {
     "solver": "scip",
-    "obj": -2664.474806596214,
-    "bound": -2664.74123648408,
-    "time": 1.8155156248249114,
+    "obj": -2664.474806596984,
+    "bound": -2664.67687606753,
+    "time": 0.1777233719999458,
     "status": "optimal"
    },
    {
     "solver": "couenne",
     "obj": -2664.4699161200583,
     "bound": NaN,
-    "time": 0.7104504997842014,
+    "time": 0.44484904700038896,
     "status": "optimal"
    },
    {
     "solver": "baron",
-    "obj": -2664.471674171282,
-    "bound": -2664.4717054907505,
-    "time": 1.4760147496126592,
-    "status": "locallyOptimal"
+    "obj": NaN,
+    "bound": NaN,
+    "time": NaN,
+    "status": "not run: GAMS/BARON not installed"
    },
    {
     "solver": "jaxglobal",
-    "obj": -2664.458519750391,
-    "bound": -2664.4834224256456,
-    "time": 27.867308374959975,
+    "obj": -2664.4589804143034,
+    "bound": -2664.592122897193,
+    "time": 6.424971977000041,
     "status": "optimal",
     "nodes": 11
    }
@@ -53,16 +53,16 @@
    {
     "solver": "jax.nn.softplus",
     "obj": 0.7731076007300555,
-    "bound": 0.7730585416177287,
-    "time": 2.016327291727066,
+    "bound": 0.7730356248846317,
+    "time": 0.8696090089997597,
     "status": "optimal",
-    "nodes": 69
+    "nodes": 75
    },
    {
     "solver": "jax.scipy.stats.norm.cdf",
     "obj": -664.4590207496797,
     "bound": -664.5252208587162,
-    "time": 2.0662672920152545,
+    "time": 3.9679172209998796,
     "status": "optimal",
     "nodes": 2421
    }
@@ -78,31 +78,31 @@
    {
     "solver": "scip",
     "obj": -2.7941306973831193,
-    "bound": -2.79417242305738,
-    "time": 0.11807495774701238,
+    "bound": -2.794172423057381,
+    "time": 0.14002171800029828,
     "status": "optimal"
    },
    {
     "solver": "couenne",
     "obj": -2.794130737988682,
     "bound": NaN,
-    "time": 0.31667662458494306,
+    "time": 0.2069604140001502,
     "status": "optimal"
    },
    {
     "solver": "baron",
     "obj": NaN,
     "bound": NaN,
-    "time": 0.7953133331611753,
-    "status": "noSolution"
+    "time": NaN,
+    "status": "not run: GAMS/BARON not installed"
    },
    {
     "solver": "jaxglobal",
     "obj": -2.794130737988682,
-    "bound": -2.794228278107737,
-    "time": 3.082453333772719,
+    "bound": -2.7942663526418663,
+    "time": 0.8543526170001314,
     "status": "optimal",
-    "nodes": 49
+    "nodes": 55
    }
   ],
   "note": "3 variables"
@@ -116,47 +116,47 @@
    {
     "solver": "scip p=0.0",
     "obj": -1.0316283126240289,
-    "bound": -1.03171115685791,
-    "time": 0.19970458280295134,
+    "bound": -1.031711156857912,
+    "time": 0.23223875400026373,
     "status": "optimal"
    },
    {
     "solver": "scip p=0.5",
-    "obj": -1.3645697415487879,
-    "bound": -1.36462551475075,
-    "time": 0.14228537492454052,
+    "obj": -1.3645691815925063,
+    "bound": -1.364628929256042,
+    "time": 0.14427658099975815,
     "status": "optimal"
    },
    {
     "solver": "scip p=1.0",
-    "obj": -1.739532136447073,
+    "obj": -1.7395321364470717,
     "bound": -1.73953287884095,
-    "time": 0.12297520879656076,
+    "time": 0.13075114699995538,
     "status": "optimal"
    },
    {
     "solver": "jaxglobal p=0.0",
     "obj": -1.0316284534898774,
-    "bound": -1.031648066451715,
-    "time": 5.13457233319059,
+    "bound": -1.0316911011132437,
+    "time": 1.2901442540000971,
     "status": "optimal",
     "nodes": 21
    },
    {
     "solver": "jaxglobal p=0.5",
     "obj": -1.3645697415487879,
-    "bound": -1.3645758223368212,
-    "time": 0.1421214579604566,
+    "bound": -1.3646214511834696,
+    "time": 0.16292711500000223,
     "status": "optimal",
     "nodes": 15
    },
    {
     "solver": "jaxglobal p=1.0",
     "obj": -1.7395323548157449,
-    "bound": -1.739541146440935,
-    "time": 0.13502524979412556,
+    "bound": -1.7395839249609828,
+    "time": 0.18819724000013593,
     "status": "optimal",
-    "nodes": 17
+    "nodes": 11
    }
   ],
   "note": "loop over parameter values; no batching"

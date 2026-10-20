@@ -196,7 +196,7 @@ for ax, key in ((axs[1], "time (s)"), (axs[2], "agreement")):
     ax.set_xscale("log"), ax.set_yticks(range(len(labels))), ax.set_ylim(len(labels) - 0.5, -0.5)
 ax = axs[1]
 ax.set_yticklabels(labels, fontsize=8), ax.set_xlabel("wall time, s"), ax.set_title("time per solve (hollow: not converged)", fontsize=10)
-ax.legend(frameon=False, fontsize=8, loc="lower right")
+ax.legend(frameon=False, fontsize=8, loc="upper right")
 axs[2].set_yticklabels([]), axs[2].set_xlabel("relative distance from the best objective"), axs[2].set_title("agreement", fontsize=10)
 plt.tight_layout()
 plt.show()
