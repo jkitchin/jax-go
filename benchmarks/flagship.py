@@ -141,6 +141,8 @@ def worker_pyomo(solver, p, tl):
 
 
 def run_scip(nl, tl, tmp):
+    if not pathlib.Path(SCIP).exists():
+        return run_pyscipopt(nl, tl)
     cmds = (f"set limits time {tl} set limits gap {R.REL_GAP} set limits absgap {R.ABS_GAP} "
             f"set numerics feastol {R.FEAS_TOL} read {nl} opt display statistics quit")  # fmt: skip
     out = R._run([SCIP, "-c", cmds], tl, cwd=tmp)
@@ -154,6 +156,22 @@ def run_scip(nl, tl, tmp):
                 dual=R._num(R._float(R._grab(r"Dual Bound\s*:\s*(\S+)", out))),
                 nodes=R._float(R._grab(r"Solving Nodes\s*:\s*(\d+)", out)), message=st.strip() or out.strip()[-120:])  # fmt: skip
 
+
+def run_pyscipopt(nl, tl):
+    """SCIP through pyscipopt's .nl reader, for machines without the ``scip`` binary (same limits and tolerances)."""
+    import pyscipopt
+
+    m = pyscipopt.Model()
+    m.hideOutput()
+    m.readProblem(str(nl))
+    for k, v in (("limits/time", tl), ("limits/gap", R.REL_GAP), ("limits/absgap", R.ABS_GAP), ("numerics/feastol", R.FEAS_TOL)):
+        m.setParam(k, v)
+    m.optimize()
+    st = m.getStatus()
+    status = {"optimal": "optimal", "gaplimit": "optimal", "infeasible": "infeasible", "timelimit": "time_limit"}.get(st, "error")
+    primal = m.getObjVal() if m.getNSols() else float("nan")
+    return dict(status=status, time=m.getSolvingTime(), primal=R._num(primal), dual=R._num(m.getDualbound()),
+                nodes=m.getNNodes(), message=f"pyscipopt {pyscipopt.__version__}: {st}")
 
 def run_couenne(nl, tl, tmp):
     pathlib.Path(tmp, "couenne.opt").write_text(
