@@ -28,6 +28,13 @@ nonzero on any wrong or unverified MINLPLib answer.
   takes its coefficients from one facet and its offset from the other is
   invalid; on jax 0.11 this made the lifted LP infeasible and its bound ~1e277.
   Values and slopes of every cut go through `jax.lax.optimization_barrier`.
+* **`jnp.maximum`'s derivative is not tie-safe under `jit`.** Its JVP weighs
+  the two operands by two separate comparisons. XLA can compute an operand
+  twice with different FMA rounding, so at a near-tie both comparisons can
+  pick "the other one" and `jax.grad` of cv is not a subgradient. Before
+  PR #76 this certified 130186.35 as optimal on a model of two lines with
+  motor price lists, where 130000.6 is attainable. `cvmax`/`ccmin` select
+  one operand with a single predicate.
 * **αBB amplifies rounding.** `f + a/2 (z − lo)(z − hi)` has a slope of about
   `a (hi − lo) / 2` that `f` does not, so on a wide range (a quotient with a
   tiny denominator) a one-ulp error in `z`'s relaxation became 4e-8 in the
@@ -36,16 +43,17 @@ nonzero on any wrong or unverified MINLPLib answer.
 ## Limitations
 
 * **Scale.** On 328 mixed-integer MINLPLib instances with up to 100
-  variables (60 s, cold, measured on 2026-10-17, before the SCIP-gap work),
+  variables (60 s, cold, measured on 2026-10-17, before the SCIP-gap work and
+  PR #76; re-run pending),
   jaxglobal solved 72 of the 220 with at most 50
   variables and 1 of the 108 with 51 to 100. At that size the time goes to
   setup (tracing, compiling, the first dense LP) before the search starts. The
   node LP is a dense interior point method whose cost grows as rows × n² per
   iteration. Only quadratic and polynomial (degree ≤ 6) problems get a sparse
   lifted LP.
-* **Speed.** Shifted geometric mean time at 60 s, cold (2026-10-17, before the
-  SCIP-gap work): 32.6 s against
-  SCIP's 1.9 s on `start50`, and 35.9 s against 1.35 s on `int50`. Much of
+* **Speed.** Shifted geometric mean time, cold, unsolved instances counted at
+  the 60 s limit (2026-10-17, before the SCIP-gap work and PR #76): 30.7 s
+  against SCIP's 1.93 s on `start50`, and 31.8 s against 1.35 s on `int50`. Much of
   jaxglobal's cold time goes to tracing and compiling the bounding kernels. The kernels are cached in memory and on disk
   under `~/.cache/jaxglobal` (`$JAXGLOBAL_CACHE_DIR`; `JAXGLOBAL_CACHE=0`
   turns the cache off), so a repeat solve of the same model takes about

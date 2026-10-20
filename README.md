@@ -34,12 +34,16 @@ solvers on general problems (see [Limitations](#limitations)).
 * **Correct answers so far:** 0 wrong answers on the MINLPLib sets below, all
   checked against the library's reference bounds. Every returned point is
   re-checked in float64, and an opt-in `safe=True` mode rounds the bounds
-  outward.
+  outward. Outside MINLPLib, before PR #76 the solver certified a wrong
+  optimum on an application model (two parallel lines with motor price
+  lists: reported optimal 130186.35 while 130000.6 is attainable), caused by
+  invalid subgradients at near-ties; this is now fixed.
 * **MINLPLib against SCIP, October 2026** (`main` at 58bb551). An instance
   passes if jaxglobal proves it optimal within max(2 x SCIP's time, 10 s).
   "Cold" includes JAX compilation; "warm" reuses the compile caches from a
   previous run. SCIP has no compile step, so the cold numbers are the fair
-  comparison.
+  comparison. Measured at 58bb551 (2026-10-19), before PR #76 (relaxation
+  subgradient fix); re-run pending.
 
   | set | instances | pass, cold | pass, warm | where SCIP takes ≥ 0.5 s (warm) |
   |---|---:|---:|---:|---:|
@@ -72,7 +76,8 @@ solvers on general problems (see [Limitations](#limitations)).
 * **global50, 60 s limit** (the 50-instance BARON comparison panel from
   discopt, `discopt_benchmarks/config/baron_global50.txt`). All solvers ran on
   the same machine. 48 of the 50 ran; casctanks and hda are missing from this
-  repo's MINLPLib tables.
+  repo's MINLPLib tables. Measured at 58bb551 (2026-10-19), before PR #76;
+  re-run pending.
 
   | | solved in 60 s | wrong answers | not solved in 60 s |
   |---|---:|---:|---|
@@ -92,7 +97,7 @@ solvers on general problems (see [Limitations](#limitations)).
     tspn05, which SCIP leaves unsolved, but BARON solves all three faster.
 
 * **MINLPLib, 60 s limit, cold start (compilation included)**, measured on
-  2026-10-17, before the SCIP-gap work, and not re-run since:
+  2026-10-17, before the SCIP-gap work and PR #76, and not re-run since:
 
   | set | jaxglobal | SCIP |
   |---|---:|---:|
@@ -105,8 +110,8 @@ solvers on general problems (see [Limitations](#limitations)).
   Branching comparisons (below) were separate runs, so their counts differ.
 * **What it is for:** problems defined by code, which equation-based solvers
   cannot read at all or need rewritten by hand: `jnp.where` logic,
-  neural-network and Gaussian-process surrogates, ODE kinetics written as
-  Python loops.
+  neural-network and Gaussian-process surrogates, ODE kinetics integrated by
+  fixed-step loops (Python loops or `lax.scan`).
 
 Narrated, executed notebooks in [`notebooks/`](notebooks/README.md) walk through
 the relaxations, branch and bound, the test problems, the comparison with
@@ -198,7 +203,8 @@ Times are wall-clock on a laptop CPU for a first (cold) call, so they are
 mostly JIT compilation; a second solve of the same function reuses the
 compiled kernels and takes a small fraction of that (see notebook 04). For the two
 problems without a published optimum, the tests check the certificate against
-a 401×401 brute-force grid.
+a 401×401 brute-force grid. Measured at 2ae4c39 (2026-10-18), before PR #76;
+re-run pending.
 
 ![convergence](figures/convergence.png)
 
@@ -270,20 +276,28 @@ continuous relaxation.
 The default, `branch_var="auto"`, branches on pseudocosts (the bound gains
 measured on earlier splits of each variable) when there are no integer
 variables, and on `width` (relative width times the relaxation gap, fractional
-integers first) when there are. Those were the best measured choices: on the
-MINLPLib start50 set (a branching comparison on 2026-10-18, a separate run from
-the cold table above) pseudocost solves 38 instances in 60 s against 36 for
-width and for `strong`, and on the 25 built-in and synthetic problems it takes
-the least total time. On
+integers first) when there are. Those were the best measured choices in
+branching comparisons on 2026-10-18 (before PR #76; the data are not checked
+in, and these numbers are to be re-measured): on the MINLPLib start50 set (a
+separate run from the cold table above) pseudocost solves 38 instances in 60 s
+against 36 for width and for `strong`, and on the 25 built-in and synthetic
+problems it takes the least total time. On
 int50 pseudocost and `strong` each solve one more instance than width, but each
-loses one that width solves (flay04m and nous1). Override it when:
+loses one that width solves (flay04m and nous1). An earlier, checked-in int50
+comparison (2026-10-17, warm) went the other way: width 31
+(`results/int50_probe_warm.csv`), pseudocost 27 (`int50_pseudocost_warm.csv`).
+Override it when (node counts from the 2026-10-18 runs):
 
 * a continuous problem takes more nodes with pseudocost than with width
-  (holder_table 279 vs 191, tanh_net_2d 241 vs 189): try `width`;
+  (holder_table 279 vs 191, tanh_net_2d 241 vs 189; the results table above,
+  a separate run, has 239 for tanh_net_2d): try `width`;
 * bounding a box is cheap and the tree is small to medium: `strong` bounds
   trial children for the candidates and often needs far fewer nodes (hartmann6
   634 vs 1081, univariate_sum_20 205 vs 665), but on deep trees it can cost
-  more than it saves (nn_tanh_5x8x2: 575k nodes vs 244k);
+  more than it saves (nn_tanh_5x8x2: 575k nodes vs 244k). An earlier run on
+  2026-10-17 against `width` ([`docs/ROADMAP.md`](docs/ROADMAP.md)) gave other
+  counts (hartmann6 1099 → 634, univariate_sum_20 513 → 201, nn_tanh_5x8x2
+  +6%);
 * an integer problem stalls with a large gap: try `pseudocost` or `strong`
   (tln4 and tspn05 are solved by both and not by width).
 
@@ -310,12 +324,16 @@ the peaks function (Matérn 5/2, abs/rel gap 1e-3), same answers:
 
 | training points | nodes, `jnp` formula | nodes, `kernels.matern52` | time |
 |---:|---:|---:|---|
-| 20 | 1079 | 89 | 28 s → 19 s |
-| 50 | 3489 | 425 | 22 s → 11 s |
-| 100 | 6165 | 665 | 44 s → 17 s |
-| 200 | 23191 | 2343 | 67 s → 8.7 s |
+| 20 | 1079\* | 89 | — |
+| 50 | 3489 | 425 | 10.8 s → 1.4 s |
+| 100 | 6165\* | 665 | — |
+| 200 | 23191 | 2343 | 77.8 s → 8.3 s |
 
-(cold solves, compilation included.) Matérn 3/2 at N = 50: 1917 → 429 nodes.
+Nodes and times are the stored outputs of notebook 06 (one session; the
+`kernels` solve at N = 50 reuses kernels compiled earlier in it). \*Not
+reproduced by the stored notebook: from runs on or before 2026-10-17, as is
+the `jnp` count for Matérn 3/2 at N = 50, 1917 nodes (429 with
+`kernels.matern32`, as in the notebook). All before PR #76; re-run pending.
 SE and Matérn 1/2 are unchanged: their `jnp` formulas were already relaxed
 exactly.
 
@@ -326,8 +344,9 @@ value, and its relaxation uses the GP's structure: the quadratic form as a sum
 of squares, and the bound `|σ(x) − σ(c)| ≤ sd_prior(f(x) − f(c))`, which holds
 because the posterior is itself a Gaussian process and does not involve
 `K⁻¹`. On a 95% chance constraint (`mean + 1.96 std ≤ c`) the solve is now
-certified in 2807 nodes and 11 s, where the formula did not close in 120 s
-(140k nodes). `gp_mean` is the matching mean.
+certified in 2807 nodes and 15.0 s (notebook 06's stored output), where the
+formula did not close in 120 s (140k nodes; a run on or before 2026-10-17,
+not reproduced by the stored notebook). `gp_mean` is the matching mean.
 
 The acquisition functions are primitives too:
 `expected_improvement(mu, sigma, fmin)` is relaxed as the jointly convex,
@@ -335,9 +354,11 @@ monotone function it is (the perspective of `zΦ(z) + φ(z)`), with the concave
 envelope over the `(mu, sigma)` box, and
 `probability_of_improvement(mu, sigma, target)` from its monotonicity plus the
 exact envelopes of `Φ`, instead of `Φ`, `φ` and the division one by one. On
-the 20-point GP of example 06, with `gp_std`: EI 1401 → 765 nodes (warm solve
-0.9 s → 0.4 s), PI 727 → 451 (0.55 s → 0.4 s; PI's first, compiling solve is
-slower). [`notebooks/06-gaussian-processes.ipynb`](notebooks/06-gaussian-processes.ipynb)
+the 20-point GP of notebook 06, with `gp_std`: EI 1401 → 765 nodes, PI 727 →
+451. The 765 and 451 are in the notebook's stored outputs; the formula counts
+(1401, 727) and the warm times measured with them (EI 0.9 s → 0.4 s, PI
+0.55 s → 0.4 s) are from runs on or before 2026-10-17 and are not reproduced
+by the stored notebook. [`notebooks/06-gaussian-processes.ipynb`](notebooks/06-gaussian-processes.ipynb)
 repeats the paper's case studies: GP means, acquisition functions, a chance
 constraint and a Bayesian-optimization loop.
 
@@ -350,7 +371,7 @@ discopt facts come from discopt's own README and development notes.
 
 | | jaxglobal | discopt |
 |---|---|---|
-| **Model input** | a plain JAX function, traced to a jaxpr, or an `.nl` file. `jnp.where` logic, neural networks, GP surrogates and Python-loop ODEs get certified bounds. | an algebraic modeling API (`Model`, `m.continuous`, `dm.exp`, ...), or `.nl`, `.gms` and QPLIB files. Opaque Python callables (`dm.custom`, `dm.external`) are solved without a dual bound. |
+| **Model input** | a plain JAX function, traced to a jaxpr, or an `.nl` file. `jnp.where` logic, neural networks, GP surrogates and fixed-step ODE integrators (Python loops or `lax.scan`) get certified bounds. | an algebraic modeling API (`Model`, `m.continuous`, `dm.exp`, ...), or `.nl`, `.gms` and QPLIB files. Opaque Python callables (`dm.custom`, `dm.external`) are solved without a dual bound. |
 | **Implementation** | pure Python and JAX: relaxations, the LP interior-point method, FBBT and OBBT are all `jit`/`vmap` kernels. | a Rust core (expression IR, B&B tree, `.nl` parser, FBBT, simplex) with a numpy relaxation layer and Python orchestration. JAX is no longer on its default solve path. |
 | **Lower bounds** | McCormick and alphaBB rules applied to each jaxpr primitive; alphaBB is derived automatically from `grad(grad(prim))`. Also a lifted quadratic and polynomial LP with RLT rows, and convex outer approximation. | McCormick over 28 primitives with a table of univariate envelopes, piecewise McCormick, alphaBB, G-convexity, RLT, PSD/SOC, GMI and OA cuts. |
 | **Node LPs** | a primal–dual interior-point method in JAX (Mehrotra predictor–corrector, early stop), batched over boxes, with weak-duality-certified bounds. | an in-house Rust simplex with sparse LU and warm starts; HiGHS only for pure LP/MILP. |
@@ -358,7 +379,7 @@ discopt facts come from discopt's own README and development notes.
 | **Primal heuristics** | multi-start local NLP (pounce when installed, otherwise optax L-BFGS; scipy on request), dives, rounding repair and integer polish. | multi-start NLP, feasibility pump, diving, RINS, local branching and QUBO local search. |
 | **Soundness** | float64 re-check of every point; optional `safe=True` outward rounding; MINLPLib wrong-answer checks and a fuzzer. | outward rounding, MINLPLib `.solu` checks and certificate checks. |
 | **Fixed cost** | JAX compilation: seconds per new model structure. A warm cache removes most of it. | small: native code with no compile step per model. |
-| **global50, 60 s** | 45 of 48 run, 0 wrong (this repo, October 2026). | 48 of 50 "ok" (incumbent matches the known optimum), at a geomean time about 8x BARON's (discopt report, July 2026). |
+| **global50, 60 s** | 48 of the 50 run, 45 of those solved, 0 wrong (this repo, 58bb551, October 2026, before PR #76). | 48 of 50 "ok" (incumbent matches the known optimum), at a geomean time about 8x BARON's (discopt report, July 2026). |
 
 **What jaxglobal lacks from discopt.** It has no AMP or piecewise MILP
 relaxations, no simplex warm starts, and no GMI or PSD cuts. Its heuristics are
@@ -394,7 +415,7 @@ basic and pooling problems, `where`/`clip`/table lookups, RK4 kinetics, NN
 surrogates, and things Pyomo cannot express directly.
 
 **Flagship benchmark.** `jaxglobal.applications` holds code-defined models
-(ODE kinetics, regime-switching engineering models, tanh NN surrogates after
+(RK4 ODE kinetics stepped with `lax.scan`, regime-switching engineering models, tanh NN surrogates after
 [Schweidtmann & Mitsos 2018](#ref-schweidtmann2019deterministic)), each with a hand-written Pyomo twin.
 `benchmarks/flagship.py` runs jaxglobal, SCIP, Couenne and BARON on them and
 judges each answer against the best known optimum.
@@ -549,6 +570,13 @@ Any AMPL `.nl` model (text or binary) can be loaded with
   takes its coefficients from one facet and its offset from the other is
   invalid; on jax 0.11 this made the lifted LP infeasible and its bound ~1e277.
   Values and slopes of every cut go through `jax.lax.optimization_barrier`.
+* **`jnp.maximum`'s derivative is not tie-safe under `jit`.** Its JVP weighs
+  the two operands by two separate comparisons. XLA can compute an operand
+  twice with different FMA rounding, so at a near-tie both comparisons can
+  pick "the other one" and `jax.grad` of cv is not a subgradient. Before
+  PR #76 this certified 130186.35 as optimal on a model of two lines with
+  motor price lists, where 130000.6 is attainable. `cvmax`/`ccmin` select
+  one operand with a single predicate.
 * **αBB amplifies rounding.** `f + a/2 (z − lo)(z − hi)` has a slope of about
   `a (hi − lo) / 2` that `f` does not, so on a wide range (a quotient with a
   tiny denominator) a one-ulp error in `z`'s relaxation became 4e-8 in the
@@ -557,16 +585,17 @@ Any AMPL `.nl` model (text or binary) can be loaded with
 ## Limitations
 
 * **Scale.** On 328 mixed-integer MINLPLib instances with up to 100
-  variables (60 s, cold, measured on 2026-10-17, before the SCIP-gap work),
+  variables (60 s, cold, measured on 2026-10-17, before the SCIP-gap work and
+  PR #76; re-run pending),
   jaxglobal solved 72 of the 220 with at most 50
   variables and 1 of the 108 with 51 to 100. At that size the time goes to
   setup (tracing, compiling, the first dense LP) before the search starts. The
   node LP is a dense interior point method whose cost grows as rows × n² per
   iteration. Only quadratic and polynomial (degree ≤ 6) problems get a sparse
   lifted LP.
-* **Speed.** Shifted geometric mean time at 60 s, cold (2026-10-17, before the
-  SCIP-gap work): 32.6 s against
-  SCIP's 1.9 s on `start50`, and 35.9 s against 1.35 s on `int50`. Much of
+* **Speed.** Shifted geometric mean time, cold, unsolved instances counted at
+  the 60 s limit (2026-10-17, before the SCIP-gap work and PR #76): 30.7 s
+  against SCIP's 1.93 s on `start50`, and 31.8 s against 1.35 s on `int50`. Much of
   jaxglobal's cold time goes to tracing and compiling the bounding kernels. The kernels are cached in memory and on disk
   under `~/.cache/jaxglobal` (`$JAXGLOBAL_CACHE_DIR`; `JAXGLOBAL_CACHE=0`
   turns the cache off), so a repeat solve of the same model takes about
