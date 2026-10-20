@@ -8,6 +8,7 @@ uses relative gap 1e-4 and a 60 s limit.
 import inspect
 import os
 import re
+import shutil
 import sys
 import tempfile
 import time
@@ -25,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) 
 
 GAP = 1e-4
 TIME_LIMIT = 60
-COUENNE = "/Applications/AMPL/couenne"
+COUENNE = shutil.which("couenne") or "/Applications/AMPL/couenne"
 
 
 def loc(*objs):
@@ -50,6 +51,8 @@ def model_size(m):
 def solve_pyomo(m, solver="scip", objective=None, gap=GAP, tlim=TIME_LIMIT):
     """Solve a Pyomo model; return dict(obj, bound, time, status). Wall time includes writing the model."""
     obj = objective or next(m.component_data_objects(pyo.Objective, active=True))
+    if solver == "baron" and not shutil.which("gams"):
+        return dict(solver=solver, obj=np.nan, bound=np.nan, time=np.nan, status="not run: GAMS/BARON not installed")
     t = time.perf_counter()
     try:
         if solver == "baron":
