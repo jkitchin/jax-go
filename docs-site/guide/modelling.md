@@ -93,13 +93,13 @@ tighter relaxations.
 
 | problem | n | f\* | found | proven LB | nodes | time |
 |---|---|---|---|---|---|---|
-| G06 | 2 | −6961.813876 | −6961.813876 | −6961.817313 | 11 | 2.7s |
-| G08 | 2 | −0.095825 | −0.095825 | −0.095828 | 19 | 4.8s |
-| G11 (equality) | 2 | 0.750000 | 0.750000 | 0.749999 | 7 | 0.8s |
-| G24 (disconnected feasible set) | 2 | −5.508013 | −5.508013 | −5.508016 | 43 | 1.5s |
-| G04 | 5 | −30665.538672 | −30665.538672 | −30665.561787 | 13 | 5.0s |
-| Haverly pooling | 9 | −400.000000 | −400.000019 | −400.000115 | 17 | 4.9s |
-| Reactor network | 6 | −0.388811 | −0.388811 | −0.388821 | 159 | 5.0s |
+| G06 | 2 | −6961.813876 | −6961.813876 | −6961.817327 | 11 | 18.0s |
+| G08 | 2 | −0.095825 | −0.095825 | −0.095830 | 15 | 28.2s |
+| G11 (equality) | 2 | 0.750000 | 0.750000 | 0.749999 | 7 | 6.2s |
+| G24 (disconnected feasible set) | 2 | −5.508013 | −5.508013 | −5.508016 | 43 | 8.7s |
+| G04 | 5 | −30665.538672 | −30665.538672 | −30665.540938 | 19 | 28.3s |
+| Haverly pooling | 9 | −400.000000 | −400.000000 | −400.000076 | 17 | 11.3s |
+| Reactor network | 6 | −0.388811 | −0.388811 | −0.388821 | 159 | 19.7s |
 
 Equality optima can sit slightly below f\* because of `feas_tol` (1e-6).
 
@@ -142,16 +142,17 @@ the peaks function (Matérn 5/2, abs/rel gap 1e-3), same answers:
 
 | training points | nodes, `jnp` formula | nodes, `kernels.matern52` | time |
 |---:|---:|---:|---|
-| 20 | 1079\* | 89 | — |
-| 50 | 3489 | 425 | 10.8 s → 1.4 s |
-| 100 | 6165\* | 665 | — |
-| 200 | 23191 | 2343 | 77.8 s → 8.3 s |
+| 20 | 1079\* | 81 | — |
+| 50 | 3477 | 411 | 13.8 s → 1.2 s |
+| 100 | 6165\* | 647 | — |
+| 200 | 22449 | 2253 | 56.4 s → 11.9 s |
 
-Nodes and times are the stored outputs of notebook 06 (one session; the
-`kernels` solve at N = 50 reuses kernels compiled earlier in it). \*Not
+Nodes and times are the stored outputs of notebook 06, re-run on 2026-10-20 on
+current `main` (after PRs #76, #77 and #81) on a 4-core cloud VM (one session;
+the `kernels` solve at N = 50 reuses kernels compiled earlier in it). \*Not
 reproduced by the stored notebook: from runs on or before 2026-10-17, as is
 the `jnp` count for Matérn 3/2 at N = 50, 1917 nodes (429 with
-`kernels.matern32`, as in the notebook). All before PR #76; re-run pending.
+`kernels.matern32`, as in the notebook).
 SE and Matérn 1/2 are unchanged: their `jnp` formulas were already relaxed
 exactly.
 
@@ -162,7 +163,7 @@ value, and its relaxation uses the GP's structure: the quadratic form as a sum
 of squares, and the bound `|σ(x) − σ(c)| ≤ sd_prior(f(x) − f(c))`, which holds
 because the posterior is itself a Gaussian process and does not involve
 `K⁻¹`. On a 95% chance constraint (`mean + 1.96 std ≤ c`) the solve is now
-certified in 2807 nodes and 15.0 s (notebook 06's stored output), where the
+certified in 2759 nodes and 31.0 s (notebook 06's stored output), where the
 formula did not close in 120 s (140k nodes; a run on or before 2026-10-17,
 not reproduced by the stored notebook). `gp_mean` is the matching mean.
 
@@ -172,8 +173,8 @@ monotone function it is (the perspective of `zΦ(z) + φ(z)`), with the concave
 envelope over the `(mu, sigma)` box, and
 `probability_of_improvement(mu, sigma, target)` from its monotonicity plus the
 exact envelopes of `Φ`, instead of `Φ`, `φ` and the division one by one. On
-the 20-point GP of notebook 06, with `gp_std`: EI 1401 → 765 nodes, PI 727 →
-451. The 765 and 451 are in the notebook's stored outputs; the formula counts
+the 20-point GP of notebook 06, with `gp_std`: EI 1401 → 683 nodes, PI 727 →
+491. The 683 and 491 are in the notebook's stored outputs; the formula counts
 (1401, 727) and the warm times measured with them (EI 0.9 s → 0.4 s, PI
 0.55 s → 0.4 s) are from runs on or before 2026-10-17 and are not reproduced
 by the stored notebook. [Notebook 06](../notebooks/06-gaussian-processes.ipynb)

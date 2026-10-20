@@ -228,6 +228,13 @@ table(rows_pipe)
 # additional nonconvex constraint for the solver to branch on. In jaxglobal the iteration count is a modelling
 # choice you control.
 #
+# jaxglobal's point is right, but it is **not certified**: it stops at the time limit with a lower bound of $-\infty$.
+# The reason is the interval of the iterate on the whole box. The Haaland start already ranges over an interval that
+# includes negative values, so after one iteration the argument of the logarithm can reach zero and the bound on $x$
+# becomes infinite, and after two it is $(-\infty, \infty)$; the cell below shows it. Branch and bound has to split
+# the box a long way before the four composed iterations have a finite bound, and in 60 s it does not get there.
+# SCIP, on the implicit-equation model, branches on $x$ itself and proves the optimum in about a second.
+#
 # The figure shows where the optimum lies. The flow rate is at its upper bound: along the valley of best diameters
 # the objective keeps decreasing with $Q$, so the extra revenue outweighs the extra pumping cost everywhere in the
 # range. The diameter balances pumping against pipe cost (right panel). The orange line is $Re = 2300$; the optimum lies above it, in the region the caveat above is about.
@@ -316,19 +323,34 @@ for pt in ([5e-3, 0.1], [2e-3, 0.05], [float(xq), float(xd)]):
     print(f"({pt[0]:.4f}, {pt[1]:.4f}) {float(pipe(x)):11.3f} {float(pipe_iters(x, 1)):11.3f} {cv_loop:12.3f} {cv_unr:16.3f}")
 
 # %% [markdown]
-# The relaxation of the unrolled function agrees with the 4-iteration value, as it should. The relaxation of the
-# `fori_loop` version agrees with the **1-iteration** value instead. jaxglobal's relaxation interpreter (and its
-# bound-tightening tape, which is built the same way) treats a `scan` primitive like a function call and evaluates
-# its body once, regardless of the trip count. For a `fori_loop` with no per-iteration inputs this runs without
-# error and silently bounds a different function; for a `scan` over an array (as in `jnp.polyval` below, or the
-# `lax.scan` in notebook 10) the shapes do not match and it fails.
+# Both relaxations agree with the 4-iteration value, as they must. This check found a real bug: before PR #81,
+# jaxglobal's relaxation interpreter (and its bound-tightening tape, built the same way) treated a `scan`
+# primitive like a function call and evaluated its body once, so the `fori_loop` column matched the **1-iteration**
+# value instead, and an earlier version of this notebook reported the model as `optimal` with a bound that was a
+# certificate for the 1-iteration function. A `scan` over an array (`jnp.polyval` below, the `lax.scan` in notebook
+# 10) failed with a shape error for the same reason. Since #81 the interpreter unrolls `scan` with a fixed trip
+# count exactly as the trace unrolls a Python `for` loop, so the two forms give the same bound and cost the same
+# compilation; `while_loop` and a `lax.cond` on a model value are refused with an error naming the primitive.
 #
-# So for this model the `optimal` status and the bound in the table above are not a certificate for the
-# 4-iteration function. The objective value is genuine (the local solver and the incumbent evaluate `pipe` with
-# JAX), and it agrees with the Pyomo solvers to the accuracy of the iteration, but the bound comes from a relaxation
-# of the 1-iteration function, which differs from the 4-iteration one by as much as the first two columns show. Until the interpreter unrolls `scan`, write
-# fixed-count loops as Python `for` loops, which the trace unrolls; the price is a larger jaxpr and a longer
-# compilation.
+# The interval of the iterate on the root box, iteration by iteration, explains the missing certificate above:
+
+# %%
+from jaxglobal.relax import interval
+
+
+def iterate(k):  # x after k Colebrook iterations, as a function of (Q, D)
+    def f(z):
+        Q, D = z[0], z[1]
+        Re = RHO * 4 * Q / (jnp.pi * D**2) * D / MU
+        x0 = -1.8 * jnp.log10((EPS / D / 3.7) ** 1.11 + 6.9 / Re)
+        return jax.lax.fori_loop(0, k, lambda i, x: -2.0 * jnp.log10(EPS / (3.7 * D) + 2.51 * x / Re), x0)
+
+    return f
+
+
+for k in range(5):
+    xl, xh = interval(iterate(k))(jnp.array([1e-3, 0.02]), jnp.array([1e-2, 0.3]))
+    print(f"after {k} iterations: x in [{float(xl):.3g}, {float(xh):.3g}]")
 
 # %%
 save_results("12", "Colebrook fori_loop", loc(pipe_pyomo), loc(pipe, friction), size_pipe, rows_pipe,
@@ -408,10 +430,9 @@ table(rows_lib, extra=["nodes"])
 
 # %% [markdown]
 # **Reading the result.** Two of three work unchanged: `jax.nn.softplus`, and the newsvendor model built on the
-# normal CDF (`erfc`), certified in the number of nodes shown. `jnp.polyval` fails with a shape error. It traces to
-# a `scan` over the coefficient array, and jaxglobal's interpreter evaluates a `scan` body once, as found in part 1,
-# so the per-coefficient slice has the wrong shape. That is an implementation gap, not a fundamental limit; the
-# polynomial can be written as an explicit Horner expression instead.
+# normal CDF (`erfc`), certified in the number of nodes shown, and `jnp.polyval`. `jnp.polyval` traces to a `scan`
+# over the coefficient array; before PR #81 jaxglobal's interpreter evaluated a `scan` body once (part 1) and this
+# model failed with a shape error. It now unrolls the scan and certifies the minimum.
 #
 # The newsvendor solution is worth a look, because it shows what the library function bought: the expected profit
 # is a smooth surface in $(q, p)$ with the optimum in the interior, and the optimal order quantity sits above the
@@ -700,11 +721,11 @@ for name, f, lo, hi in [("Colebrook (fori_loop)", pipe, [1e-3, 0.02], [1e-2, 0.3
 
 # %% [markdown]
 # The export unrolls the Colebrook loop (4 iterations, as the report notes) and also the `scan` inside
-# `jnp.polyval`, the two things the relaxation interpreter gets wrong. `softplus` traces to `max(u, 0)` plus
+# `jnp.polyval`, as the relaxation interpreter now does too. `softplus` traces to `max(u, 0)` plus
 # `log1p(exp(-|u|))`, which are written as the exact identities `(a + b + |a - b|)/2` and `log(1 + ...)`. The
 # newsvendor model is refused because SCIP has no `erf`/`erfc`.
-# So for the Colebrook model, exporting to SCIP is today the way to get a certified bound on the 4-iteration
-# function. The README's export section and `notebooks/export_scip.py` describe the rest.
+# For the Colebrook model this gives SCIP the same 4-iteration function that jaxglobal could not certify in 60 s
+# (the export section of the README, and `notebooks/export_scip.py`, show how to solve it).
 #
 # ## What was hard
 #
@@ -712,16 +733,15 @@ for name, f, lo, hi in [("Colebrook (fori_loop)", pipe, [1e-3, 0.02], [1e-2, 0.3
 # * `jax.nn.softplus`, the normal-CDF newsvendor model, the einsum quadratic and the parametric loop were solved and
 #   certified, each written as the plain function. The jaxglobal versions are shorter than the Pyomo ones (see the
 #   line counts above); for Colebrook the two are also not equivalent (implicit equation versus a fixed iteration).
-# * The `fori_loop` model ran and returned the right objective value, but see the next list: its bound is not a
-#   certificate.
+# * `jnp.polyval` (a `scan` over its coefficients) is certified since PR #81 unrolled `scan`.
+# * The `fori_loop` model returns the right objective value but no certificate in 60 s; see the next list.
 #
 # **Did not work, or worked only partly**
-# * `lax.fori_loop` / `lax.scan`: jaxglobal's relaxation and bound-tightening interpreter evaluates the body of a
-#   `scan` once. A fixed-count `fori_loop` is therefore silently relaxed as a single iteration (part 1), and a
-#   `scan` over an array fails with a shape error (`jnp.polyval` here, the `lax.scan` in notebook 10). Write such
-#   loops as Python `for` loops, which the trace unrolls.
-# * Library functions are only reusable when every primitive they trace to is supported. `jnp.polyval` fails for the
-#   reason above; `jax.nn.softplus` and the normal CDF work.
+# * The Colebrook iteration: the bound on the iterate is infinite on the root box after one iteration (part 1), so
+#   jaxglobal stops at the time limit without a certificate, while SCIP proves the implicit-equation model in about a
+#   second. Before PR #81 a fixed-count `fori_loop` was silently relaxed as a single iteration, and this notebook then
+#   reported a bound that was not a certificate; `lax.scan` / `fori_loop` are now unrolled, like Python `for` loops.
+# * Library functions are only reusable when every primitive they trace to is supported; here all three now are.
 # * Solver coverage of functions differs between solvers. In earlier runs with BARON available (through GAMS), it
 #   returned no solution for the sine-containing einsum quadratic, while SCIP and Couenne solved it; BARON is not
 #   installed for every run of this notebook, in which case its rows read "not run".

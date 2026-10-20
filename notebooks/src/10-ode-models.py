@@ -572,7 +572,8 @@ plt.show()
 #
 # ## Does `lax.scan` work for the loop?
 #
-# Python loops are unrolled in the trace, which is why compile time grows with the number of steps. A `lax.scan` would keep the graph small, if the interpreter supported it.
+# Python loops are unrolled in the trace, which is why compile time grows with the number of steps. A `lax.scan` keeps the
+# jaxpr small. Does it make the solve cheaper?
 
 # %%
 import jax
@@ -593,11 +594,15 @@ except Exception as e:  # noqa: BLE001
     print(f"{type(e).__name__}: {e}")
 
 # %% [markdown]
-# It does not: `minimize` fails while building the relaxation of the scan
-# (the error above is raised from inside jaxglobal, and is not the
-# `NotImplementedError` naming the primitive that unsupported operations
-# normally raise). The function itself is fine JAX. `jaxglobal.export`, which
-# unrolls `scan` when it translates a model for SCIP, accepts it. The exported
+# It does not. Since PR #81 jaxglobal's relaxation interpreter unrolls a
+# `scan` with a fixed length, exactly as the trace unrolls the Python loop
+# (before #81 it evaluated the body once, and this cell failed with a shape
+# error). The relaxation is therefore the same unrolled graph as for the
+# Python-loop model, with the same compile cost: in the 30 s given here the
+# first compilation does not finish (no nodes, no point; the line above). The
+# Python-loop solve earlier in this notebook reused kernels already compiled
+# and cached on disk. `jaxglobal.export` also unrolls `scan` when it translates
+# a model for SCIP. The exported
 # problem is the reduced-space model (two variables, the objective one long
 # expression of degree 32 in $k$), not the full-space model of the Pyomo
 # section, and that matters to SCIP: give it 10 s and compare its dual bound
