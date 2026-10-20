@@ -9,7 +9,7 @@ gap 1e-6, feasibility tolerance 1e-6, and the time limit.
 
 Solvers:
   jaxglobal  this package, on the model read by jaxglobal.nl
-  scip       SCIP command line, reading the .nl file
+  scip       SCIP command line, reading the .nl file (pyscipopt's .nl reader if no classic scip binary)
   couenne    Couenne (AMPL build), reading the .nl file
   baron      BARON through GAMS, on the MINLPLib .gms file
 
@@ -99,7 +99,54 @@ def _drain(tl):
         kc.wait_for_builds(budget)
 
 
+_SCIP_PY = """
+import sys, pyscipopt
+m = pyscipopt.Model()
+m.hideOutput()
+m.readProblem(sys.argv[1])
+for k, v in (("limits/time", float(sys.argv[2])), ("limits/gap", float(sys.argv[3])), ("limits/absgap", float(sys.argv[4])),
+             ("numerics/feastol", float(sys.argv[5]))):
+    m.setParam(k, v)
+m.optimize()
+print("SCIP Status        :", m.getStatus())
+print("Solving Time (sec) :", m.getSolvingTime())
+print("Primal Bound       :", m.getPrimalbound())
+print("Dual Bound         :", m.getDualbound())
+print("Solving Nodes      :", m.getNNodes())
+print("SCIP Version       :", m.version(), "pyscipopt", pyscipopt.__version__)
+"""
+
+
+def _classic_scip():
+    """The classic SCIP binary on PATH (``scip -c``), not the AMPL MP driver, which takes no ``-c``."""
+    exe = shutil.which("scip")
+    if not exe:
+        return None
+    try:
+        out = subprocess.run([exe, "-c", "quit"], capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return exe if "SCIP version" in out else None
+
+
+def run_scip_pyscipopt(name, tl):
+    """SCIP through pyscipopt's .nl reader in a child process, with the same limits and tolerances."""
+    nl = str(LIB / "nl" / f"{name}.nl")
+    out = _run([sys.executable, "-c", _SCIP_PY, nl, str(tl), str(REL_GAP), str(ABS_GAP), str(FEAS_TOL)], tl)
+    if isinstance(out, dict):
+        return out
+    st = _grab(r"SCIP Status\s*:\s*(.*)", out) or ""
+    status = {"optimal": "optimal", "gaplimit": "optimal", "infeasible": "infeasible", "timelimit": "time_limit"}.get(st.strip(), "error")
+    return dict(status=status, time=_float(_grab(r"Solving Time \(sec\)\s*:\s*(\S+)", out)),
+                primal=_num(_float(_grab(r"Primal Bound\s*:\s*(\S+)", out))),
+                dual=_num(_float(_grab(r"Dual Bound\s*:\s*(\S+)", out))),
+                nodes=_float(_grab(r"Solving Nodes\s*:\s*(\d+)", out)),
+                message=f"{st.strip()} ({(_grab(r'SCIP Version\s*:\s*(.*)', out) or '').strip()})" if st else out.strip()[-160:])  # fmt: skip
+
+
 def run_scip(name, tl):
+    if _classic_scip() is None:
+        return run_scip_pyscipopt(name, tl)
     with tempfile.TemporaryDirectory() as tmp:
         cmds = (f"set limits time {tl} set limits gap {REL_GAP} set limits absgap {ABS_GAP} "
                 f"set numerics feastol {FEAS_TOL} read {LIB / 'nl' / name}.nl opt "
