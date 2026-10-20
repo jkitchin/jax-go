@@ -1,0 +1,40 @@
+{
+ "A: two lines, 26 motor ratings": {
+  "loc_pyomo": 18,
+  "loc_jax": 13,
+  "pyomo_vars": 55,
+  "pyomo_cons": 4,
+  "rows": [
+   {
+    "solver": "scip",
+    "obj": 129893.95739100606,
+    "bound": 129879.1976659459,
+    "time": 300.27608479599985,
+    "status": "maxTimeLimit"
+   },
+   {
+    "solver": "couenne",
+    "obj": 129894.00608162905,
+    "bound": NaN,
+    "time": 244.51681437000025,
+    "status": "optimal"
+   },
+   {
+    "solver": "baron",
+    "obj": NaN,
+    "bound": NaN,
+    "time": NaN,
+    "status": "not run: GAMS/BARON not installed"
+   },
+   {
+    "solver": "jaxglobal",
+    "obj": 129895.85773950668,
+    "bound": 129883.2074315693,
+    "time": 28.134992238999985,
+    "status": "optimal",
+    "nodes": 413
+   }
+  ],
+  "note": "52 binaries, one per rating and line"
+ }
+}

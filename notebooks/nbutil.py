@@ -8,6 +8,7 @@ uses relative gap 1e-4 and a 60 s limit.
 import inspect
 import os
 import re
+import shutil
 import sys
 import tempfile
 import time
@@ -25,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) 
 
 GAP = 1e-4
 TIME_LIMIT = 60
-COUENNE = "/Applications/AMPL/couenne"
+COUENNE = shutil.which("couenne") or "/Applications/AMPL/couenne"
 
 
 def loc(*objs):
@@ -47,14 +48,44 @@ def model_size(m):
     return nv, nc
 
 
+_MP = {}
+
+
+def _scip_mp():
+    """True when the scip on PATH is the AMPL MP driver (option names like lim:time), not the classic SCIP binary."""
+    if "mp" not in _MP:
+        import subprocess
+
+        exe = shutil.which("scip")
+        try:
+            out = subprocess.run([exe, "-="], capture_output=True, text=True, timeout=30).stdout if exe else ""
+        except (OSError, subprocess.SubprocessError):
+            out = ""
+        _MP["mp"] = "lim:time" in out
+    return _MP["mp"]
+
+
 def solve_pyomo(m, solver="scip", objective=None, gap=GAP, tlim=TIME_LIMIT):
     """Solve a Pyomo model; return dict(obj, bound, time, status). Wall time includes writing the model."""
     obj = objective or next(m.component_data_objects(pyo.Objective, active=True))
+    if solver == "baron" and not shutil.which("gams"):
+        return dict(solver=solver, obj=np.nan, bound=np.nan, time=np.nan, status="not run: GAMS/BARON not installed")
     t = time.perf_counter()
     try:
         if solver == "baron":
             opts = [f"option optcr={gap}, optca=1e-6, reslim={tlim};"]
             r = pyo.SolverFactory("gams").solve(m, solver="baron", add_options=opts, load_solutions=False)
+        elif solver == "scip" and _scip_mp():
+            # AMPL MP driver (SCIP >= 10 from ampl_module_scip): it ignores scip.set and takes MP option names
+            # from the scip_options environment variable; mip:bestbound returns the dual bound as a suffix
+            if not hasattr(m, "bestbound"):
+                m.bestbound = pyo.Suffix(direction=pyo.Suffix.IMPORT)
+            env = os.environ.get("scip_options")
+            os.environ["scip_options"] = f"lim:time={tlim} lim:gap={gap} lim:absgap=1e-6 mip:bestbound=1"
+            try:
+                r = pyo.SolverFactory("scip").solve(m, load_solutions=False)
+            finally:
+                os.environ.pop("scip_options") if env is None else os.environ.update(scip_options=env)
         elif solver == "scip":
             r = pyo.SolverFactory("scip").solve(
                 m, options={"limits/gap": gap, "limits/absgap": 1e-6, "limits/time": tlim}, load_solutions=False
@@ -76,9 +107,27 @@ def solve_pyomo(m, solver="scip", objective=None, gap=GAP, tlim=TIME_LIMIT):
     dt = time.perf_counter() - t
     tc = str(r.solver.termination_condition)
     fun = lb = np.nan
-    if len(r.solution) and tc not in ("noSolution", "licensingProblems", "error", "infeasible"):
-        m.solutions.load_from(r)
-        fun = pyo.value(obj)
+    if solver == "scip" and _scip_mp():
+        # Pyomo does not parse the MP driver's messages ("optimal solution", "gap limit", "time limit") and marks the
+        # result unknown, which load_from refuses; classify the message here and mark a returned point as feasible
+        msg = str(r.solver.message)
+        tc = ("optimal" if "optimal solution" in msg or "gap limit" in msg else "infeasible" if "infeasible" in msg
+              else "maxTimeLimit" if "time limit" in msg else tc)  # fmt: skip
+        if len(r.solution) and tc != "infeasible":
+            from pyomo.opt import SolutionStatus, SolverStatus
+
+            r.solver.status = SolverStatus.ok
+            r.solution(0).status = SolutionStatus.feasible
+            bb = [v.get("bestbound") for v in r.solution(0).objective.values()]
+            lb = float(bb[0]) if bb and bb[0] is not None else np.nan
+    if len(r.solution) and tc not in ("noSolution", "licensingProblems", "error", "infeasible", "unknown"):
+        try:
+            m.solutions.load_from(r)
+            fun = pyo.value(obj)
+        except ValueError as e:
+            return dict(solver=solver, obj=np.nan, bound=np.nan, time=dt, status="error: " + str(e)[:60])
+    if solver == "scip" and _scip_mp():
+        return dict(solver=solver, obj=fun, bound=lb if np.isfinite(lb) else np.nan, time=dt, status=tc)
     try:
         if solver == "scip":  # SCIP reports through the .nl solver message: gap limit == converged
             tc = "optimal" if "gap limit" in str(r.solver.message) or tc == "optimal" else tc
