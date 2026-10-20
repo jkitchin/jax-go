@@ -1415,6 +1415,114 @@ def apply_rule(ctx, eqn, invals):
 # ---------------------------------------------------------------------------
 
 SUBJAXPR_PARAMS = ("jaxpr", "call_jaxpr", "fun_jaxpr")
+# higher-order primitives that call their inner jaxpr exactly once on their operands (inlined by the
+# interpreters); any other primitive with an inner jaxpr is a loop / branch and is handled by
+# ``inline_call`` (``scan`` unrolled, ``cond`` on a constant index) or refused
+CALLS = frozenset({"pjit", "jit", "closed_call", "core_call", "custom_jvp_call", "custom_vjp_call",
+                   "custom_vjp_call_jaxpr", "remat", "remat2", "checkpoint", "custom_lin"})  # fmt: skip
+MAX_SCAN_UNROLL = 10_000  # iterations of one ``scan`` the interpreters unroll
+_UNROLLED: dict = {}  # id(eqn) -> (eqn, unrolled ClosedJaxpr)
+
+
+def scan_unrolled(eqn):
+    """The ``scan`` equation ``eqn`` as an equivalent loop-free ``ClosedJaxpr`` on its operands.
+
+    The body runs ``length`` times (in reverse when ``reverse``), threading the carry, reading row
+    ``t`` of each scanned operand and stacking the per-iteration outputs, as ``export`` unrolls it.
+    Interpreting the body once (the inner jaxpr as a plain call) would relax one iteration only.
+    A ``scan`` nested in the body stays a ``scan`` and is unrolled when it is interpreted."""
+    hit = _UNROLLED.get(id(eqn))
+    if hit is not None and hit[0] is eqn:
+        return hit[1]
+    p = eqn.params
+    L = int(p["length"])
+    if L > MAX_SCAN_UNROLL:
+        raise NotImplementedError(
+            f"primitive 'scan' (lax.scan / lax.fori_loop) of length {L}: relaxing it unrolls the loop, "
+            f"which is limited to {MAX_SCAN_UNROLL} iterations"
+        )
+    body = p["jaxpr"]
+    body_fn = jcore.jaxpr_as_fun(body if isinstance(body, jcore.ClosedJaxpr) else jcore.ClosedJaxpr(body, ()))
+    ins_avals = [v.aval for v in eqn.invars]
+    out_avals = [v.aval for v in eqn.outvars]
+    if "ft_in" in p:  # jax >= 0.10: flat-tree split of the operands and results
+        def split_in(ins):
+            return (list(a) for a in p["ft_in"].update(list(ins)).unpack())
+
+        def split_out(out):
+            c, y = p["ft_out"].update(list(out)).unpack()
+            return list(c), list(y)
+    else:
+        nc, nk0 = p["num_consts"], p["num_carry"]
+
+        def split_in(ins):
+            return list(ins[:nc]), list(ins[nc : nc + nk0]), list(ins[nc + nk0 :])
+
+        def split_out(out):
+            return list(out[:nk0]), list(out[nk0:])
+
+    def run(*ins):
+        consts, carry, xs = split_in(ins)
+        nk = len(carry)
+        ys = [[None] * L for _ in range(len(out_avals) - nk)]
+        for t in range(L - 1, -1, -1) if p["reverse"] else range(L):
+            out = body_fn(*consts, *carry, *[lax.index_in_dim(x, t, keepdims=False) for x in xs])
+            carry, yt = split_out(out)
+            if len(yt) != len(ys):
+                raise NotImplementedError("primitive 'scan': unexpected output structure")
+            for j, y in enumerate(yt):
+                ys[j][t] = y
+        carry = [lax.convert_element_type(c, a.dtype) for c, a in zip(carry, out_avals)]
+        stacked = [jnp.stack(col).astype(a.dtype) if L else jnp.zeros(a.shape, a.dtype)
+                   for col, a in zip(ys, out_avals[nk:])]  # fmt: skip
+        return carry + stacked
+
+    args = [jax.ShapeDtypeStruct(a.shape, a.dtype, weak_type=getattr(a, "weak_type", False)) for a in ins_avals]
+    closed = jax.make_jaxpr(run)(*args)
+    if len(_UNROLLED) > 256:
+        _UNROLLED.clear()
+    _UNROLLED[id(eqn)] = (eqn, closed)
+    return closed
+
+
+def inline_call(eqn, args, index):
+    """``(jaxpr, consts, args)`` to interpret in place of the higher-order equation ``eqn``, or None
+    if ``eqn`` has no inner jaxpr. ``index(a)`` is the concrete value of the operand ``a`` (a
+    ``cond`` index) or None if it depends on the variables.
+
+    A call (``CALLS``) is its inner jaxpr; a ``scan`` is unrolled (``scan_unrolled``); a ``cond``
+    whose index is a constant is its taken branch. Every other higher-order primitive raises
+    ``NotImplementedError``: its inner jaxpr does not run exactly once on the operands, so
+    interpreting it as a call would bound the wrong function (one iteration of a loop)."""
+    name, p = eqn.primitive.name, eqn.params
+    if name == "scan":
+        closed = scan_unrolled(eqn)
+        return closed.jaxpr, closed.consts, list(args)
+    if name == "while":
+        raise NotImplementedError(
+            "primitive 'while' (lax.while_loop, or lax.fori_loop with traced bounds) is not supported: "
+            "its trip count is not static; use lax.fori_loop with Python int bounds (a scan), which is unrolled"
+        )
+    if name == "cond":
+        k = index(args[0])
+        if k is None:
+            raise NotImplementedError(
+                "primitive 'cond' (lax.cond / lax.switch) with a variable-dependent predicate is not "
+                "supported: use jnp.where"
+            )
+        br = p["branches"]
+        b = br[int(np.clip(int(np.asarray(k)), 0, len(br) - 1))]
+        return b.jaxpr, b.consts, list(args[1:])
+    sub = next((p[k] for k in SUBJAXPR_PARAMS if k in p), None)
+    if sub is None:
+        if any(isinstance(getattr(v, "jaxpr", v), jcore.Jaxpr) for v in p.values()):
+            raise NotImplementedError(f"higher-order primitive '{name}' is not supported")
+        return None
+    if name not in CALLS:
+        raise NotImplementedError(
+            f"higher-order primitive '{name}' is not supported (its inner jaxpr is not a plain call)"
+        )
+    return getattr(sub, "jaxpr", sub), getattr(sub, "consts", ()), list(args)
 
 
 _READS = {"slice", "squeeze", "reshape", "expand_dims", "convert_element_type"}  # element reads (see eval_jaxpr_mc)
@@ -1422,6 +1530,11 @@ _READS = {"slice", "squeeze", "reshape", "expand_dims", "convert_element_type"} 
 
 def _relaxable(v):
     return isinstance(v, (MC, Unknown))
+
+
+def _concrete(v):
+    """The value of ``v`` if it is a constant known at trace time, else None."""
+    return None if _relaxable(v) or isinstance(v, jax.core.Tracer) else v
 
 
 def eval_jaxpr_mc(jaxpr, consts, args, ctx: Ctx = Ctx()):
@@ -1460,12 +1573,10 @@ def eval_jaxpr_mc(jaxpr, consts, args, ctx: Ctx = Ctx()):
         elif name in RULES:
             outs = apply_rule(ctx, eqn, invals)
         else:
-            sub = next((eqn.params[p] for p in SUBJAXPR_PARAMS if p in eqn.params), None)
-            if sub is None:
+            call = inline_call(eqn, invals, _concrete)
+            if call is None:
                 raise NotImplementedError(f"no relaxation rule for primitive '{name}'")
-            outs = eval_jaxpr_mc(
-                getattr(sub, "jaxpr", sub), getattr(sub, "consts", ()), invals, ctx
-            )
+            outs = eval_jaxpr_mc(*call, ctx)
         if eqn.primitive.multiple_results:
             for v, o in zip(eqn.outvars, outs):
                 env[v] = o

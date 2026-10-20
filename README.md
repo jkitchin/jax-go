@@ -588,9 +588,13 @@ Any AMPL `.nl` model (text or binary) can be loaded with
   (see *Phase 6* in [`docs/ROADMAP.md`](docs/ROADMAP.md)). Feasibility holds
   to `feas_tol`, not exactly.
 * **Supported JAX.** `dot_general` between two variable-dependent arrays is
-  supported only for 1-D inner products. `lax.cond`, `while_loop` and `scan`
-  with variable-dependent control flow are not supported; Python control flow
-  on static values is fine. An unsupported primitive raises
+  supported only for 1-D inner products. `lax.scan`, and `lax.fori_loop` with
+  Python `int` bounds (which lowers to a scan), are unrolled by the bounding
+  interpreters (at most 10,000 iterations per scan), so the trace and compile
+  time grow with the trip count, as with a Python loop. `lax.while_loop` (and
+  `fori_loop` with traced bounds) is not supported, and `lax.cond`/`switch` only
+  on a constant index; use `jnp.where` for a variable-dependent branch. Python
+  control flow on static values is fine. An unsupported primitive raises
   `NotImplementedError` naming the primitive.
 * **Unbounded variables.** Finite bounds are derived first
   (`jaxglobal/domain.py`): FBBT from the declared box, unused variables fixed,

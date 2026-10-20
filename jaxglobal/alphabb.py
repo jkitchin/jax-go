@@ -86,7 +86,8 @@ def taylor2_bytes(slots, d, batch=TAYLOR_BATCH):
 
 def _live_eqns(jaxpr):
     """The equations of ``jaxpr`` that its outputs depend on (what ``jit`` keeps after dead-code
-    elimination), with those of the jaxprs nested in their parameters."""
+    elimination), with those of the jaxprs nested in their parameters (a ``scan`` body once per
+    iteration: the bounding interpreters unroll it, see ``relax.scan_unrolled``)."""
     live = {v for v in jaxpr.outvars if isinstance(v, jcore.Var)}
     keep = []
     for e in reversed(jaxpr.eqns):
@@ -99,7 +100,8 @@ def _live_eqns(jaxpr):
             for q in p if isinstance(p, (tuple, list)) else (p,):
                 inner = getattr(q, "jaxpr", q)
                 if isinstance(inner, jcore.Jaxpr):
-                    yield from _live_eqns(inner)
+                    for _ in range(e.params.get("length", 1) if e.primitive.name == "scan" else 1):
+                        yield from _live_eqns(inner)
 
 
 def _has_tracer_consts(closed):
