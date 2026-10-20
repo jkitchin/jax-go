@@ -148,7 +148,7 @@ fig.tight_layout()
 plt.show()
 for D in (0.03, 0.1, 0.3):
     print(f"D = {D:4} m: f jumps from {64 / 2300:.4f} (laminar) to {sj(2300.0, D):.4f} (turbulent) at Re = 2300; "
-          f"Swamee-Jain pole at Re = {(5.74 / (1 - EPS / (3.7 * D))) ** (1 / 0.9):.2f}")
+          f"Swamee-Jain pole at Re = {(5.74 / (1 - EPS / (3.7 * D))) ** (1 / 0.9):.3f}")
 
 # %% [markdown]
 # At $Re = 2300$ the turbulent correlation gives a friction factor well above the laminar one, so crossing the line from the
@@ -303,6 +303,7 @@ cs = ax1.contourf(np.asarray(Qg) * 1e3, np.asarray(Dg), np.log10(G - G.min() + 1
 fig.colorbar(cs, ax=ax1, label=r"$\log_{10}$(objective $-$ grid min $+ 1$)")
 Qs = np.linspace(QLO, QHI, 50)
 ax1.plot(Qs * 1e3, 4 * RHO * Qs / (2300 * np.pi * MU), color=ORANGE, lw=2, label="$Re = 2300$")
+ax1.set_ylim(DLO, DHI)
 ax1.text(2.0, 0.22, "laminar", color="white", fontsize=10)
 ax1.text(7.0, 0.035, "turbulent", color="white", fontsize=10)
 ax1.plot(xj[0] * 1e3, xj[1], "*", color=ORANGE, ms=15, mec=INK, label="jaxglobal optimum")
@@ -342,8 +343,9 @@ plt.show()
 #
 # ### How jaxglobal closed the gap
 #
-# Below is the upper bound (best point found) and the lower bound over all open boxes after each branch-and-bound iteration.
-# Where no lower bound is plotted, it was still $-\infty$. The reason is the discarded branch of the `where`: on a box
+# Below, after each branch-and-bound iteration: how far the best point found so far (the upper bound) is above the best
+# objective any solver reported, and the gap between the upper bound and the lower bound over all open boxes. The search
+# stops when the gap is below the tolerance. Where no gap is plotted, the lower bound was still $-\infty$. The reason is the discarded branch of the `where`: on a box
 # that straddles the switch both branches are bounded and hulled, and interval arithmetic on $Re = \rho v D/\mu$ with
 # $v = 4Q/(\pi D^2)$ loses the cancellation of $D$, so the computed range of $Re$ is far wider than the true one and reaches
 # the pole of the Swamee-Jain formula. The next cell shows this on the root box.
@@ -370,14 +372,14 @@ print(f"root-box interval of the objective: [{float(f_root.lo)}, {float(f_root.h
 # %%
 def plot_history(ax, res, ref, title):
     h = np.array(res.history, dtype=float)  # rows: (iteration, nodes so far, lower bound, upper bound, open boxes)
-    ax.plot(h[:, 1], h[:, 3] - ref, "o-", color=ORANGE, lw=2, ms=4, label="upper bound (incumbent)")
-    fin = np.isfinite(h[:, 2])
-    ax.plot(h[fin, 1], h[fin, 2] - ref, "s--", color=ORANGE, lw=1.5, ms=4, mfc="white", label="lower bound")
+    nodes, lb, ub = h[:, 1], h[:, 2], h[:, 3]
+    ax.semilogy(nodes, np.maximum(ub - ref, 1e-12 * abs(ref)), "o-", color=ORANGE, lw=2, ms=4,
+                label="upper bound − best known objective")  # fmt: skip
+    fin = np.isfinite(lb)
+    ax.semilogy(nodes[fin], ub[fin] - lb[fin], "s--", color=BLUE, lw=1.5, ms=4, mfc="white", label="gap: upper − lower bound")
     if (~fin).any():
-        ax.axvspan(0, h[~fin, 1].max(), color=MUTED, alpha=0.12, lw=0, label="lower bound $= -\\infty$")
-    tol = 1e-4 * abs(ref)
-    ax.axhspan(-tol, tol, color=AQUA, alpha=0.2, lw=0, label="± rel. tolerance 1e-4")
-    ax.set_yscale("symlog", linthresh=tol)
+        ax.axvspan(0, nodes[~fin].max(), color=MUTED, alpha=0.12, lw=0, label="lower bound still $-\\infty$")
+    ax.axhline(1e-4 * abs(ref), color=AQUA, lw=1.5, ls=":", label="tolerance: 1e-4 × |objective|")
     ax.set_xlabel("nodes explored")
     ax.set_title(title, loc="left")
 
@@ -385,7 +387,7 @@ def plot_history(ax, res, ref, title):
 ref_a = np.nanmin([r["obj"] for r in rows])
 fig, ax = plt.subplots(figsize=(6.5, 3.8))
 plot_history(ax, res_a, ref_a, "A: jaxglobal bounds per iteration")
-ax.set_ylabel("bound − best objective found by any solver (\\$/yr)")
+ax.set_ylabel("\\$/yr")
 ax.legend(frameon=False, fontsize=8)
 fig.tight_layout()
 plt.show()
@@ -393,9 +395,10 @@ print(f"{res_a.iterations} iterations, {res_a.nodes} nodes, final gap {res_a.gap
       f"(tolerance {1e-4 * abs(res_a.fun):.3g})")  # fmt: skip
 
 # %% [markdown]
-# Read the plot from left to right: the upper bound only moves when a better point is found, while the lower bound is $-\infty$ as long as some open box still reaches the pole.
-# Once those boxes are split small enough that the computed range of $Re$ stays clear of the pole, the bound becomes finite
-# and the gap closes to the tolerance band. Pyomo avoids this particular trap because $Re$ is a variable with tight hand-made bounds, which is the
+# Read the plot from left to right. The upper bound only moves when a better point is found. The lower bound starts at
+# $-\infty$, as the root-box check shows it must; it becomes finite only after the boxes are split small enough that the
+# computed range of $Re$ stays clear of the pole, and then the gap falls below the tolerance line within a few iterations.
+# Pyomo avoids this particular trap because $Re$ is a variable with tight hand-made bounds, which is the
 # kind of reformulation a modeler adds for exactly this reason; the price is that the modeler must think of it.
 #
 # ## B. Steam-heated exchanger with property tables
@@ -568,10 +571,11 @@ def a_min(P):
     return QREQ / (UCOEF * (np.interp(P, P_TAB, T_TAB) - TPROC))
 
 
+P_ticks = [2, 3, 4, 5, 10, 20, 40, 60]
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.3), gridspec_kw={"width_ratios": [1.1, 1]})
-cs = ax1.contourf(PG, AG, np.ma.masked_where(infeas, cost_b) / 1e3, levels=30, cmap="viridis")
+cs = ax1.contourf(PG, AG, cost_b / 1e3, levels=30, cmap="viridis")
 fig.colorbar(cs, ax=ax1, label="annual cost (k\\$/yr)")
-ax1.contourf(PG, AG, infeas, levels=[0.5, 1.5], colors=[MUTED], alpha=0.35)
+ax1.contourf(PG, AG, infeas, levels=[0.5, 1.5], colors=["#d9d8d2"])
 pb = np.linspace(P_min + 0.05, 60, 400)
 ab = a_min(pb)
 ok = ab <= 400
@@ -580,42 +584,51 @@ ax1.axvline(P_min, color=MUTED, lw=1, ls="--", label=f"$T_{{sat}} = T_{{proc}}$ 
 xb = rows_b[-1]["x"]
 ax1.plot(*xb, "*", color=ORANGE, ms=15, mec=INK, label="jaxglobal optimum")
 ax1.set_xscale("log")
+ax1.set_xticks(P_ticks, [str(t) for t in P_ticks])
+ax1.minorticks_off()
 ax1.set_xlabel("steam pressure $P$ (bar)")
 ax1.set_ylabel("exchanger area $A$ (m²)")
 ax1.set_title("Annual cost; grey = duty not met", loc="left")
 ax1.legend(frameon=False, fontsize=8, loc="upper right")
 ax1.grid(False)
 
-pb2 = np.linspace(P_min + 0.2, 60, 2000)
-pb2 = pb2[a_min(pb2) <= 400]
-cb = np.asarray(jax.vmap(steam)(jnp.asarray(np.stack([pb2, a_min(pb2)], 1))))
-ax2.plot(pb2, cb / 1e3, color=BLUE, lw=2, label="cost on the boundary")
-for p in P_TAB[(P_TAB > pb2[0])]:
+P_400 = float(np.interp(TPROC + QREQ / (UCOEF * 400), T_TAB, P_TAB))  # where A_min(P) = 400 m2, the area bound
+pb2 = np.linspace(P_400, 12, 1000)
+ab2 = a_min(pb2)
+cb = np.asarray(jax.vmap(steam)(jnp.asarray(np.stack([pb2, ab2], 1))))
+hx = 600.0 * ab2**0.65
+ax2.plot(pb2, cb / 1e3, color=INK, lw=2, label="total on the boundary")
+ax2.plot(pb2, (cb - hx) / 1e3, color=BLUE, lw=1.5, label="steam bill")
+ax2.plot(pb2, hx / 1e3, color=AQUA, lw=1.5, label="exchanger $600A_{min}^{0.65}$")
+for p in P_TAB[(P_TAB > pb2[0]) & (P_TAB < pb2[-1])]:
     ax2.axvline(p, color=MUTED, lw=0.8, ls=":")
 for r in rows_b:
     if np.isfinite(r["obj"]):
         p = xb[0] if r["solver"] == "jaxglobal" else pyomo_xb[r["solver"]][0]
         ax2.plot(p, r["obj"] / 1e3, MARKER[r["solver"]], color=COLOR[r["solver"]], mec=INK,
                  ms=14 if r["solver"] == "jaxglobal" else 7, label=r["solver"])  # fmt: skip
-ax2.set_xscale("log")
-ax2.set_ylim(cb.min() / 1e3 - 20, cb.min() / 1e3 + 400)
 ax2.set_xlabel("steam pressure $P$ (bar); dotted = table pressures")
 ax2.set_ylabel("annual cost (k\\$/yr)")
-ax2.set_title("Along $A = A_{min}(P)$", loc="left")
-ax2.legend(frameon=False, fontsize=8, loc="upper right")
+ax2.set_title(f"Along $A = A_{{min}}(P)$, from the area bound (P = {P_400:.2f} bar)", loc="left", fontsize=10)
+ax2.legend(frameon=False, fontsize=8, loc="center right")
 fig.tight_layout()
 plt.show()
+hx_opt = 600.0 * xb[1] ** 0.65
+print(f"at the jaxglobal optimum: steam {rows_b[-1]['obj'] - hx_opt:,.0f} $/yr, exchanger {hx_opt:,.0f} $/yr; "
+      f"lowest pressure that fits A <= 400 m2: {P_400:.2f} bar")  # fmt: skip
 
 # %% [markdown]
-# Near the asymptote the area, and so the exchanger cost, blows up; at high pressure the steam bill dominates. The minimum is
-# in between, on the duty boundary. Because each table is linear between breakpoints, the cost along the boundary is smooth
-# inside a segment and has a kink at each table pressure; the optimum here is inside a segment, not at a kink.
+# Near the asymptote the area, and so the exchanger cost, blows up; at higher pressure the steam bill dominates. The
+# minimum is in between, on the duty boundary and close to the low-pressure end: in this example steam is the larger cost,
+# so the design runs at nearly the lowest pressure that still fits the area bound. Because each table is linear between
+# breakpoints, the cost along the boundary is smooth inside a segment and has a kink at each table pressure (dotted lines);
+# the optimum here is inside a segment, not at a kink.
 # Again all solvers agree to the tolerance.
 
 # %%
 fig, ax = plt.subplots(figsize=(6.5, 3.8))
 plot_history(ax, res_b, np.nanmin([r["obj"] for r in rows_b]), "B: jaxglobal bounds per iteration")
-ax.set_ylabel("bound − best objective found by any solver (\\$/yr)")
+ax.set_ylabel("\\$/yr")
 ax.legend(frameon=False, fontsize=8)
 fig.tight_layout()
 plt.show()
@@ -630,11 +643,11 @@ print(f"{res_b.iterations} iterations, {res_b.nodes} nodes, final gap {res_b.gap
 
 # %%
 fig, axes = plt.subplots(1, 3, figsize=(13, 3.6))
-names = ["scip", "couenne", "baron", "jaxglobal"]
-w = 0.2
+names = [*SOLVERS, "jaxglobal"]
+w = 0.8 / len(names)
 for k, s in enumerate(names):
     t = [r["time"] if np.isfinite(r["obj"]) else np.nan for rr in (rows, rows_b) for r in rr if r["solver"] == s]
-    axes[0].bar(np.arange(2) + (k - 1.5) * w, t, w, color=COLOR[s], label=s)
+    axes[0].bar(np.arange(2) + (k - (len(names) - 1) / 2) * w, t, w, color=COLOR[s], label=s)
 axes[0].set_yscale("log")
 axes[0].set_ylabel("wall time (s)")
 for ax in axes:
