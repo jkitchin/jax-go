@@ -43,3 +43,7 @@ jaxglobal,m3,optimal,41.04797987300026,37.80000000029,37.79996388360964,43,optim
 jaxglobal,cvxnonsep_nsig30,optimal,35.229378215,130.62871264377927,130.6167514436622,123,optimal,5.46
 jaxglobal,tls2,time_limit,60.613243382999826,nan,1.737321084810514,71,time_limit,4.52
 jaxglobal,cvxnonsep_psig30,time_limit,60.000638483999865,nan,nan,0,time_limit,5.09
+jaxglobal,tanksize,time_limit,60.00699935400007,nan,nan,0,time_limit,4.87
+jaxglobal,fac2,time_limit,63.920925389999866,nan,0.0,1,time_limit,5.31
+jaxglobal,cvxnonsep_psig40r,optimal,59.29441149100012,86.54510470075608,86.53739671585787,85,optimal,5.81
+jaxglobal,clay0303hfsg,time_limit,60.01132345300039,nan,nan,0,time_limit,5.61
