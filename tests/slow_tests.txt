@@ -193,6 +193,10 @@ tests/test_gp.py::test_mean_matches_formula[matern52]
 tests/test_gp.py::test_mean_relaxation_sound_composite_and_5d
 tests/test_gp.py::test_mean_taylor_remainder_holds[matern52]
 tests/test_gp.py::test_relaxation_sound_5d
+tests/test_gp.py::test_std_cuts_valid_both_sides
+tests/test_gp.py::test_std_interval_converges
+tests/test_gp.py::test_std_relaxation_sound_composite_and_5d
+tests/test_gp.py::test_std_taylor_model_holds[matern52]
 tests/test_incumbent.py::test_free_slack_instances_solve[clay0203m-41573.26]
 tests/test_incumbent.py::test_free_slack_instances_solve[m3-37.8]
 tests/test_incumbent.py::test_incumbent_repaired_to_strict_feasibility

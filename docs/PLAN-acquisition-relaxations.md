@@ -1,7 +1,7 @@
 # Specialized relaxations for Bayesian-optimization acquisition functions
 
-Status (October 2026): the mean's first-order Taylor bound is implemented (`gp.gp_mean`, §5);
-the rest is a plan. The numbers in §2–3 come from `benchmarks/acq_gap.py`, run on the 15-point
+Status (October 2026): the first-order Taylor bounds of the mean (`gp.gp_mean`, §5) and of the
+standard deviation (`gp.gp_std`, §6) are implemented; the joint acquisition bounds are a plan. The numbers in §2–3 come from `benchmarks/acq_gap.py`, run on the 15-point
 Matérn 5/2 GP of `tests/test_gp.py` (target `fmin − 0.05`, 25 random square boxes per width in
 [−1, 1]²).
 
@@ -11,7 +11,7 @@ Matérn 5/2 GP of `tests/test_gp.py` (target `fmin − 0.05`, 25 random square b
 |---|---|---|
 | Matérn 1/2, 3/2, 5/2, SE kernels | `kernels.py` | one convex, nonincreasing function of the squared distance [schweidtmann2021deterministic] |
 | GP mean `k(x)ᵀα` | `gp.gp_mean` | sum of kernel primitives, relaxed term by term (before §5) |
-| GP std | `gp.gp_std` | `√(σ_f² − ‖Wᵀk‖²)` intersected with `σ(c) ± √(2σ_f²(1 − k(d_max)))` |
+| GP std | `gp.gp_std` | `√(σ_f² − ‖Wᵀk‖²)` intersected with `σ(c) ± √(2σ_f²(1 − k(d_max)))` (and §6) |
 | EI | `gp.expected_improvement` | jointly convex and monotone in (μ, σ); concave envelope over the (μ, σ) box |
 | PI | `gp.probability_of_improvement` | monotonicity bound plus exact Φ envelopes on z = (t − μ)/σ |
 | LCB/UCB | none needed | `μ − κσ`, composed |
@@ -174,7 +174,47 @@ and the first incumbent came out worse. For example, on N = 50 the root UB was �
 tighter root bound. Using the Taylor model in the interval only, or only on boxes where it is
 narrower than the formula's interval, did no better than the plain max.
 
-Next: σ's Taylor model in `gp_std`, then the joint LCB/EI vertex bounds (§3).
+## 6. Implemented: σ's Taylor model
+
+`gp_std`'s rule, for Matérn 5/2 and SE, also intersects with `|σ(x) − s̃(δ)| ≤ e(s)` (§3).
+`s̃ = √q` with `q(δ) = σ_f² + Σⱼ Dⱼδⱼ² − ‖w + J_w δ‖²` in closed form (`w = Wᵀk(c)`,
+`Dⱼ = −2σ_f²φ'(0)/ℓⱼ²`), which matches autodiff of the posterior covariance to 1e−13.
+
+* **Concave side.** `√` of a concave overestimator of `q`. Squares are bounded by their secant,
+  a constant on the symmetric box. Cross terms `C_ij δ_iδ_j` use the bilinear McCormick
+  overestimator, written as `|C_ij|(h_ih_j − |h_iδ_j − sgn(C_ij)h_jδ_i|)`. It is exact at the
+  vertices.
+* **Convex side.** The max of the tangent planes of `s̃` at the center, the clipped minimizer of
+  `q` and the 2n face centers. A plane is skipped where `s̃` is too small for its slope to be
+  accurate.
+* Both are affine in δ or `√` of a concave function of it, so they compose with a relaxed input
+  by the sign of each coefficient. Rounding margins cover the cancellation in `q` and the
+  evaluated σ. The cross terms and tangents are vectorized: the rule is 838 jaxpr equations
+  against 515 before, independent of n.
+
+σ's interval over the true range (`tests/test_gp.py` GP, 20 boxes per width): 1.35 / 2.0 /
+1.30 / 1.06 at widths 1 / 0.2 / 0.05 / 0.01, against 1.8 / 2.9 / 3.4 / 2.5 before.
+
+Solves (`benchmarks/results/gp_std_ab.csv`, the code before and after this change, `gp_mean`
+primitive in both; cold first solve with `JAXGLOBAL_CACHE=0`, then warm):
+
+| case | nodes before | nodes after | warm s before → after | cold s before → after |
+|---|---:|---:|---|---|
+| chance constraint | 1,359 | 153 | 0.7 → 0.2 | 24.2 → 20.6 |
+| LCB, N = 50 | 3,477 | 679 | 1.2 → 0.4 | 16.6 → 19.2 |
+| PI, ξ = 0 | 14,243 | 719 | 6.3 → 0.8 | 32.0 → 34.3 |
+| EI, N = 50 | 1,289 | 963 | 1.0 → 0.9 | 19.0 → 24.6 |
+| EI, N = 20 | 559 | 527 | 0.2 → 0.2 | 17.5 → 21.2 |
+| PI, ξ = 0.1σ_y | 399 | 375 | 0.4 → 0.5 | 26.6 → 33.4 |
+| LCB, N = 20 | 295 | 295 | 0.2 → 0.1 | 15.7 → 19.8 |
+
+Same optimum in every case. On these small 2-D problems the cold time is mostly compilation
+(on a 4-core VM), and the larger rule adds 2–7 s to it. The warm solves, and the hard cases
+(PI without a margin, the chance constraint, LCB on 50 points), are where the bound pays.
+Dropping the Lipschitz bound for these kernels (the Taylor model alone) changed nodes by 0–2%,
+so it is kept.
+
+Next: the joint LCB/EI vertex bounds (§3).
 
 Refs: [schweidtmann2021deterministic] (*Math. Prog. Comp.* 13(3), 2021); Ament et al.,
 "Unexpected improvements to expected improvement for Bayesian optimization", NeurIPS 2023

@@ -1,8 +1,11 @@
 """A/B: the GP mean as the ``jnp`` formula ``k(x)^T alpha`` against the ``gp.gp_mean`` primitive.
 
+For an A/B of another change (``gp_std``'s rule), run ``primitive`` in two checkouts.
+
 Notebook 06's problems, its GP class (trained the same way) and its tolerances (abs/rel 1e-3).
 Before the primitive, ``gp_mean`` was the formula, so ``formula`` is the old behaviour.
-Each case runs in its own process; ``--repeat 2`` reports the second (warm-cache) time.
+Each case runs in its own process; ``--repeat 2`` reports the first solve's time (compiling, or
+loading kernels from the cache) and the second's (warm). ``JAXGLOBAL_CACHE=0`` for cold first times.
 
     python benchmarks/gp_mean_ab.py --list
     python benchmarks/gp_mean_ab.py CASE MODE [--repeat 2]      # one row of CSV to stdout
@@ -19,9 +22,9 @@ import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CASES = ["mean_N20", "mean_N50", "mean_N100", "mean_N200", "mean_N50_matern32", "mean_N50_se",
-         "lcb", "ei", "pi", "chance", "mean_constraint"]  # fmt: skip
+         "lcb", "ei", "pi", "pi0", "lcb_N50", "ei_N50", "chance", "mean_constraint"]  # fmt: skip
 MODES = ["formula", "primitive"]
-FIELDS = ["case", "mode", "status", "fun", "lower_bound", "nodes", "iterations", "time_s"]
+FIELDS = ["case", "mode", "status", "fun", "lower_bound", "nodes", "iterations", "time_s", "first_time_s"]
 
 
 def notebook_namespace():
@@ -55,14 +58,16 @@ def problem(case, mode):
         n, kernel = int(parts[1][1:]), (parts[2] if len(parts) > 2 else "matern52")
         X = lhs(n)
         return dict(f=mean_of(GP(X, peaks(X), LO, HI, kernel=kernel)), lo=LO, hi=HI)
-    if case in ("lcb", "ei", "pi"):
-        X20 = lhs(20)
-        y20 = np.asarray(peaks(X20))
-        gp20 = GP(X20, y20, LO, HI)
-        mu, fmin = mean_of(gp20), float(y20.min())
-        f = {"lcb": lambda x: mu(x) - 2.0 * gp20.std(x),
-             "ei": lambda x: -expected_improvement(mu(x), gp20.std(x), fmin),
-             "pi": lambda x: -probability_of_improvement(mu(x), gp20.std(x), fmin - 0.1 * gp20.ys)}[case]  # fmt: skip
+    if case.split("_")[0] in ("lcb", "ei", "pi", "pi0"):
+        n = int(case.split("_N")[1]) if "_N" in case else 20
+        Xa = lhs(n)
+        ya = np.asarray(peaks(Xa))
+        gpa = GP(Xa, ya, LO, HI)
+        mu, fmin = mean_of(gpa), float(ya.min())
+        f = {"lcb": lambda x: mu(x) - 2.0 * gpa.std(x),
+             "ei": lambda x: -expected_improvement(mu(x), gpa.std(x), fmin),
+             "pi": lambda x: -probability_of_improvement(mu(x), gpa.std(x), fmin - 0.1 * gpa.ys),
+             "pi0": lambda x: -probability_of_improvement(mu(x), gpa.std(x), fmin)}[case.split("_")[0]]  # fmt: skip
         return dict(f=f, lo=LO, hi=HI)
     CLO, CHI, C = np.zeros(2), np.ones(2), 5.0
     Xc = lhs(40, seed=1, lo=CLO, hi=CHI)
@@ -84,13 +89,15 @@ def run_one(case, mode, repeat):
 
     p = problem(case, mode)
     kw = {"ineq": p["ineq"]} if "ineq" in p else {}
+    times = []
     for _ in range(repeat):
         t = time.perf_counter()
         r = minimize(p["f"], p["lo"], p["hi"], abs_tol=1e-3, rel_tol=1e-3, time_limit=300, **kw)
-        dt = time.perf_counter() - t
+        times.append(time.perf_counter() - t)
     w = csv.DictWriter(sys.stdout, FIELDS)
     w.writerow(dict(case=case, mode=mode, status=r.status, fun=f"{r.fun:.6g}", lower_bound=f"{r.lower_bound:.6g}",
-                    nodes=r.nodes, iterations=r.iterations, time_s=f"{dt:.1f}"))
+                    nodes=r.nodes, iterations=r.iterations, time_s=f"{times[-1]:.1f}",
+                    first_time_s=f"{times[0]:.1f}"))
 
 
 def run_all(jobs, repeat):
@@ -100,7 +107,7 @@ def run_all(jobs, repeat):
         cmd = [sys.executable, __file__, *cm, "--repeat", str(repeat)]
         out = subprocess.run(cmd, capture_output=True, text=True, env={**os.environ, "RUST_LOG": "warn"})
         rows = [ln for ln in out.stdout.splitlines() if ln.startswith(cm[0] + ",")]
-        return rows[-1] if rows else f"{cm[0]},{cm[1]},error,,,,,"
+        return rows[-1] if rows else f"{cm[0]},{cm[1]},error,,,,,,"
 
     print(",".join(FIELDS), flush=True)
     with ThreadPoolExecutor(jobs) as ex:

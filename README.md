@@ -402,6 +402,12 @@ remainder is bounded by the mean's RKHS norm:
 2253 → 497 for the N = 200 GP mean, 2759 → 1359 for the chance constraint,
 683 → 559 for EI. A few cases are unchanged or within 3%
 ([`benchmarks/results/gp_mean_ab.csv`](benchmarks/results/gp_mean_ab.csv)).
+`gp_std` gets the same treatment: `|σ(x) − √q(δ)| ≤ e(δ)`, with `q` the
+posterior variance of `f(c) + ∇f(c)·δ`, a quadratic in closed form whose
+square root is convex. With both, PI without a margin solves in 719 nodes
+instead of 14243, LCB on 50 points in 679 instead of 3477, and the chance
+constraint in 153 instead of 1359. The larger rule adds a few seconds of
+compilation ([`benchmarks/results/gp_std_ab.csv`](benchmarks/results/gp_std_ab.csv)).
 
 The acquisition functions are primitives too:
 `expected_improvement(mu, sigma, fmin)` is relaxed as the jointly convex,

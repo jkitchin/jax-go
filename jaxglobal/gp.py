@@ -39,7 +39,17 @@ concave sides:
   = sqrt(2 sf2 (1 - kernel(d(x, c))))`` (the triangle inequality for standard
   deviations; conditioning never increases the variance of a linear
   functional). Over the box this gives ``sigma(c) -+ h`` with ``h`` from the
-  farthest corner: first order in the box size, independent of ``A``.
+  farthest corner: first order in the box size, independent of ``A``;
+* for ``matern52`` and ``se``, a first-order model (``_std_taylor``): the same
+  argument with ``f(c) + grad f(c).delta`` in place of ``f(c)`` gives
+  ``|sigma(x) - sqrt(q(delta))| <= e(s)``, ``e`` the prior remainder of the mean's
+  model above (without ``||mu||_H``) and ``q`` the posterior variance of
+  ``f(c) + grad f(c).delta``, a PSD quadratic in closed form,
+  ``q = sf2 + sum_j D_j delta_j^2 - ||w + J_w delta||^2`` (``w = W^T k(c)``,
+  ``J_w`` its Jacobian, ``D_j = -2 sf2 phi'(0) / l_j^2``). ``sqrt(q)`` is convex:
+  its convex side is a max of tangent planes, its concave side ``sqrt`` of a
+  concave overestimator of ``q``. Second order: the interval converges to the
+  true range as the box shrinks.
 
 ``v >= 0`` in exact arithmetic (``A`` is positive semidefinite); ``eps`` keeps
 the square root differentiable.
@@ -179,6 +189,74 @@ def gp_std(x, Z, lengthscale, A, sf2, kernel="matern52", eps=1e-12):
     return gp_std_p.bind(f(x), f(Z), f(lengthscale), W, f(sf2), kernel=kernel, eps=float(eps))
 
 
+def _std_taylor(x, Z, lengthscale, W, sf2, kernel, eps):
+    """``(lo, hi, cv, cc)`` of sigma on the box of ``x`` from the first-order model (kernels in ``_SMOOTH``).
+
+    ``|sigma(x) - st(delta)| <= e(s)``, ``st(delta) = sqrt(q(delta))`` the posterior sd of
+    ``f(c) + grad f(c).delta``, ``q(delta) = q0 + 2 b.delta + delta^T C delta`` (``C`` PSD): convex.
+    cc: ``sqrt`` of a concave overestimator of ``q`` (squares by their secant on the symmetric box,
+    cross terms by the bilinear McCormick overestimators: exact at the vertices). cv: the max of
+    tangent planes of ``st`` at the center, the clipped minimizer of ``q`` and the face centers.
+    Both are affine or ``sqrt`` of a concave function of ``delta``, relaxed by the sign of each
+    coefficient when ``x`` is itself relaxed.
+    """
+    phi, d1 = KERNELS[kernel], jax.grad(KERNELS[kernel])
+    N, n = Z.shape[0], x.lo.shape[-1]
+    c = jnp.where(jnp.isfinite(x.lo) & jnp.isfinite(x.hi), 0.5 * (x.lo + x.hi), 0.0)
+    h = jnp.maximum(c - x.lo, x.hi - c)
+    s = jnp.sum((h / lengthscale) ** 2)  # the farthest corner
+    dphi0 = d1(jnp.zeros_like(s))
+    e = jnp.sqrt(jnp.maximum(2 * sf2 * (1 - phi(s) + 2 * s * d1(s) - s * dphi0), 0.0) + 16 * _EPS * sf2 * (1 + 3 * s * jnp.abs(dphi0)))
+
+    def wk(u):
+        return W.T @ _kvec(u, Z, lengthscale, sf2, kernel)
+
+    w, Jw = wk(c), jax.jacfwd(wk)(c)  # (N,), (N, n)
+    D = -2 * sf2 * dphi0 / lengthscale**2  # prior covariance of grad f (diagonal)
+    q0, b, C = sf2 - w @ w, -Jw.T @ w, jnp.diag(D) - Jw.T @ Jw
+    # rounding: of q (and its gradient) from the cancellation sf2 + D delta^2 - ||w + Jw delta||^2, and of
+    # the evaluated sigma itself (sf2 - ||W^T k||^2 with ||W^T k||^2 <= ~sf2)
+    big = jnp.abs(w) + jnp.abs(Jw) @ h
+    k_err = 16 * (N + n + 2) * _EPS
+    errQ = k_err * (sf2 + jnp.sum(D * h**2) + big @ big)
+    errG = k_err * (D * h + jnp.abs(Jw).T @ big)
+    tolV = jnp.sqrt(k_err * sf2) + jnp.sqrt(eps)  # also sqrt(max(v, eps)) <= sqrt(v) + sqrt(eps)
+    dcv, dcc = x.cv - c, x.cc - c  # relaxations of delta
+
+    # concave side: q <= q0 + sum_i C_ii h_i^2 + 2 b.delta + sum_{i != j} |C_ij| (h_i h_j - |l_ij(delta)|),
+    # l_ij = h_i delta_j - sgn(C_ij) h_j delta_i, and -|l| = min(l, -l), each relaxed from above
+    def up(a, k):  # concave overestimator of a * delta_k (elementwise)
+        return jnp.where(a >= 0, a * dcc[k], a * dcv[k])
+
+    diag = jnp.sum(jnp.diag(C) * h**2)
+    ccq = q0 + diag + jnp.sum(up(2 * b, jnp.arange(n)))
+    qmax = q0 + diag + 2 * jnp.abs(b) @ h
+    off = 1.0 - jnp.eye(n)
+    ai = -jnp.sign(C) * h[None, :]  # coefficient of delta_i in l_ij (that of delta_j is h_i >= 0)
+    rows, cols = jnp.arange(n)[:, None], jnp.arange(n)[None, :]
+    m = jnp.minimum(h[:, None] * dcc[cols] + up(ai, rows), -h[:, None] * dcv[cols] + up(-ai, rows))
+    hh = h[:, None] * h[None, :]
+    ccq = ccq + jnp.sum(off * jnp.abs(C) * (hh + m))
+    qmax = qmax + jnp.sum(off * jnp.abs(C) * hh)
+    cc = jnp.sqrt(jnp.maximum(ccq, 0.0) + errQ) + e + tolV
+    hi = jnp.sqrt(jnp.maximum(qmax, 0.0) + errQ) + e + tolV
+    # convex side: tangent planes st(p) + g.(delta - p), g = (b + C p) / st(p), where st(p) is not tiny
+    eye = jnp.eye(n)
+    newton = jnp.clip(-jnp.linalg.solve(C + (1e-12 * jnp.trace(C) / n + 1e-300) * eye, b), -h, h)
+    P = jnp.concatenate([jnp.zeros((1, n)), newton[None], jnp.diag(h), -jnp.diag(h)])  # (2n + 2, n)
+    st = jnp.sqrt(jnp.maximum(q0 + 2 * P @ b + jnp.einsum("pi,ij,pj->p", P, C, P), 0.0))
+    use = st * st >= 1e4 * errQ  # then the computed st and g are accurate to the margin below
+    ss = jnp.where(use, st, 1.0)
+    G = (b + P @ C) / ss[:, None]
+    margin = errQ / ss + ((errG[None, :] / ss[:, None] + jnp.abs(G) * (errQ / ss**2)[:, None]) * 2 * h) @ jnp.ones(n)
+    base = st - jnp.sum(G * P, axis=1) - margin - e - tolV
+    tan_cv = base + jnp.sum(jnp.where(G >= 0, G * dcv, G * dcc), axis=1)
+    tan_lo = base - jnp.abs(G) @ h
+    cv = jnp.max(jnp.where(use, tan_cv, 0.0))  # sigma >= 0
+    lo = jnp.max(jnp.where(use, tan_lo, 0.0))
+    return lo, hi, cv, cc
+
+
 def _rule(ctx, eqn, x, Z, lengthscale, W, sf2):
     kernel, eps = eqn.params["kernel"], eqn.params["eps"]
     x = as_mc(x)
@@ -190,12 +268,18 @@ def _rule(ctx, eqn, x, Z, lengthscale, W, sf2):
     d_max = jnp.sum((half / lengthscale) ** 2)
     h = jnp.sqrt(jnp.maximum(2 * sf2 * (1 - KERNELS[kernel](d_max)), 0.0))
     sc = jnp.sqrt(jnp.maximum(_var(c, Z, lengthscale, W, sf2, kernel), 0.0))
-    lo_l, hi_l = sc - h, sc + h + jnp.sqrt(eps)  # sqrt(max(v, eps)) <= sqrt(v) + sqrt(eps)
+    lo, hi = sc - h, sc + h + jnp.sqrt(eps)  # sqrt(max(v, eps)) <= sqrt(v) + sqrt(eps)
+    cv, cc = lo, hi
     ok = fin & jnp.isfinite(h) & jnp.isfinite(sc)
-    return tighten(MC(jnp.where(ok, jnp.maximum(sig.lo, lo_l), sig.lo),
-                      jnp.where(ok, jnp.minimum(sig.hi, hi_l), sig.hi),
-                      jnp.where(ok, jnp.maximum(sig.cv, lo_l), sig.cv),
-                      jnp.where(ok, jnp.minimum(sig.cc, hi_l), sig.cc)))  # fmt: skip
+    if kernel in _SMOOTH and not any(isinstance(v, MC) for v in (Z, lengthscale, W, sf2)):
+        tlo, thi, tcv, tcc = _std_taylor(x, Z, lengthscale, W, sf2, kernel, eps)
+        tok = fin & jnp.isfinite(tlo) & jnp.isfinite(thi) & jnp.isfinite(tcv) & jnp.isfinite(tcc)
+        lo, hi = jnp.where(tok, jnp.maximum(lo, tlo), lo), jnp.where(tok, jnp.minimum(hi, thi), hi)
+        cv, cc = jnp.where(tok, jnp.maximum(cv, tcv), cv), jnp.where(tok, jnp.minimum(cc, tcc), cc)
+    return tighten(MC(jnp.where(ok, jnp.maximum(sig.lo, lo), sig.lo),
+                      jnp.where(ok, jnp.minimum(sig.hi, hi), sig.hi),
+                      jnp.where(ok, jnp.maximum(sig.cv, cv), sig.cv),
+                      jnp.where(ok, jnp.minimum(sig.cc, cc), sig.cc)))  # fmt: skip
 
 
 RULES["gp_std"] = _rule

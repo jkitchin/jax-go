@@ -150,6 +150,91 @@ def test_relaxation_sound_5d():
         assert np.all(m.lo <= F + tol) and np.all(F <= m.hi + tol)
 
 
+@pytest.mark.parametrize("kernel", ["matern52", "se"])
+def test_std_taylor_model_holds(kernel):
+    """|sigma(x) - sqrt(q(x - c))| <= e(s), q the posterior variance of f(c) + grad f(c).delta, in its closed
+    form sf2 + sum_j D_j delta_j^2 - ||w + Jw delta||^2: what the first-order rule relies on."""
+    phi, d1 = kernels.KERNELS[kernel], jax.grad(kernels.KERNELS[kernel])
+    for noise in (1e-6, 1e-2):
+        Z, ls, A, _, sf2 = trained(kernel, noise)
+        sd = formula(Z, ls, A, sf2, kernel)
+        W = jnp.linalg.cholesky(0.5 * (A + A.T))
+
+        def wk(u):
+            return W.T @ (sf2 * phi(jnp.sum(((u - Z) / ls) ** 2, axis=-1)))
+
+        def gap(x, c):
+            dl = x - c
+            w, Jw = wk(c), jax.jacfwd(wk)(c)
+            q = sf2 + jnp.sum(-2 * sf2 * d1(0.0) / ls**2 * dl**2) - jnp.sum((w + Jw @ dl) ** 2)
+            s = jnp.sum((dl / ls) ** 2)
+            e = jnp.sqrt(jnp.maximum(2 * sf2 * (1 - phi(s) + 2 * s * d1(s) - s * d1(0.0)), 0.0))
+            return jnp.abs(sd(x) - jnp.sqrt(jnp.maximum(q, 0.0))) - e
+
+        rng = np.random.default_rng(9)
+        C = jnp.asarray(np.concatenate([rng.uniform(-1, 1, (2000, 2)), np.repeat(Z, 20, axis=0)]))  # also at the data
+        X = C + jnp.asarray(rng.normal(size=C.shape)) * 10.0 ** jnp.asarray(rng.uniform(-4, 0, (len(C), 1)))
+        assert float(jnp.max(jax.vmap(gap)(X, C))) <= 1e-7  # sd's own floor sqrt(1e-12) and rounding
+
+
+def test_std_relaxation_sound_composite_and_5d():
+    """The input a relaxed function of the variables (5-D), and tiny boxes at the training points."""
+    rng = np.random.default_rng(10)
+    Z, ls, sf2 = rng.uniform(-1, 1, (25, 5)), np.full(5, 0.8), 0.9
+    d = (((Z[:, None] - Z[None]) / ls) ** 2).sum(-1)
+    A = np.linalg.inv(sf2 * np.asarray(kernels.matern52(jnp.asarray(d))) + 1e-6 * np.eye(25))
+    M = rng.normal(size=(5, 5)) / 3
+    f = lambda z: gp_std(jnp.tanh(M @ z + z**2), Z, ls, A, sf2)  # noqa: E731
+    g = jax.vmap(lambda z: formula(Z, ls, A, sf2, "matern52")(jnp.tanh(M @ z + z**2)))
+    fd = lambda x: gp_std(x, Z, ls, A, sf2)  # noqa: E731
+    gd = jax.vmap(formula(Z, ls, A, sf2, "matern52"))
+    rf, rd = jax.jit(jax.vmap(relax(f), in_axes=(0, None, None))), jax.jit(jax.vmap(relax(fd), in_axes=(0, None, None)))
+    for i in range(16):
+        w = 10.0 ** rng.uniform(-4, 0) * np.ones(5)
+        if i % 2:  # around a training point: sigma near its noise floor
+            c, rel, fun = Z[i % 25] + rng.uniform(-1, 1, 5) * w / 4, rd, gd
+        else:
+            c, rel, fun = rng.uniform(-1, 1, 5), rf, g
+        lo, hi = c - w / 2, c + w / 2
+        X = rng.uniform(lo, hi, (800, 5))
+        m, F = rel(X, lo, hi), np.asarray(fun(jnp.asarray(X)))
+        tol = 1e-9 * (1 + np.abs(F).max())
+        assert np.all(m.cv <= F + tol) and np.all(F <= m.cc + tol)
+        assert np.all(m.lo <= F + tol) and np.all(F <= m.hi + tol)
+
+
+def test_std_cuts_valid_both_sides():
+    Z, ls, A, _, sf2 = trained()
+    f = lambda x: gp_std(x, Z, ls, A, sf2)  # noqa: E731
+    rng = np.random.default_rng(11)
+    for lo, hi in boxes(rng, 6):
+        lo, hi = jnp.asarray(lo), jnp.asarray(hi)
+        X = jnp.asarray(rng.uniform(lo, hi, (400, 2)))
+        for side, sgn in (("cv", 1.0), ("cc", -1.0)):  # cv: tangent planes below, cc: above
+            fn = jax.jit(lambda x: getattr(relax(f)(x, lo, hi), side))
+            vg, V = jax.jit(jax.value_and_grad(fn)), jax.vmap(fn)(X)
+            for x0 in np.concatenate([np.array([lo, hi]), rng.uniform(lo, hi, (4, 2))]):
+                v, gr = vg(jnp.asarray(x0))
+                if np.isfinite(v) and np.all(np.isfinite(gr)):
+                    assert float(jnp.max(sgn * (v + (X - x0) @ gr - V))) <= 1e-8 * (1 + float(jnp.abs(V).max()))
+
+
+def test_std_interval_converges():
+    """On small boxes the interval approaches the true range (before the first-order model: ~2.5x)."""
+    Z, ls, A, _, sf2 = trained()
+    f = lambda x: gp_std(x, Z, ls, A, sf2)  # noqa: E731
+    rp = jax.jit(relax(f))
+    rng = np.random.default_rng(12)
+    ratios = []
+    for _ in range(10):
+        c = rng.uniform(-0.99, 0.99, 2)
+        lo, hi = jnp.asarray(c - 0.005), jnp.asarray(c + 0.005)
+        F = jax.vmap(f)(jnp.asarray(rng.uniform(lo, hi, (2000, 2))))
+        m = rp(jnp.asarray(c), lo, hi)
+        ratios.append(float(m.hi - m.lo) / float(F.max() - F.min()))
+    assert np.median(ratios) <= 1.3, ratios
+
+
 # --- posterior mean ------------------------------------------------------------
 
 
