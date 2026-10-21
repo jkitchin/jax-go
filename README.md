@@ -390,7 +390,18 @@ because the posterior is itself a Gaussian process and does not involve
 `K⁻¹`. On a 95% chance constraint (`mean + 1.96 std ≤ c`) the solve is now
 certified in 2759 nodes and 31.0 s (notebook 06's stored output), where the
 formula did not close in 120 s (140k nodes; a run on or before 2026-10-17,
-not reproduced by the stored notebook). `gp_mean` is the matching mean.
+not reproduced by the stored notebook).
+
+`jaxglobal.gp.gp_mean(x, Z, lengthscale, alpha, sf2, kernel=...)` is the
+matching mean, `k(x)ᵀα`. Relaxed term by term, the signed sum loses the
+cancellation between its terms. For Matérn 5/2 and SE its relaxation is also
+intersected with a first-order Taylor model around the box center, whose
+remainder is bounded by the mean's RKHS norm:
+`|μ(x) − μ(c) − ∇μ(c)·δ| ≤ ‖μ‖_H e(δ)`, with `e` in closed form and of order
+`|δ|²`. On notebook 06's problems it gives the same answers in fewer nodes:
+2253 → 497 for the N = 200 GP mean, 2759 → 1359 for the chance constraint,
+683 → 559 for EI. A few cases are unchanged or within 3%
+([`benchmarks/results/gp_mean_ab.csv`](benchmarks/results/gp_mean_ab.csv)).
 
 The acquisition functions are primitives too:
 `expected_improvement(mu, sigma, fmin)` is relaxed as the jointly convex,

@@ -1,15 +1,16 @@
 # Specialized relaxations for Bayesian-optimization acquisition functions
 
-Status: investigation (October 2026). Nothing here is in the solver yet. The numbers come from
-`benchmarks/acq_gap.py`, run on the 15-point Matérn 5/2 GP of `tests/test_gp.py`
-(target `fmin − 0.05`, 25 random square boxes per width in [−1, 1]²).
+Status (October 2026): the mean's first-order Taylor bound is implemented (`gp.gp_mean`, §5);
+the rest is a plan. The numbers in §2–3 come from `benchmarks/acq_gap.py`, run on the 15-point
+Matérn 5/2 GP of `tests/test_gp.py` (target `fmin − 0.05`, 25 random square boxes per width in
+[−1, 1]²).
 
 ## 1. What exists
 
 | function | where | relaxation |
 |---|---|---|
 | Matérn 1/2, 3/2, 5/2, SE kernels | `kernels.py` | one convex, nonincreasing function of the squared distance [schweidtmann2021deterministic] |
-| GP mean `k(x)ᵀα` | `gp.gp_mean` | plain sum of kernel primitives, relaxed term by term |
+| GP mean `k(x)ᵀα` | `gp.gp_mean` | sum of kernel primitives, relaxed term by term (before §5) |
 | GP std | `gp.gp_std` | `√(σ_f² − ‖Wᵀk‖²)` intersected with `σ(c) ± √(2σ_f²(1 − k(d_max)))` |
 | EI | `gp.expected_improvement` | jointly convex and monotone in (μ, σ); concave envelope over the (μ, σ) box |
 | PI | `gp.probability_of_improvement` | monotonicity bound plus exact Φ envelopes on z = (t − μ)/σ |
@@ -32,7 +33,8 @@ For EI and PI, nearly all of the gap comes from how loosely **μ and σ themselv
 enclosed. A tighter (μ, σ) → EI rule cannot help much. LCB at small widths is the exception:
 there, half of the gap comes from treating μ and σ as independent, so a joint bound is needed.
 
-**The GP mean is the loosest piece.** Width of each enclosure divided by the true range:
+**The GP mean has the loosest interval.** Width of each interval enclosure divided by the true
+range:
 
 | width | μ, current | μ, Taylor + RKHS (§3) | σ, `gp_std` | σ, Taylor + RKHS | remainder `e_max` |
 |---:|---:|---:|---:|---:|---:|
@@ -42,10 +44,12 @@ there, half of the gap comes from treating μ and σ as independent, so a joint 
 | 0.01 | 7.3 | 1.14 | 2.5 | 1.06 | 4.3e−4 |
 | 0.002 | 6.6 | 1.05 | 2.5 | 1.01 | 1.7e−5 |
 
-The current μ enclosure does not converge to the true range: it stays about 7× too wide
+The current μ interval does not converge to the true range: it stays about 7× too wide
 however small the box. `k(x)ᵀα` is a sum of N kernel terms with signed weights
 (‖α‖₁ = 21 here, against ‖μ‖_H = 2.7). Each term is relaxed on its own, so the cancellation
-between terms is lost.
+between terms is lost. (Correction found while implementing §5: this is the *interval*. The
+formula's convex underestimator is much tighter than its interval, and on most boxes the node
+bound comes from it, so for minimizing μ alone the gain is smaller than these ratios suggest.)
 
 ## 3. Proposal: Taylor models with RKHS remainders
 
@@ -106,12 +110,13 @@ both bounds (LCB is worse with the Taylor model on large boxes).
    * cc of σ: `s̃(δ) + e` is convex, so a concave overestimator needs its vertex
      interpolant or a tangent-plus-curvature bound.
    * cv of σ: `s̃(δ) − e` is already convex.
-   * μ: affine ± a constant, trivial.
-   These belong inside `gp_std`'s rule and a new `gp_mean` primitive, so every acquisition
+   * μ: affine ± a constant, trivial (done, §5).
+   These belong inside `gp_std`'s rule and the `gp_mean` primitive, so every acquisition
    benefits through the existing EI/PI rules.
 3. **Matérn 1/2 and 3/2** are not differentiable at 0 (no `∇f(c)`). For them only the
-   zeroth-order version applies: `μ(c) ± ‖μ‖_H √(2σ_f²(1 − φ(s)))`, a ~2× tightening on large
-   boxes (measured 3.7–5.1× against 6–9× for Matérn 5/2), and first order.
+   zeroth-order version applies: `μ(c) ± ‖μ‖_H √(2σ_f²(1 − φ(s)))`, a ~2× tightening of the
+   interval on large boxes (measured 3.7–5.1× against 6–9× for Matérn 5/2), and first order.
+   Used in the relaxation it cost nodes (§5), so it is not.
 4. **Rounding.** ‖μ‖_H, `k_post(c, c)` and `s̃` involve cancellation where σ is small; `safe=True`
    needs outward widening like the other GP rules.
 5. Measure with notebook 06's LCB/EI/PI solves (333 / 765 / 451 nodes now) and the
@@ -135,6 +140,41 @@ both bounds (LCB is worse with the Taylor model on large boxes).
 * **Batch / Monte Carlo q-EI, knowledge gradient, entropy search**: these need the joint
   posterior over q points (a q×q Cholesky inside the relaxation) or inner optimization. They
   are out of scope for now.
+
+## 5. Implemented: the mean's Taylor bound
+
+`gp.gp_mean` is now a primitive. For Matérn 5/2 and SE its rule intersects the formula's
+relaxation with `μ(c) + ∇μ(c)·δ ± ‖μ‖_H e(s_max)` (§3): affine cv/cc, by the sign of `∇μ(c)`
+when the input is itself relaxed, plus rounding margins. Matérn 1/2 and 3/2 keep the formula's
+relaxation. `‖μ‖_H` is computed when `gp_mean` is called. `univariate.SMOOTH_IF` tells αBB the
+primitive is smooth for those two kernels, as the formula was. Without that, the mean lost αBB,
+and its solves took more nodes.
+
+A/B against the formula on notebook 06's problems (`benchmarks/gp_mean_ab.py`,
+`benchmarks/results/gp_mean_ab.csv`; nodes, same optimum in every case):
+
+| case | formula | `gp_mean` |
+|---|---:|---:|
+| min μ, peaks, N = 20 | 81 | 81 |
+| N = 50 | 411 | 423 |
+| N = 100 | 647 | 407 |
+| N = 200 | 2,253 | 497 |
+| N = 50, Matérn 3/2 (no Taylor bound) | 429 | 429 |
+| N = 50, SE | 439 | 361 |
+| LCB (κ = 2) | 295 | 295 |
+| −EI | 683 | 559 |
+| −PI (ξ = 0.1σ_y) | 491 | 399 |
+| chance constraint, μ + 1.96σ ≤ c | 2,759 | 1,359 |
+| mean constraint, μ ≤ c | 735 | 151 |
+
+The zeroth-order bound was tried as well and dropped. On the root box it makes `cv` flat over
+most of the box, the relaxation minimizer then seeds the root local solve somewhere arbitrary,
+and the first incumbent came out worse. For example, on N = 50 the root UB was −0.49 instead of
+−4.03, which cost 18–30% more nodes on N = 20 and 50, Matérn 3/2 and LCB, against a 7×
+tighter root bound. Using the Taylor model in the interval only, or only on boxes where it is
+narrower than the formula's interval, did no better than the plain max.
+
+Next: σ's Taylor model in `gp_std`, then the joint LCB/EI vertex bounds (§3).
 
 Refs: [schweidtmann2021deterministic] (*Math. Prog. Comp.* 13(3), 2021); Ament et al.,
 "Unexpected improvements to expected improvement for Bayesian optimization", NeurIPS 2023

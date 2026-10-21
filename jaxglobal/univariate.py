@@ -51,6 +51,14 @@ EXACT = {"exp", "exp2", "expm1", "log", "log1p", "sqrt", "rsqrt", "cosh", "squar
 # smooth elementwise primitives this module knows how to differentiate twice
 SMOOTH_ELEMENTWISE = {"mul", "div", "integer_pow", "square", "one_minus_square", "pow", "exp", "exp2", "expm1",
                       "log", "log1p", "sqrt", "rsqrt", "cosh", "neg", "sub"} | set(AUTO_UNIVARIATE)  # fmt: skip
+# primitives that are smooth for some parameters only: name -> predicate on ``eqn.params``
+SMOOTH_IF = {}
+
+
+def smooth_eqn(eqn):
+    """True when ``eqn`` is a smooth primitive (by name, or by ``SMOOTH_IF`` for its parameters)."""
+    name = eqn.primitive.name
+    return name in SMOOTH_ELEMENTWISE or (name in SMOOTH_IF and SMOOTH_IF[name](eqn.params))
 
 
 def _dep_masks(tape, n):
@@ -137,7 +145,7 @@ def find_blocks(tape, n):
             users.setdefault(a, []).append(node)
         if not vin:
             continue
-        sm = all(smooth.get(a, False) for a in vin) and (name in AFFINE or name in SMOOTH_ELEMENTWISE
+        sm = all(smooth.get(a, False) for a in vin) and (name in AFFINE or smooth_eqn(node.eqn)
                                                           or name == "dot_general")  # fmt: skip
         is_aff = (name in AFFINE or (name in ("mul", "dot_general") and len(vin) == 1)
                   or (name == "div" and node.ins[1] not in vin))  # fmt: skip

@@ -1,7 +1,26 @@
 """Gaussian-process predictions with relaxations that keep the kernel structure.
 
-``gp_mean`` is a plain function of the ``jaxglobal.kernels`` primitives.
-``gp_std`` is a primitive: the posterior standard deviation
+``gp_mean`` is a primitive: the posterior mean ``mu(x) = k(x)^T alpha``. Relaxed term by term, the
+sum of N kernels with signed weights loses their cancellation (``||alpha||_1`` can be many times
+``||mu||_H``): the interval stays several times the true range on every box. For kernels
+differentiable at 0 (``matern52``, ``se``) the rule intersects that relaxation with a first-order
+Taylor model whose remainder is bounded in the RKHS of the kernel. ``mu`` is in it with
+``||mu||_H^2 = alpha^T K_f alpha`` (``K_f`` the noise-free training covariance), so for ``c`` the box
+center, ``delta = x - c`` and ``s = ||delta / l||^2``,
+
+    |mu(x) - mu(c) - grad mu(c).delta| <= ||mu||_H ||k_x - k_c - D k_c delta||_H = ||mu||_H e(s),
+    e(s)^2 = 2 sf2 (1 - phi(s) + 2 s phi'(s) - s phi'(0)),
+
+``phi`` the unit-variance kernel as a function of ``s``. ``e`` is nondecreasing in ``s`` (its
+derivative is ``phi'(s) - phi'(0) + 2 s phi''(s) >= 0``, ``phi'`` being nondecreasing and ``phi''
+>= 0`` for these kernels), so its box maximum is at the farthest corner, and ``e = O(s) = O(w^2)``:
+the model converges to the true range as the box shrinks, and does not involve the conditioning of
+``K``. The zeroth-order bound ``|mu(x) - mu(c)| <= ||mu||_H sqrt(2 sf2 (1 - phi(s)))`` holds for
+every kernel but is not used: on large boxes it makes the relaxation flat, its minimizer then says
+nothing about where ``mu`` is low, and the local solves started from it found the incumbent later
+(more nodes in ``benchmarks/gp_mean_ab.py``, docs/PLAN-acquisition-relaxations.md).
+
+``gp_std`` is a primitive too: the posterior standard deviation
 
     sigma(x) = sqrt(max(v(x), eps)),   v(x) = sf2 - k(x)^T A k(x) = sf2 - ||W^T k(x)||^2,
 
@@ -35,6 +54,7 @@ from jax.interpreters import ad, batching, mlir
 
 from .kernels import KERNELS
 from .relax import MC, RULES, as_mc, eval_jaxpr_mc, tighten
+from .univariate import SMOOTH_IF
 
 
 def _kvec(x, Z, lengthscale, sf2, kernel):
@@ -42,9 +62,88 @@ def _kvec(x, Z, lengthscale, sf2, kernel):
     return sf2 * KERNELS[kernel](d)
 
 
-def gp_mean(x, Z, lengthscale, alpha, sf2, kernel="matern52"):
-    """Posterior mean ``k(x)^T alpha`` (``alpha = A y``) at one point ``x``."""
+def _mean(x, Z, lengthscale, alpha, sf2, rkhs, *, kernel):
     return _kvec(x, Z, lengthscale, sf2, kernel) @ alpha
+
+
+def _batch_of(fn):
+    def batch(args, dims, **p):
+        # batched evaluation goes through the formula: relaxations only ever see one point
+        axes = tuple(d if isinstance(d, int) else None for d in dims)  # not_mapped -> None
+        return jax.vmap(lambda *a: fn(*a, **p), in_axes=axes)(*args), 0
+
+    return batch
+
+
+gp_mean_p = Primitive("gp_mean")
+gp_mean_p.def_impl(_mean)
+gp_mean_p.def_abstract_eval(lambda x, Z, lengthscale, alpha, sf2, rkhs, **_: x.update(shape=x.shape[:-1]))
+mlir.register_lowering(gp_mean_p, mlir.lower_fun(_mean, multiple_results=False))
+# derivatives in x only (the other operands are the trained GP's constants)
+ad.defjvp(gp_mean_p, lambda g, x, *rest, **p: jax.jvp(lambda u: _mean(u, *rest, **p), (x,), (g,))[1],
+          None, None, None, None, None)  # fmt: skip
+batching.primitive_batchers[gp_mean_p] = _batch_of(_mean)
+
+
+def gp_mean(x, Z, lengthscale, alpha, sf2, kernel="matern52"):
+    """Posterior mean ``k(x)^T alpha`` (``alpha = A y``) at one point ``x``.
+
+    ``Z`` (N, n) training inputs, ``lengthscale`` (n,), ``sf2`` the signal variance, ``alpha`` the
+    weights (any vector: the RKHS norm the relaxation uses is computed from it).
+    """
+    f = jnp.asarray
+    Z, lengthscale, alpha, sf2 = f(Z, dtype=float), f(lengthscale, dtype=float), f(alpha, dtype=float), f(sf2, dtype=float)
+    d = jnp.sum(((Z[:, None, :] - Z[None, :, :]) / lengthscale) ** 2, axis=-1)
+    Kf = sf2 * KERNELS[kernel](d)  # noise-free training covariance
+    q = alpha @ Kf @ alpha
+    # rounding of q is at most ~N eps sf2 ||alpha||_1^2 (|Kf_ij| <= sf2): add a multiple of it
+    rkhs = jnp.sqrt(jnp.maximum(q, 0.0) + 4 * (alpha.size + 2) * _EPS * sf2 * jnp.sum(jnp.abs(alpha)) ** 2)
+    return gp_mean_p.bind(f(x, dtype=float), Z, lengthscale, alpha, sf2, rkhs, kernel=kernel)
+
+
+_EPS = float(jnp.finfo(jnp.float64).eps)
+_SMOOTH = {"matern52", "se"}  # differentiable at 0: grad mu exists and the first-order bound holds
+
+
+def _relax_formula(fn, args, ctx):
+    closed = jax.make_jaxpr(fn)(*(jnp.zeros(a.lo.shape, a.lo.dtype) for a in args))
+    (out,) = eval_jaxpr_mc(closed.jaxpr, closed.consts, list(args), ctx)
+    return as_mc(out)
+
+
+def _mean_rule(ctx, eqn, x, Z, lengthscale, alpha, sf2, rkhs):
+    kernel = eqn.params["kernel"]
+    x = as_mc(x)
+    base = _relax_formula(lambda u: _mean(u, Z, lengthscale, alpha, sf2, rkhs, kernel=kernel), [x], ctx)
+    if kernel not in _SMOOTH or any(isinstance(v, MC) for v in (Z, lengthscale, alpha, sf2, rkhs)):
+        return base  # no gradient at the training points, or not a trained GP's constants
+    phi, d1 = KERNELS[kernel], jax.grad(KERNELS[kernel])
+    fin = jnp.all(jnp.isfinite(x.lo) & jnp.isfinite(x.hi))
+    c = jnp.where(jnp.isfinite(x.lo) & jnp.isfinite(x.hi), 0.5 * (x.lo + x.hi), 0.0)
+    half = jnp.maximum(c - x.lo, x.hi - c)
+    s = jnp.sum((half / lengthscale) ** 2)  # the farthest corner
+    m0, g = jax.value_and_grad(lambda u: _mean(u, Z, lengthscale, alpha, sf2, rkhs, kernel=kernel))(c)
+    # mu(c) + g.(x - c) -+ ||mu||_H e(s), the remainder from its closed form, which cancels to O(s^2):
+    # its rounding is a few eps times its terms. tol: rounding of mu anywhere on the box (and of m0),
+    # ~N eps sum_i |alpha_i| k_i <= N eps sf2 ||alpha||_1, and of g.(x - c)
+    r2 = 2 * sf2 * (1 - phi(s) + 2 * s * d1(s) - s * d1(jnp.zeros_like(s)))
+    e = rkhs * jnp.sqrt(jnp.maximum(r2, 0.0) + 16 * _EPS * sf2 * (1 + 3 * s * jnp.abs(d1(jnp.zeros_like(s)))))
+    tol = 4 * (alpha.size + c.size + 2) * _EPS * (sf2 * jnp.sum(jnp.abs(alpha)) + jnp.sum(jnp.abs(g) * (jnp.abs(c) + half)))
+    e = e + tol
+    span = jnp.sum(jnp.abs(g) * half)
+    # g.(x - c) relaxed term by term by the sign of g (x may itself be relaxed)
+    lin_cv = m0 + jnp.sum(jnp.where(g >= 0, g * (x.cv - c), g * (x.cc - c)))
+    lin_cc = m0 + jnp.sum(jnp.where(g >= 0, g * (x.cc - c), g * (x.cv - c)))
+    lo, hi, cv, cc = m0 - span - e, m0 + span + e, lin_cv - e, lin_cc + e
+    ok = fin & jnp.isfinite(lo) & jnp.isfinite(hi) & jnp.isfinite(cv) & jnp.isfinite(cc)
+    return tighten(MC(jnp.where(ok, jnp.maximum(base.lo, lo), base.lo),
+                      jnp.where(ok, jnp.minimum(base.hi, hi), base.hi),
+                      jnp.where(ok, jnp.maximum(base.cv, cv), base.cv),
+                      jnp.where(ok, jnp.minimum(base.cc, cc), base.cc)))  # fmt: skip
+
+
+RULES["gp_mean"] = _mean_rule
+SMOOTH_IF["gp_mean"] = lambda p: p["kernel"] in _SMOOTH  # alphaBB applies as it did to the formula
 
 
 def _var(x, Z, lengthscale, W, sf2, kernel):
@@ -64,13 +163,7 @@ ad.defjvp(gp_std_p, lambda g, x, Z, lengthscale, W, sf2, **p: jax.jvp(
     lambda u: _std(u, Z, lengthscale, W, sf2, **p), (x,), (g,))[1], None, None, None, None)
 
 
-def _batch(args, dims, **p):
-    # batched evaluation goes through the formula: relaxations only ever see one point
-    axes = tuple(d if isinstance(d, int) else None for d in dims)  # not_mapped -> None
-    return jax.vmap(lambda *a: _std(*a, **p), in_axes=axes)(*args), 0
-
-
-batching.primitive_batchers[gp_std_p] = _batch
+batching.primitive_batchers[gp_std_p] = _batch_of(_std)
 
 
 def gp_std(x, Z, lengthscale, A, sf2, kernel="matern52", eps=1e-12):
@@ -89,13 +182,7 @@ def gp_std(x, Z, lengthscale, A, sf2, kernel="matern52", eps=1e-12):
 def _rule(ctx, eqn, x, Z, lengthscale, W, sf2):
     kernel, eps = eqn.params["kernel"], eqn.params["eps"]
     x = as_mc(x)
-
-    def run(fn, arg):
-        closed = jax.make_jaxpr(fn)(jnp.zeros(arg.lo.shape, arg.lo.dtype))
-        (out,) = eval_jaxpr_mc(closed.jaxpr, closed.consts, [arg], ctx)
-        return as_mc(out)
-
-    sig = run(lambda u: _std(u, Z, lengthscale, W, sf2, kernel=kernel, eps=eps), x)  # Cholesky form
+    sig = _relax_formula(lambda u: _std(u, Z, lengthscale, W, sf2, kernel=kernel, eps=eps), [x], ctx)  # Cholesky form
     # Lipschitz bound: sigma(c) -+ sqrt(2 sf2 (1 - kernel(d_max))), d_max to the farthest corner
     fin = jnp.all(jnp.isfinite(x.lo) & jnp.isfinite(x.hi))
     c = jnp.where(jnp.isfinite(x.lo) & jnp.isfinite(x.hi), 0.5 * (x.lo + x.hi), 0.0)

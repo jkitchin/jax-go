@@ -187,6 +187,11 @@ tests/test_gp.py::test_acquisition_solve_matches_formula_with_fewer_nodes[pi]
 tests/test_gp.py::test_chance_constraint_certified_and_tighter
 tests/test_gp.py::test_cuts_valid
 tests/test_gp.py::test_matches_formula[matern52]
+tests/test_gp.py::test_mean_cuts_valid_and_infinite_box
+tests/test_gp.py::test_mean_interval_converges
+tests/test_gp.py::test_mean_matches_formula[matern52]
+tests/test_gp.py::test_mean_relaxation_sound_composite_and_5d
+tests/test_gp.py::test_mean_taylor_remainder_holds[matern52]
 tests/test_gp.py::test_relaxation_sound_5d
 tests/test_incumbent.py::test_free_slack_instances_solve[clay0203m-41573.26]
 tests/test_incumbent.py::test_free_slack_instances_solve[m3-37.8]
