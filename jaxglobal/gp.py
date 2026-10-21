@@ -59,6 +59,7 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jax.extend.core import Primitive
 from jax.interpreters import ad, batching, mlir
 
@@ -103,12 +104,16 @@ def gp_mean(x, Z, lengthscale, alpha, sf2, kernel="matern52"):
     """
     f = jnp.asarray
     Z, lengthscale, alpha, sf2 = f(Z, dtype=float), f(lengthscale, dtype=float), f(alpha, dtype=float), f(sf2, dtype=float)
-    d = jnp.sum(((Z[:, None, :] - Z[None, :, :]) / lengthscale) ** 2, axis=-1)
-    Kf = sf2 * KERNELS[kernel](d)  # noise-free training covariance
-    q = alpha @ Kf @ alpha
-    # rounding of q is at most ~N eps sf2 ||alpha||_1^2 (|Kf_ij| <= sf2): add a multiple of it
-    rkhs = jnp.sqrt(jnp.maximum(q, 0.0) + 4 * (alpha.size + 2) * _EPS * sf2 * jnp.sum(jnp.abs(alpha)) ** 2)
+    rkhs = _rkhs(Z, lengthscale, alpha, sf2, kernel)
     return gp_mean_p.bind(f(x, dtype=float), Z, lengthscale, alpha, sf2, rkhs, kernel=kernel)
+
+
+def _rkhs(Z, lengthscale, alpha, sf2, kernel):
+    """``||mu||_H = sqrt(alpha^T K_f alpha)``, ``K_f`` the noise-free training covariance, rounded up."""
+    d = jnp.sum(((Z[:, None, :] - Z[None, :, :]) / lengthscale) ** 2, axis=-1)
+    q = alpha @ (sf2 * KERNELS[kernel](d)) @ alpha
+    # rounding of q is at most ~N eps sf2 ||alpha||_1^2 (|Kf_ij| <= sf2): add a multiple of it
+    return jnp.sqrt(jnp.maximum(q, 0.0) + 4 * (alpha.size + 2) * _EPS * sf2 * jnp.sum(jnp.abs(alpha)) ** 2)
 
 
 _EPS = float(jnp.finfo(jnp.float64).eps)
@@ -121,27 +126,42 @@ def _relax_formula(fn, args, ctx):
     return as_mc(out)
 
 
+def _box(x):
+    """Center ``c``, half-widths ``h`` and whether the box of ``x`` is finite."""
+    fin = jnp.all(jnp.isfinite(x.lo) & jnp.isfinite(x.hi))
+    c = jnp.where(jnp.isfinite(x.lo) & jnp.isfinite(x.hi), 0.5 * (x.lo + x.hi), 0.0)
+    return c, jnp.maximum(c - x.lo, x.hi - c), fin
+
+
+def _remainder(s, sf2, kernel):
+    """``e(s)``: the prior sd of the first-order remainder at scaled squared distance ``s``, rounded up."""
+    phi, d1 = KERNELS[kernel], jax.grad(KERNELS[kernel])
+    dphi0 = d1(jnp.zeros_like(s))
+    r2 = 2 * sf2 * (1 - phi(s) + 2 * s * d1(s) - s * dphi0)
+    # the closed form cancels to O(s^2): its rounding is a few eps times its terms
+    return jnp.sqrt(jnp.maximum(r2, 0.0) + 16 * _EPS * sf2 * (1 + 3 * s * jnp.abs(dphi0)))
+
+
+def _mean_model(c, h, Z, lengthscale, alpha, sf2, rkhs, kernel):
+    """``(m0, g, em)``: ``|mu(c + delta) - m0 - g.delta| <= em`` on the box ``|delta| <= h`` (with rounding)."""
+    m0, g = jax.value_and_grad(lambda u: _mean(u, Z, lengthscale, alpha, sf2, rkhs, kernel=kernel))(c)
+    e = rkhs * _remainder(jnp.sum((h / lengthscale) ** 2), sf2, kernel)  # the farthest corner
+    # rounding of mu anywhere on the box (and of m0), ~N eps sum_i |alpha_i| k_i <= N eps sf2 ||alpha||_1,
+    # and of g.(x - c)
+    tol = 4 * (alpha.size + c.size + 2) * _EPS * (sf2 * jnp.sum(jnp.abs(alpha)) + jnp.sum(jnp.abs(g) * (jnp.abs(c) + h)))
+    return m0, g, e + tol
+
+
 def _mean_rule(ctx, eqn, x, Z, lengthscale, alpha, sf2, rkhs):
     kernel = eqn.params["kernel"]
     x = as_mc(x)
     base = _relax_formula(lambda u: _mean(u, Z, lengthscale, alpha, sf2, rkhs, kernel=kernel), [x], ctx)
     if kernel not in _SMOOTH or any(isinstance(v, MC) for v in (Z, lengthscale, alpha, sf2, rkhs)):
         return base  # no gradient at the training points, or not a trained GP's constants
-    phi, d1 = KERNELS[kernel], jax.grad(KERNELS[kernel])
-    fin = jnp.all(jnp.isfinite(x.lo) & jnp.isfinite(x.hi))
-    c = jnp.where(jnp.isfinite(x.lo) & jnp.isfinite(x.hi), 0.5 * (x.lo + x.hi), 0.0)
-    half = jnp.maximum(c - x.lo, x.hi - c)
-    s = jnp.sum((half / lengthscale) ** 2)  # the farthest corner
-    m0, g = jax.value_and_grad(lambda u: _mean(u, Z, lengthscale, alpha, sf2, rkhs, kernel=kernel))(c)
-    # mu(c) + g.(x - c) -+ ||mu||_H e(s), the remainder from its closed form, which cancels to O(s^2):
-    # its rounding is a few eps times its terms. tol: rounding of mu anywhere on the box (and of m0),
-    # ~N eps sum_i |alpha_i| k_i <= N eps sf2 ||alpha||_1, and of g.(x - c)
-    r2 = 2 * sf2 * (1 - phi(s) + 2 * s * d1(s) - s * d1(jnp.zeros_like(s)))
-    e = rkhs * jnp.sqrt(jnp.maximum(r2, 0.0) + 16 * _EPS * sf2 * (1 + 3 * s * jnp.abs(d1(jnp.zeros_like(s)))))
-    tol = 4 * (alpha.size + c.size + 2) * _EPS * (sf2 * jnp.sum(jnp.abs(alpha)) + jnp.sum(jnp.abs(g) * (jnp.abs(c) + half)))
-    e = e + tol
-    span = jnp.sum(jnp.abs(g) * half)
-    # g.(x - c) relaxed term by term by the sign of g (x may itself be relaxed)
+    c, h, fin = _box(x)
+    m0, g, e = _mean_model(c, h, Z, lengthscale, alpha, sf2, rkhs, kernel)
+    span = jnp.sum(jnp.abs(g) * h)
+    # mu(c) + g.(x - c) -+ e; g.(x - c) relaxed term by term by the sign of g (x may itself be relaxed)
     lin_cv = m0 + jnp.sum(jnp.where(g >= 0, g * (x.cv - c), g * (x.cc - c)))
     lin_cc = m0 + jnp.sum(jnp.where(g >= 0, g * (x.cc - c), g * (x.cv - c)))
     lo, hi, cv, cc = m0 - span - e, m0 + span + e, lin_cv - e, lin_cc + e
@@ -189,6 +209,28 @@ def gp_std(x, Z, lengthscale, A, sf2, kernel="matern52", eps=1e-12):
     return gp_std_p.bind(f(x), f(Z), f(lengthscale), W, f(sf2), kernel=kernel, eps=float(eps))
 
 
+def _std_model(c, h, Z, lengthscale, W, sf2, kernel, eps):
+    """The first-order model of sigma on the box ``|delta| <= h``: ``|sigma(c + delta) - sqrt(q(delta))| <= e + tolV``,
+    ``q = q0 + 2 b.delta + delta^T C delta``; ``errQ``, ``errG`` bound the rounding of ``q`` and its gradient."""
+    N, n = Z.shape[0], c.shape[-1]
+    e = _remainder(jnp.sum((h / lengthscale) ** 2), sf2, kernel)  # the farthest corner
+
+    def wk(u):
+        return W.T @ _kvec(u, Z, lengthscale, sf2, kernel)
+
+    w, Jw = wk(c), jax.jacfwd(wk)(c)  # (N,), (N, n)
+    D = -2 * sf2 * jax.grad(KERNELS[kernel])(jnp.zeros(())) / lengthscale**2  # prior covariance of grad f (diagonal)
+    q0, b, C = sf2 - w @ w, -Jw.T @ w, jnp.diag(D) - Jw.T @ Jw
+    # rounding: of q (and its gradient) from the cancellation sf2 + D delta^2 - ||w + Jw delta||^2, and of
+    # the evaluated sigma itself (sf2 - ||W^T k||^2 with ||W^T k||^2 <= ~sf2)
+    big = jnp.abs(w) + jnp.abs(Jw) @ h
+    k_err = 16 * (N + n + 2) * _EPS
+    errQ = k_err * (sf2 + jnp.sum(D * h**2) + big @ big)
+    errG = k_err * (D * h + jnp.abs(Jw).T @ big)
+    tolV = jnp.sqrt(k_err * sf2) + jnp.sqrt(eps)  # also sqrt(max(v, eps)) <= sqrt(v) + sqrt(eps)
+    return q0, b, C, e, errQ, errG, tolV
+
+
 def _std_taylor(x, Z, lengthscale, W, sf2, kernel, eps):
     """``(lo, hi, cv, cc)`` of sigma on the box of ``x`` from the first-order model (kernels in ``_SMOOTH``).
 
@@ -200,27 +242,9 @@ def _std_taylor(x, Z, lengthscale, W, sf2, kernel, eps):
     Both are affine or ``sqrt`` of a concave function of ``delta``, relaxed by the sign of each
     coefficient when ``x`` is itself relaxed.
     """
-    phi, d1 = KERNELS[kernel], jax.grad(KERNELS[kernel])
-    N, n = Z.shape[0], x.lo.shape[-1]
-    c = jnp.where(jnp.isfinite(x.lo) & jnp.isfinite(x.hi), 0.5 * (x.lo + x.hi), 0.0)
-    h = jnp.maximum(c - x.lo, x.hi - c)
-    s = jnp.sum((h / lengthscale) ** 2)  # the farthest corner
-    dphi0 = d1(jnp.zeros_like(s))
-    e = jnp.sqrt(jnp.maximum(2 * sf2 * (1 - phi(s) + 2 * s * d1(s) - s * dphi0), 0.0) + 16 * _EPS * sf2 * (1 + 3 * s * jnp.abs(dphi0)))
-
-    def wk(u):
-        return W.T @ _kvec(u, Z, lengthscale, sf2, kernel)
-
-    w, Jw = wk(c), jax.jacfwd(wk)(c)  # (N,), (N, n)
-    D = -2 * sf2 * dphi0 / lengthscale**2  # prior covariance of grad f (diagonal)
-    q0, b, C = sf2 - w @ w, -Jw.T @ w, jnp.diag(D) - Jw.T @ Jw
-    # rounding: of q (and its gradient) from the cancellation sf2 + D delta^2 - ||w + Jw delta||^2, and of
-    # the evaluated sigma itself (sf2 - ||W^T k||^2 with ||W^T k||^2 <= ~sf2)
-    big = jnp.abs(w) + jnp.abs(Jw) @ h
-    k_err = 16 * (N + n + 2) * _EPS
-    errQ = k_err * (sf2 + jnp.sum(D * h**2) + big @ big)
-    errG = k_err * (D * h + jnp.abs(Jw).T @ big)
-    tolV = jnp.sqrt(k_err * sf2) + jnp.sqrt(eps)  # also sqrt(max(v, eps)) <= sqrt(v) + sqrt(eps)
+    c, h, _ = _box(x)
+    n = c.shape[-1]
+    q0, b, C, e, errQ, errG, tolV = _std_model(c, h, Z, lengthscale, W, sf2, kernel, eps)
     dcv, dcc = x.cv - c, x.cc - c  # relaxations of delta
 
     # concave side: q <= q0 + sum_i C_ii h_i^2 + 2 b.delta + sum_{i != j} |C_ij| (h_i h_j - |l_ij(delta)|),
@@ -500,3 +524,120 @@ def _pi_rule(ctx, eqn, mu, sigma, t):
 
 
 RULES["probability_of_improvement"] = _pi_rule
+
+
+# ---------------------------------------------------------------------------
+# Acquisition functions of one GP: joint bounds
+# ---------------------------------------------------------------------------
+#
+# Relaxed from mu and sigma separately, LCB = mu - kappa sigma and EI(mu, sigma) lose that mu and
+# sigma are functions of the same x: the bound pairs the lowest mu with the highest sigma, which
+# may sit at opposite ends of the box. With both first-order models on the box ``|delta| <= h``,
+#
+#   LCB(x) >= mu(c) + g.delta - em - kappa (sqrt(q(delta) + errQ) + e + tolV)       (kappa >= 0)
+#   EI(x)  <= EI(mu(c) + g.delta - em, sqrt(q(delta) + errQ) + e + tolV),
+#
+# ``sqrt(q + errQ)`` the norm of an affine map of delta (q is a variance), so convex. The LCB bound
+# is concave in delta and the EI bound convex (EI is jointly convex, nondecreasing in sigma): their
+# extremes over the box are at its 2^n vertices. The rule takes them as LCB's lower and EI's upper
+# interval bound (which enter the node bound directly), intersected with the separate relaxation.
+
+_VERTEX_MAX = 8  # joint vertex bounds up to this many inputs (2^n vertices)
+
+
+def _acq(x, Z, lengthscale, alpha, W, sf2, rkhs, offset, scale, p, *, kind, kernel, eps):
+    mu = offset + scale * _mean(x, Z, lengthscale, alpha, sf2, rkhs, kernel=kernel)
+    sd = scale * _std(x, Z, lengthscale, W, sf2, kernel=kernel, eps=eps)
+    return mu - p * sd if kind == "lcb" else _ei(mu, sd, p)
+
+
+gp_acq_p = Primitive("gp_acquisition")
+gp_acq_p.def_impl(_acq)
+gp_acq_p.def_abstract_eval(lambda x, *_, **__: x.update(shape=x.shape[:-1]))
+mlir.register_lowering(gp_acq_p, mlir.lower_fun(_acq, multiple_results=False))
+ad.defjvp(gp_acq_p, lambda g, x, *rest, **p: jax.jvp(lambda u: _acq(u, *rest, **p), (x,), (g,))[1],
+          *([None] * 9))  # fmt: skip
+batching.primitive_batchers[gp_acq_p] = _batch_of(_acq)
+
+
+def _acq_separate(x, Z, lengthscale, alpha, W, sf2, rkhs, offset, scale, p, *, kind, kernel, eps):
+    """The same value through the ``gp_mean``, ``gp_std`` and ``expected_improvement`` primitives (their rules)."""
+    mu = offset + scale * gp_mean_p.bind(x, Z, lengthscale, alpha, sf2, rkhs, kernel=kernel)
+    sd = scale * gp_std_p.bind(x, Z, lengthscale, W, sf2, kernel=kernel, eps=eps)
+    return mu - p * sd if kind == "lcb" else ei_p.bind(mu, sd, jnp.asarray(p, mu.dtype))
+
+
+def _acq_rule(ctx, eqn, x, Z, lengthscale, alpha, W, sf2, rkhs, offset, scale, p):
+    kind, kernel, eps = eqn.params["kind"], eqn.params["kernel"], eqn.params["eps"]
+    x = as_mc(x)
+    consts = (Z, lengthscale, alpha, W, sf2, rkhs, offset, scale, p)
+    if any(isinstance(v, MC) for v in consts):  # not a trained GP's constants: the formula
+        closed = jax.make_jaxpr(lambda u, *a: _acq(u, *a, **eqn.params))(jnp.zeros(x.lo.shape), *(
+            jnp.zeros(jnp.shape(v.lo if isinstance(v, MC) else v)) for v in consts))
+        (out,) = eval_jaxpr_mc(closed.jaxpr, closed.consts, [x, *consts], ctx)
+        return as_mc(out)
+    base = _relax_formula(lambda u: _acq_separate(u, *consts, **eqn.params), [x], ctx)
+    n = x.lo.shape[-1]
+    if kernel not in _SMOOTH or n > _VERTEX_MAX:
+        return base
+    c, h, fin = _box(x)
+    m0, g, em = _mean_model(c, h, Z, lengthscale, alpha, sf2, rkhs, kernel)
+    q0, b, C, e, errQ, _, tolV = _std_model(c, h, Z, lengthscale, W, sf2, kernel, eps)
+    V = h * jnp.asarray([[1.0 - 2.0 * ((k >> j) & 1) for j in range(n)] for k in range(2**n)])  # vertices - c
+    mu_lo = offset + scale * (m0 + V @ g - em)
+    sd_hi = scale * (jnp.sqrt(jnp.maximum(q0 + 2 * V @ b + jnp.einsum("vi,ij,vj->v", V, C, V), 0.0) + errQ) + e + tolV)
+    ok = fin & (scale > 0)
+    if kind == "lcb":
+        lo = jnp.min(mu_lo - p * sd_hi)
+        lo = lo - 4 * _EPS * (jnp.abs(lo) + jnp.max(jnp.abs(mu_lo)) + p * jnp.max(sd_hi))  # rounding of the sums
+        ok = ok & (p >= 0) & jnp.isfinite(lo)  # kappa < 0 (an upper confidence bound): convex, no vertex minimum
+        return tighten(MC(jnp.where(ok, jnp.maximum(base.lo, lo), base.lo), base.hi, base.cv, base.cc))
+    hi = jnp.max(_ei(mu_lo, sd_hi, p))
+    hi = hi * (1 + 1e-12) + 1e-300  # rounding of Phi and phi
+    ok = ok & jnp.isfinite(hi)
+    return tighten(MC(base.lo, jnp.where(ok, jnp.minimum(base.hi, hi), base.hi), base.cv, base.cc))
+
+
+RULES["gp_acquisition"] = _acq_rule
+
+
+class GPModel:
+    """A trained GP's predictions, ``offset + scale * mu(x)`` and ``scale * sigma(x)``, and acquisition functions.
+
+    ``Z`` (N, n) training inputs, ``lengthscale`` (n,), ``alpha`` the weights (``Kinv @ y``), ``Kinv`` the
+    inverse of the noisy training covariance, ``sf2`` the signal variance; ``offset`` and ``scale`` undo an
+    output standardization. ``lcb`` and ``ei`` are primitives whose relaxations bound mu and sigma jointly
+    (the vertex bounds above); ``mean``, ``std`` and ``pi`` are the separate primitives.
+    """
+
+    def __init__(self, Z, lengthscale, alpha, Kinv, sf2, kernel="matern52", offset=0.0, scale=1.0, eps=1e-12):
+        f = np.asarray
+        self.Z, self.lengthscale, self.alpha = f(Z, float), f(lengthscale, float), f(alpha, float)
+        self.sf2, self.kernel, self.eps = float(sf2), kernel, float(eps)
+        self.offset, self.scale = float(offset), float(scale)
+        Kinv = f(Kinv, float)
+        self.Kinv, self.W = Kinv, np.linalg.cholesky(0.5 * (Kinv + Kinv.T))
+        self.rkhs = float(_rkhs(self.Z, self.lengthscale, self.alpha, self.sf2, kernel))
+
+    def mean(self, x):
+        return self.offset + self.scale * gp_mean(x, self.Z, self.lengthscale, self.alpha, self.sf2, kernel=self.kernel)
+
+    def std(self, x):
+        return self.scale * gp_std_p.bind(jnp.asarray(x, float), self.Z, self.lengthscale, self.W, self.sf2,
+                                          kernel=self.kernel, eps=self.eps)  # fmt: skip
+
+    def _bind(self, x, kind, p):
+        return gp_acq_p.bind(jnp.asarray(x, float), self.Z, self.lengthscale, self.alpha, self.W, self.sf2, self.rkhs,
+                             self.offset, self.scale, jnp.asarray(p, float), kind=kind, kernel=self.kernel, eps=self.eps)  # fmt: skip
+
+    def lcb(self, x, kappa=2.0):
+        """Lower confidence bound ``mean - kappa * std`` (minimize it)."""
+        return self._bind(x, "lcb", kappa)
+
+    def ei(self, x, fmin):
+        """Expected improvement below ``fmin`` (maximize it)."""
+        return self._bind(x, "ei", fmin)
+
+    def pi(self, x, target):
+        """Probability of falling below ``target`` (maximize it)."""
+        return probability_of_improvement(self.mean(x), self.std(x), target)

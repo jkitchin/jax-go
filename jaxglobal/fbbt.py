@@ -775,7 +775,7 @@ _ELEMENTWISE_NAN = {"floor", "ceil", "round", "atan2", "asin", "acos", "acosh", 
 # ``0 * NaN``): an operand element reaches the output if all output elements are used
 _FULL_USE = {"dot_general", "cumsum", "cumprod", "cummax", "cummin", "cumlogsumexp", "sort",
              "stack", "se", "se_d1", "se_d2", "matern12", "matern12_d1", "matern12_d2", "matern32",
-             "matern32_d1", "matern32_d2", "matern52", "matern52_d1", "matern52_d2", "gp_mean", "gp_std",
+             "matern32_d1", "matern32_d2", "matern52", "matern52_d1", "matern52_d2", "gp_mean", "gp_std", "gp_acquisition",
              "expected_improvement", "probability_of_improvement"}  # fmt: skip
 
 

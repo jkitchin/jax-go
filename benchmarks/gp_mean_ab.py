@@ -1,6 +1,9 @@
-"""A/B: the GP mean as the ``jnp`` formula ``k(x)^T alpha`` against the ``gp.gp_mean`` primitive.
+"""A/B: the GP mean as the ``jnp`` formula ``k(x)^T alpha`` against the ``gp.gp_mean`` primitive,
+and LCB / EI from ``gp.GPModel`` (joint bounds) against the same from the separate primitives.
 
-For an A/B of another change (``gp_std``'s rule), run ``primitive`` in two checkouts.
+Modes: ``formula`` (the mean's formula), ``primitive`` (``gp_mean``, ``gp_std``, EI/PI primitives),
+``joint`` (``GPModel.lcb`` / ``GPModel.ei``; the other cases as ``primitive``). For an A/B of
+another change (``gp_std``'s rule), run ``primitive`` in two checkouts.
 
 Notebook 06's problems, its GP class (trained the same way) and its tolerances (abs/rel 1e-3).
 Before the primitive, ``gp_mean`` was the formula, so ``formula`` is the old behaviour.
@@ -10,6 +13,7 @@ loading kernels from the cache) and the second's (warm). ``JAXGLOBAL_CACHE=0`` f
     python benchmarks/gp_mean_ab.py --list
     python benchmarks/gp_mean_ab.py CASE MODE [--repeat 2]      # one row of CSV to stdout
     python benchmarks/gp_mean_ab.py --all --jobs 2 > benchmarks/results/gp_mean_ab.csv
+    python benchmarks/gp_mean_ab.py --all --cases lcb,ei,lcb_N50,ei_N50 --modes primitive,joint
 """
 
 import argparse
@@ -23,7 +27,7 @@ import time
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CASES = ["mean_N20", "mean_N50", "mean_N100", "mean_N200", "mean_N50_matern32", "mean_N50_se",
          "lcb", "ei", "pi", "pi0", "lcb_N50", "ei_N50", "chance", "mean_constraint"]  # fmt: skip
-MODES = ["formula", "primitive"]
+MODES = ["formula", "primitive", "joint"]
 FIELDS = ["case", "mode", "status", "fun", "lower_bound", "nodes", "iterations", "time_s", "first_time_s"]
 
 
@@ -64,6 +68,13 @@ def problem(case, mode):
         ya = np.asarray(peaks(Xa))
         gpa = GP(Xa, ya, LO, HI)
         mu, fmin = mean_of(gpa), float(ya.min())
+        kind = case.split("_")[0]
+        if mode == "joint" and kind in ("lcb", "ei"):
+            from jaxglobal.gp import GPModel
+
+            m = GPModel(gpa.Xs, gpa.lam, gpa.alpha, gpa.Kinv, gpa.sf2, kernel=gpa.kernel, offset=gpa.ym, scale=gpa.ys)
+            f = (lambda x: m.lcb(gpa.scale(x), 2.0)) if kind == "lcb" else (lambda x: -m.ei(gpa.scale(x), fmin))
+            return dict(f=f, lo=LO, hi=HI)
         f = {"lcb": lambda x: mu(x) - 2.0 * gpa.std(x),
              "ei": lambda x: -expected_improvement(mu(x), gpa.std(x), fmin),
              "pi": lambda x: -probability_of_improvement(mu(x), gpa.std(x), fmin - 0.1 * gpa.ys),
@@ -100,7 +111,7 @@ def run_one(case, mode, repeat):
                     first_time_s=f"{times[0]:.1f}"))
 
 
-def run_all(jobs, repeat):
+def run_all(jobs, repeat, cases=CASES, modes=MODES[:2]):
     from concurrent.futures import ThreadPoolExecutor
 
     def go(cm):
@@ -111,7 +122,7 @@ def run_all(jobs, repeat):
 
     print(",".join(FIELDS), flush=True)
     with ThreadPoolExecutor(jobs) as ex:
-        for row in ex.map(go, [(c, m) for c in CASES for m in MODES]):
+        for row in ex.map(go, [(c, m) for c in cases for m in modes]):
             print(row, flush=True)
 
 
@@ -123,10 +134,12 @@ if __name__ == "__main__":
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--jobs", type=int, default=2)
     ap.add_argument("--list", action="store_true")
+    ap.add_argument("--cases", default=",".join(CASES))
+    ap.add_argument("--modes", default="formula,primitive")
     a = ap.parse_args()
     if a.list:
         print("\n".join(CASES))
     elif a.all:
-        run_all(a.jobs, a.repeat)
+        run_all(a.jobs, a.repeat, a.cases.split(","), a.modes.split(","))
     else:
         run_one(a.case, a.mode, a.repeat)
