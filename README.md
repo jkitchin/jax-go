@@ -362,52 +362,50 @@ def gp_mean(x):
 Each kernel is a JAX primitive that is one convex, nonincreasing function of
 `d`, so it is relaxed by its envelopes; written in `jnp`, the Matérn kernels
 are relaxed factor by factor. Its derivatives are primitives too, so αBB gets
-a finite Hessian at the training points (Matérn 5/2 and SE). On the GP mean of
-the peaks function (Matérn 5/2, abs/rel gap 1e-3), same answers:
+a finite Hessian at the training points (Matérn 5/2 and SE).
 
-| training points | nodes, `jnp` formula | nodes, `kernels.matern52` | time |
-|---:|---:|---:|---|
-| 20 | 1079\* | 81 | — |
-| 50 | 3477 | 411 | 13.8 s → 1.2 s |
-| 100 | 6165\* | 647 | — |
-| 200 | 22449 | 2253 | 56.4 s → 11.9 s |
+The mean `k(x)ᵀα` needs more than its kernels: relaxed term by term, the signed
+sum loses the cancellation between its terms. `jaxglobal.gp.gp_mean(x, Z,
+lengthscale, alpha, sf2, kernel=...)` has the same value. For Matérn 5/2 and SE its
+relaxation also uses a first-order Taylor model around the box center whose
+remainder is bounded by the mean's RKHS norm,
+`|μ(x) − μ(c) − ∇μ(c)·δ| ≤ ‖μ‖_H e(δ)`, with `e` in closed form and of order
+`|δ|²`. On the GP mean of the peaks function (Matérn 5/2, abs/rel gap 1e-3),
+same answers:
 
-Nodes and times are the stored outputs of notebook 06, re-run on 2026-10-20 on
-current `main` (after PRs #76, #77 and #81) on a 4-core cloud VM (one session;
-the `kernels` solve at N = 50 reuses kernels compiled earlier in it). \*Not
-reproduced by the stored notebook: from runs on or before 2026-10-17, as is
-the `jnp` count for Matérn 3/2 at N = 50, 1917 nodes (429 with
-`kernels.matern32`, as in the notebook).
-SE and Matérn 1/2 are unchanged: their `jnp` formulas were already relaxed
-exactly.
+| training points | nodes, `jnp` formula | nodes, `kernels.matern52` | nodes, `kernels.matern52` + `gp_mean` |
+|---:|---:|---:|---:|
+| 20 | 1079\* | 81 | 81 |
+| 50 | 3477 | 411 | 423 |
+| 100 | 6165\* | 647† | 407 |
+| 200 | 22449 | 2253 | 497 |
+| 400 | 91289\* | 5519† | 725 |
+
+Nodes are the stored outputs of notebook 06, re-run on 2026-10-21 on a 4-core
+cloud VM; the N = 400 solve takes 10 s there, compilation included (21 s
+without `gp_mean`). †From the notebook's previous stored run (2026-10-20),
+before `gp_mean` was a primitive. \*Not reproduced by the stored notebook:
+from runs on or before 2026-10-17, as is the `jnp` count for Matérn 3/2 at
+N = 50, 1917 nodes (429 with `kernels.matern32`, as in the notebook). The
+`jnp` formulas of SE and Matérn 1/2 were already relaxed exactly; SE gains
+from `gp_mean` (439 → 361 nodes at N = 50). A/B runs of the mean alone:
+[`benchmarks/results/gp_mean_ab.csv`](benchmarks/results/gp_mean_ab.csv).
 
 The posterior standard deviation needs more: it is a quadratic form in the
 kernel vector, and bounds through `K⁻¹` inherit its conditioning.
-`jaxglobal.gp.gp_std(x, Z, lengthscale, Kinv, sf2, kernel=...)` has the same
-value, and its relaxation uses the GP's structure: the quadratic form as a sum
-of squares, and the bound `|σ(x) − σ(c)| ≤ sd_prior(f(x) − f(c))`, which holds
-because the posterior is itself a Gaussian process and does not involve
-`K⁻¹`. On a 95% chance constraint (`mean + 1.96 std ≤ c`) the solve is now
-certified in 2759 nodes and 31.0 s (notebook 06's stored output), where the
-formula did not close in 120 s (140k nodes; a run on or before 2026-10-17,
-not reproduced by the stored notebook).
-
-`jaxglobal.gp.gp_mean(x, Z, lengthscale, alpha, sf2, kernel=...)` is the
-matching mean, `k(x)ᵀα`. Relaxed term by term, the signed sum loses the
-cancellation between its terms. For Matérn 5/2 and SE its relaxation is also
-intersected with a first-order Taylor model around the box center, whose
-remainder is bounded by the mean's RKHS norm:
-`|μ(x) − μ(c) − ∇μ(c)·δ| ≤ ‖μ‖_H e(δ)`, with `e` in closed form and of order
-`|δ|²`. On notebook 06's problems it gives the same answers in fewer nodes:
-2253 → 497 for the N = 200 GP mean, 2759 → 1359 for the chance constraint,
-683 → 559 for EI. A few cases are unchanged or within 3%
-([`benchmarks/results/gp_mean_ab.csv`](benchmarks/results/gp_mean_ab.csv)).
-`gp_std` gets the same treatment: `|σ(x) − √q(δ)| ≤ e(δ)`, with `q` the
+`jaxglobal.gp.gp_std(x, Z, lengthscale, Kinv, sf2, kernel=...)` has the same value, and its relaxation uses the GP's structure: the
+quadratic form as a sum of squares; the bound
+`|σ(x) − σ(c)| ≤ sd_prior(f(x) − f(c))`, which holds because the posterior
+is itself a Gaussian process and does not involve `K⁻¹`; and, for Matérn 5/2
+and SE, the first-order version `|σ(x) − √q(δ)| ≤ e(δ)`, with `q` the
 posterior variance of `f(c) + ∇f(c)·δ`, a quadratic in closed form whose
-square root is convex. With both, PI without a margin solves in 719 nodes
-instead of 14243, LCB on 50 points in 679 instead of 3477, and the chance
-constraint in 153 instead of 1359. The larger rule adds a few seconds of
-compilation ([`benchmarks/results/gp_std_ab.csv`](benchmarks/results/gp_std_ab.csv)).
+square root is convex. On a 95% chance constraint (`mean + 1.96 std ≤ c`)
+the solve is certified in 153 nodes (notebook 06's stored output; 2759
+without the two first-order models). The formula did not close in 120 s
+(140k nodes; a run on or before 2026-10-17, not reproduced by the stored
+notebook). PI without a margin, which needs a positive lower bound on σ near
+the data, takes 719 nodes instead of 14359. The larger rule costs a few
+seconds of compilation ([`benchmarks/results/gp_std_ab.csv`](benchmarks/results/gp_std_ab.csv)).
 
 The acquisition functions are primitives too:
 `expected_improvement(mu, sigma, fmin)` is relaxed as the jointly convex,
@@ -415,11 +413,12 @@ monotone function it is (the perspective of `zΦ(z) + φ(z)`), with the concave
 envelope over the `(mu, sigma)` box, and
 `probability_of_improvement(mu, sigma, target)` from its monotonicity plus the
 exact envelopes of `Φ`, instead of `Φ`, `φ` and the division one by one. On
-the 20-point GP of notebook 06, with `gp_std`: EI 1401 → 683 nodes, PI 727 →
-491. The 683 and 491 are in the notebook's stored outputs; the formula counts
-(1401, 727) and the warm times measured with them (EI 0.9 s → 0.4 s, PI
-0.55 s → 0.4 s) are from runs on or before 2026-10-17 and are not reproduced
-by the stored notebook. [`notebooks/06-gaussian-processes.ipynb`](notebooks/06-gaussian-processes.ipynb)
+the 20-point GP of notebook 06 they took EI from 1401 to 683 nodes and PI from
+727 to 491 (the formula counts are from runs on or before 2026-10-17, the
+primitive counts from the notebook's 2026-10-20 run). With the first-order
+models of the mean and σ, the stored outputs are 527 and 375. Bounding μ and
+σ jointly at the box vertices was tried for LCB and EI and gave nothing
+beyond the two models (`docs/PLAN-acquisition-relaxations.md`). [`notebooks/06-gaussian-processes.ipynb`](notebooks/06-gaussian-processes.ipynb)
 repeats the paper's case studies: GP means, acquisition functions, a chance
 constraint and a Bayesian-optimization loop.
 
