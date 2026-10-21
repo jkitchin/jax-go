@@ -1,7 +1,8 @@
 # Specialized relaxations for Bayesian-optimization acquisition functions
 
 Status (October 2026): the first-order Taylor bounds of the mean (`gp.gp_mean`, §5) and of the
-standard deviation (`gp.gp_std`, §6) are implemented; the joint acquisition bounds are a plan. The numbers in §2–3 come from `benchmarks/acq_gap.py`, run on the 15-point
+standard deviation (`gp.gp_std`, §6) are implemented. The joint acquisition bounds were tried
+and did not help once both are in (§7). The numbers in §2–3 come from `benchmarks/acq_gap.py`, run on the 15-point
 Matérn 5/2 GP of `tests/test_gp.py` (target `fmin − 0.05`, 25 random square boxes per width in
 [−1, 1]²).
 
@@ -214,7 +215,24 @@ Same optimum in every case. On these small 2-D problems the cold time is mostly 
 Dropping the Lipschitz bound for these kernels (the Taylor model alone) changed nodes by 0–2%,
 so it is kept.
 
-Next: the joint LCB/EI vertex bounds (§3).
+## 7. Tried: joint LCB/EI vertex bounds (no gain)
+
+Commit 18d4bad on this branch added a `gp_acquisition` primitive (with a `GPModel` wrapper). Its
+rule intersected the separate relaxation with the vertex bounds of §3 as LCB's lower and EI's
+upper interval bound, which the node bound takes directly. It was sound, and its interval was
+1.5–2.7× tighter than the separate interval on small boxes. But it did not change the node
+bound, which comes from the convex side:
+
+* **LCB:** the node bound was identical on all 100 boxes (N = 50 GP, widths 2 to 0.02).
+* **EI:** tighter by more than 10% on 30 of 100 boxes, nearly all where the gap is already
+  about 1e−10.
+* **Solves:** LCB 295 / 295 and 679 / 679 nodes, EI 527 / 527 and 963 → 957.
+
+The reason is that the separate relaxation is now built from the same two models. LCB's convex
+side is `(μ̂ − e_μ) − κ(√cc(q) + e)`, and `cc(q)` is exact at the vertices, so its minimum over the
+box is already at the vertex bound. The vertex bounds were worth 2–40× in §3 only because the
+mean and σ had no Taylor models then. The code was removed; the remaining gap is on wide boxes,
+where the remainders are large.
 
 Refs: [schweidtmann2021deterministic] (*Math. Prog. Comp.* 13(3), 2021); Ament et al.,
 "Unexpected improvements to expected improvement for Bayesian optimization", NeurIPS 2023
