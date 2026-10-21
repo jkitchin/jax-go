@@ -1,0 +1,15 @@
+code,case,mode,status,fun,lower_bound,nodes,iterations,time_s,first_time_s
+before,chance,primitive,optimal,-157.175,-157.333,1359,23,0.7,24.2
+after,chance,primitive,optimal,-157.175,-157.275,153,15,0.2,20.6
+before,ei,primitive,optimal,-0.341161,-0.342095,559,17,0.2,17.5
+after,ei,primitive,optimal,-0.341161,-0.342143,527,17,0.2,21.2
+before,ei_N50,primitive,optimal,-0.490565,-0.491528,1289,21,1.0,19.0
+after,ei_N50,primitive,optimal,-0.49057,-0.491545,963,21,0.9,24.6
+before,lcb,primitive,optimal,-4.32882,-4.33262,295,16,0.2,15.7
+after,lcb,primitive,optimal,-4.32882,-4.33262,295,16,0.1,19.8
+before,lcb_N50,primitive,optimal,-5.22933,-5.2345,3477,26,1.2,16.6
+after,lcb_N50,primitive,optimal,-5.22933,-5.23442,679,19,0.4,19.2
+before,pi,primitive,optimal,-0.4404,-0.441364,399,18,0.4,26.6
+after,pi,primitive,optimal,-0.4404,-0.441157,375,18,0.5,33.4
+before,pi0,primitive,optimal,-0.717662,-0.718662,14243,77,6.3,32.0
+after,pi0,primitive,optimal,-0.717662,-0.718629,719,28,0.8,34.3

@@ -976,6 +976,21 @@ the quotient (ordinary rounding in default mode), and αBB's added slope
 excess is 1e-16 (rounding), and `safe=True` was already exact. Also added: a rule for `erfc`, which
 `jax.scipy.stats.norm.cdf` uses on jax 0.11.
 
+Later (October 2026, `docs/PLAN-acquisition-relaxations.md`): with the EI and
+PI rules in place, nearly all of the remaining acquisition gap was in the
+enclosures of μ and σ themselves. `gp_mean` became a primitive. `gp_mean` and
+`gp_std` now intersect their relaxations with first-order Taylor models whose
+remainders are bounded in the kernel's RKHS (Matérn 5/2 and SE): second
+order, and independent of `K⁻¹`'s conditioning. In notebook 06:
+* GP mean, N = 200: 2,253 → 497 nodes; N = 400: 5,519 → 725.
+* Chance constraint: 2,759 → 153.
+* PI without a margin: 14,359 → 719.
+* EI 683 → 527, PI 491 → 375.
+
+The zeroth-order mean bound was dropped: it flattens `cv` on large boxes and
+misguides the root local solve. Joint μ/σ vertex bounds for LCB and EI gave
+nothing beyond the two models (18d4bad, reverted).
+
 ### Phase 4 — device-resident B&B (4–6 weeks)
 
 - **Node pool on device.** Fixed-capacity arrays with masks, and the whole

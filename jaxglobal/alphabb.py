@@ -45,14 +45,14 @@ SAFE_INTERVAL_CTX = Ctx(interval_only=True, safe=True)
 
 def is_smooth(tape):
     """True when every equation that depends on the variables is a smooth primitive."""
-    from .univariate import AFFINE, SMOOTH_ELEMENTWISE
+    from .univariate import AFFINE, smooth_eqn
 
     var = {0}
     for node in tape.nodes:
         if not any(not isinstance(a, Const) and a in var for a in node.ins):
             continue
         name = node.eqn.primitive.name
-        if not (name in AFFINE or name in SMOOTH_ELEMENTWISE or name == "dot_general"):
+        if not (name in AFFINE or smooth_eqn(node.eqn) or name == "dot_general"):
             return False
         var.update(node.outs)
     return True
