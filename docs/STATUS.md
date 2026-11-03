@@ -13,22 +13,25 @@ The other documents keep the detail and history:
 - [`../benchmarks/results/README.md`](../benchmarks/results/README.md): what
   each results file is.
 
-Last updated: 2026-11-03, at `main` ce16aa8 (after PR #86). Development is
+Last updated: 2026-11-03, on branch `claude/epic-thompson-l8fpwd` (after
+`main` ce16aa8, PR #86). Development is
 paused (October 2026).
 
 ## Summary
 
-- **Correctness is solid.** jaxglobal has given 0 wrong answers on every
-  MINLPLib set run so far (global50, `start50`, `int50`, held out: 357
-  instances), all checked against reference bounds. On the same runs SCIP 10.0
-  gave 2 wrong answers and BARON 1.
+- **Correctness is solid, with one hole found and fixed.** jaxglobal gave 0
+  wrong answers on the 357 instances of the 2026-10-20 re-run (global50,
+  `start50`, `int50`, held out), all checked against reference bounds; SCIP
+  10.0 gave 2 and BARON 1. The 2026-11-03 scale smoke run found one: `jit1`,
+  where a point that used the whole `feas_tol` on badly scaled rows was
+  reported optimal 209 below the true optimum. Fixed (see *What is done*).
 - **Speed is not competitive with mature solvers.** Shifted geometric mean
   time is 8–45× SCIP's cold and 3–13× warm, depending on the set, and most of its "passes" rely
   on the 10 s floor of the pass rule. Cold runs, which include JAX compilation,
   are the fair comparison, and they are where jaxglobal loses most.
-- **It stops scaling at about 50 variables.** It solved 1 of the 108 MINLPLib
-  integer instances with 51–100 variables, because setup (tracing, compiling,
-  the first dense LP) uses up the time limit.
+- **Every solve pays a large fixed cost.** Instances solved at the root node
+  take a median of 13.6 s cold (SCIP: well under 1 s), and some never finish
+  setup in 60 s. At 51–100 variables this is why almost nothing solves.
 - **The niche (models defined by code) is promising but not yet
   demonstrated against other solvers.** Big gains in node counts on GP and NN
   models, but the flagship comparison with SCIP, Couenne and BARON has only
@@ -76,13 +79,32 @@ The 2026-10-17 cold numbers quoted in the README (30.7 s against 1.93 s on
 `start50`, 31.8 s against 1.35 s on `int50`) predate PR #76 and a different
 machine; use the table above.
 
-### Scale
+### Scale and fixed cost
 
-On 328 MINLPLib integer instances with at most 100 variables (60 s, cold,
-2026-10-17, heavily loaded machine; **stale**): 72 of 220 solved with ≤ 50
-variables, 1 of 108 with 51–100. In the 51–100 range a profile found 0–1
-nodes in 60 s: tracing and compiling the kernels took 9–37 s each, first
-bound calls 7–50 s (dense IPM, rows × n² per iteration).
+Smoke run on 2026-11-03 (this branch, 4-core cloud VM, load about 2–5, 60 s,
+cold, two at a time): the first 150 of the 328 integer instances with at most
+100 variables, in order of size (`sets/int100.txt`;
+`results/scale_int100_cold.csv`; `benchmarks/scale_report.py`). It was stopped
+there on purpose: the pattern was clear (see `CLAUDE.md`, *Measurement
+strategy*).
+
+| variables | tried | solved now | solved 2026-10-17 (same instances) |
+|---|---:|---:|---:|
+| 1–10 | 66 | 56 | 53 |
+| 11–20 | 31 | 23 | 13 |
+| 21–50 | 53 of 123 | 24 | 6 |
+| 51–100 | 0 of 108 | — | 1 of 108 |
+
+31 instances solve now that did not on 2026-10-17 and none were lost (that run
+was on a heavily loaded machine, so part of the gain is load).
+
+**Fixed cost per solve.** The 55 instances solved at the root node (1 node)
+took a median of 13.6 s (3.3–59.9 s). 16 instances reached 0 nodes in 60 s
+(the `eg_*` family, `autocorr_bern*` with 15+ terms, `cvxnonsep_psig*`,
+`ghg_1veh`, `hmittelman`, `nvs09`) and 18 more stopped at 1 node (all
+`smallinvDAX*`). On 2026-10-17 a profile of the 51–100 range found the same:
+tracing and compiling the kernels took 9–37 s each, first bound calls 7–50 s
+(dense IPM, rows × n² per iteration).
 
 ### Code-defined models (the niche)
 
@@ -115,6 +137,19 @@ but not the default.
 | 5. Niche | CROWN bounds (opt-in); GP kernel primitives, `gp_mean`, `gp_std`, EI and PI primitives with Taylor/RKHS models; RK4 kinetics via `lax.scan`; `jaxglobal.applications` with Pyomo twins | alpha-CROWN; full flagship benchmark; parametric batches of many instances; differentiable optimal value |
 | 6. Integers and rigor | MINLP (integer branching, root probing, reduced-cost fixing, pseudo-Boolean elimination, binary cuts); float64 check of every returned point; `safe=True` outward rounding (opt-in, about 1.7× slower cold) | verified transcendental enclosures; exact LP-dual check (a fully rigorous mode); MILP cuts (Gomory, cover, MIR) |
 
+Strict feasibility of the reported point (2026-11-03): when the incumbent uses
+more than 1e-3 × `feas_tol` of a constraint's tolerance, the strictly feasible
+point found by the repair solve is now always reported, and the status follows
+from its gap to the proven bound (`optimal` or `unproven`). Before, a repair
+that raised `f` by more than 100 × `feas_tol` × (1 + |f|) was rejected and the
+tolerance-exploiting point kept with status `optimal`, which reported
+MINLPLib `jit1` 209 below its optimum (small variables tied to integers, with
+objective coefficients up to 1e7). Test:
+`tests/test_incumbent.py::test_badly_scaled_repair_never_reports_below_optimum`
+(a synthetic model of the same structure). Checked on 26 other instances from
+other families (`results/smoke_repair_after*.csv`): same status and node
+counts as before.
+
 Compile and setup work (the largest cold-time cost): kernel cache in memory
 and on disk, two kernels per problem instead of four, Kelley rounds as
 `lax.scan`, lean `.nl` tracing, root OBBT skipped when the root closes the
@@ -138,31 +173,37 @@ warm, 68 cold). A3 (interpreter thresholds) has tooling but no valid timing, so
 | autocorr_bern*, hadamard_5, nvs09 (cold) | compile time on dense polynomials | lower compile cost (A3, leaner tracing) |
 | clay0303hfsg, tanksize, tspn05, flay03m (global50) | timeouts at 60 s on the cloud VM | not diagnosed individually |
 | any model with 51–100 variables | setup and dense LP exhaust the time limit | sparse or first-order LP; lower setup cost |
+| `eg_*`, `autocorr_bern*` (15+ terms), `cvxnonsep_psig*`, `ghg_1veh`, `hmittelman`, `nvs09` | 0 nodes in 60 s cold: setup or compile never finishes | profile one of each; lower setup cost |
+| `smallinvDAX*` (cold) | stop at 1 node in 60 s | profile the root |
+| badly scaled models in general | `feas_tol` is absolute, so on rows over small variables it is worth far more than intended; the repair now reports the strict point, but the bound is still that of the relaxed problem, so such solves can end `unproven` | row- or variable-scaled feasibility tolerance |
 
 ## What is next
 
-In priority order. The order is a proposal based on the measurements above:
-measure first where the numbers are stale or missing, then attack the
-largest documented cost.
+In priority order, based on the measurements above. Work from smoke tests
+and profiles, not long runs, and validate each fix on instances it was not
+developed on (`CLAUDE.md`).
 
-1. **Refresh the stale baselines** (no library change). Re-run shifted geometric
-   mean times for `start50`/`int50` and the 328-instance scale run on current
-   `main`, on one machine with the load recorded (the rules in
-   `PLAN-scip-gap-v2.md` §3). Every later item is judged against these.
+1. **Fixed cost per solve.** The largest and most general cost: a median of
+   13.6 s cold for problems SCIP solves at once, and 0 nodes in 60 s on some.
+   Profile one instance from each 0-node family and a few 1-node ones
+   (`benchmarks/profile_root.py`), find where setup time goes (tracing,
+   compile, domain derivation, local-solver build, first bound call), and cut
+   the largest piece. Finish A3 (interpreter thresholds) on the way. This also
+   decides the cold-versus-warm gap.
 2. **minlp.org smoke tests** (issue #87). Stage 1: 10–20 problems with ≤ 50
    variables and constraints against SCIP, to find which algorithmic gaps
    matter on applied models. Stage 2: larger problems.
-3. **Full flagship benchmark** (`benchmarks/flagship.py`). The niche is the
-   project's main claim, and it has only a 5-model smoke run in which jaxglobal
-   loses or times out on 4. Find out why `pipes_parallel` and the kinetics
-   models do not solve.
+3. **Flagship smoke tests** (`benchmarks/flagship.py`). The niche is the
+   project's main claim, and in the 5-model smoke run jaxglobal loses or times
+   out on 4. Find out why `pipes_parallel` and the kinetics models do not
+   solve.
 4. **Node LP beyond polynomials.** Replace the dense IPM with a sparse or
    first-order (PDHG) LP, which the weak-duality certificate keeps safe. This
    is the main blocker at 50–100 variables and also the core of a GPU
    version.
-5. **Setup and compile cost.** Finish A3 (time the interpreter thresholds and
-   decide `RULE`), make relaxation traces leaner, and fold remaining setup steps
-   into the tape analysis. This is what separates cold from warm results.
+5. **Scaled feasibility tolerance.** Make `feas_tol` relative to row and
+   variable scale, so badly scaled models are neither exploited by the search
+   nor left `unproven` after the repair.
 6. **Stronger relaxations.** FBBT intermediate ranges fed into McCormick;
    bilinear and pooling bounds (issue #12 history; tln, wastewater, circle
    packing); alpha-CROWN for deeper NNs.
@@ -170,6 +211,10 @@ largest documented cost.
    throughput on a GPU before committing to phase 4 (device-resident loop).
 8. **Rigorous mode.** Verified transcendental enclosures and an exact LP-dual
    check, to make `safe=True` a proof.
+
+Done from the earlier list: the shifted geometric means were refreshed from
+the 2026-10-20 data (above), and the scale run was replaced by the smoke run
+above. Full-set numbers are re-run only to report a finished change.
 
 Decisions still open:
 
