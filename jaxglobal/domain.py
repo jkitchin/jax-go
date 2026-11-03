@@ -308,6 +308,14 @@ def _feasible_points(f, ineq, eq, lo, hi, feas_tol, n_starts, seed, deadline=Non
     return best_x, best_f
 
 
+# Use the shared FBBT kernel (``fbbt_generic``) here. Off: measured on 12 MINLPLib instances with
+# unbounded variables (2026-11-03, two solves at a time, cold set) bound_domain itself got faster
+# once kernels were shared (17.0 against 20.7 s over six processes), but whole solves did not
+# (318 against 303 s): the first compile of each bucket costs about what reuse saves while FBBT is
+# the only shared kernel. To be revisited once the node bounder is shared too.
+GENERIC_FBBT = False
+
+
 def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed=0, deadline=None, integer=None):
     """Derive finite bounds. Returns ``(lo, hi, infeasible, x_feasible, f_feasible)``.
 
@@ -321,16 +329,36 @@ def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed
     in time; no new local solve starts after it.
     """
     lo, hi = np.array(lo, np.float64), np.array(hi, np.float64)
-    fb = jax.jit(make_fbbt(f, ineq, eq, rounds=rounds, feas_tol=feas_tol))
+
+    def build():
+        """The FBBT kernel: with ``GENERIC_FBBT`` the shared one (``fbbt_generic``: compiled once
+        per size bucket, not per problem) when the tape fits its opcode table, else one compiled
+        for this problem."""
+        from .fbbt_generic import make_generic_fbbt
+
+        g = make_generic_fbbt(f, ineq, eq, n=lo.size, rounds=rounds, feas_tol=feas_tol) if GENERIC_FBBT else None
+        if g is not None:
+            g(lo[None], hi[None], np.inf)  # compiles, or finds the bucket's kernel compiled
+
+            def run(a, b, cutoff):
+                xl, xh, empty = g(jnp.asarray(a)[None], jnp.asarray(b)[None], cutoff)
+                return xl[0], xh[0], empty[0]
+
+            return run
+        fb = jax.jit(make_fbbt(f, ineq, eq, rounds=rounds, feas_tol=feas_tol))
+        spec = jax.ShapeDtypeStruct(lo.shape, jnp.float64)
+        return fb.trace(spec, spec, jax.ShapeDtypeStruct((), jnp.float64)).lower().compile()
+
     if deadline is not None and np.isfinite(deadline):
         if not _POOL:
             _POOL.append(kcache.DaemonExecutor(1, "jaxglobal-domain"))
-        spec = jax.ShapeDtypeStruct(lo.shape, jnp.float64)
-        fut = kcache.track(_POOL[0].submit(lambda: fb.trace(spec, spec, jax.ShapeDtypeStruct((), jnp.float64)).lower().compile()))
+        fut = kcache.track(_POOL[0].submit(build))
         try:
             fb = fut.result(timeout=max(deadline - time.perf_counter(), 0.0))
         except TimeoutError:
             raise DomainTimeout() from None
+    else:
+        fb = build()
 
     def check_time():
         """``DomainTimeout`` once the deadline has passed (checked between the steps below, which

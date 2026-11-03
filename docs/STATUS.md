@@ -238,7 +238,30 @@ developed on (`CLAUDE.md`).
    per-opcode branches are built from the opcodes a problem uses, e.g.
    `integer_pow`'s exponent), tape arrays and schedules as kernel arguments
    padded to buckets, and the same for αBB, the univariate hulls and the LP
-   rows. First increment: FBBT (`fbbt_interp._propagate_steps`).
+   rows. First increment: FBBT.
+   *Increment 1 done (2026-11-03): `jaxglobal/fbbt_generic.py`.* FBBT with
+   the tape as kernel arguments: a universal opcode table (59 opcodes: every
+   elementwise primitive of the interpreter in each operand variant,
+   `integer_pow` for exponents 2–8 and −1 to −3) and a 21-opcode core table
+   that covers most models; programs padded to power-of-two buckets of rows,
+   slots, variables and outputs; the row interpreter's sweeps with a
+   `lax.switch` per row; stops at an exact fixpoint. Exported kernels go to the
+   disk cache (`kcache`), so a new process skips tracing. Bounds are bitwise
+   equal to `fbbt_interp`'s row interpreter on 14 MINLPLib models and the
+   tests (`tests/test_fbbt_generic.py`). 342 of 343 benchmark models
+   encode; the 209 held-out models fall into 33 buckets (52 in the largest).
+   Costs: a cold compile per bucket of about 2 s (core) or 5 s (full); a warm
+   process gets it in 0.3 s; per call it runs 3–6× slower than the
+   straight-line FBBT kernel (16 boxes: 2.7–9 ms against 0.4–1.7 ms), so it
+   does not belong in the node kernel by itself. Wired into `bound_domain`
+   behind `domain.GENERIC_FBBT`, **off**: `bound_domain` got faster once kernels
+   were shared (17.0 against 20.7 s over six processes), but whole solves did
+   not (318 against 303 s on 12 instances, two at a time,
+   `results/smoke_genfbbt_*.csv`). FBBT is the cheap part of the compile;
+   the gain depends on the bounder being shared too.
+   *Next increment:* the node bounder (McCormick relaxation, cuts, LP) on the
+   same design, then FBBT and bounder together in the node kernel, compared
+   end to end against the per-problem kernel.
    Smaller waste seen on the way: `pool_judge` starts a second compile of the
    node kernel (without pool rows) even when the time left (smallinvDAX: 0.5 s)
    cannot amortize it.
@@ -273,8 +296,10 @@ developed on (`CLAUDE.md`).
    before the root bound (tried: a local solve while the kernel compiles; under
    the GIL contention its own gradient compile overran the limit, so it was
    reverted). The kernel compile threads also keep the Python process alive
-   after `minimize` returns (`benchmarks/run.py` works around it with
-   `os._exit`).
+   after `minimize` returns — fixed (2026-11-03): background builds run on
+   daemon threads (`kcache.DaemonExecutor`); a script exits within about a
+   second of `minimize` returning. Builds still running at exit are dropped;
+   call `kcache.wait_for_builds` first to keep them for the disk cache.
 4. **Node LP beyond polynomials.** Replace the dense IPM with a sparse or
    first-order (PDHG) LP, which the weak-duality certificate keeps safe. This
    is the main blocker at 50–100 variables and also the core of a GPU
