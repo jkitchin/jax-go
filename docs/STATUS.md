@@ -22,9 +22,8 @@ paused (October 2026).
   MINLPLib set run so far (global50, `start50`, `int50`, held out: 357
   instances), all checked against reference bounds. On the same runs SCIP 10.0
   gave 2 wrong answers and BARON 1.
-- **Speed is not competitive with mature solvers.** On the same instances
-  jaxglobal is often 10× or more slower than SCIP (shifted geometric mean
-  about 16–24× on `start50`/`int50`, cold), and most of its "passes" rely
+- **Speed is not competitive with mature solvers.** Shifted geometric mean
+  time is 8–45× SCIP's cold and 3–13× warm, depending on the set, and most of its "passes" rely
   on the 10 s floor of the pass rule. Cold runs, which include JAX compilation,
   are the fair comparison, and they are where jaxglobal loses most.
 - **It stops scaling at about 50 variables.** It solved 1 of the 108 MINLPLib
@@ -61,12 +60,21 @@ warm (laptop run), against 20 of 23 on the instances the SCIP-gap work was tuned
 
 ### Speed
 
-| measurement | jaxglobal | SCIP | when |
-|---|---:|---:|---|
-| shifted geometric mean time, `start50`, cold | 30.7 s | 1.93 s | 2026-10-17, before PR #76; **stale** |
-| shifted geometric mean time, `int50`, cold | 31.8 s | 1.35 s | 2026-10-17, before PR #76; **stale** |
-| typical global50 instance | 0.5–8 s warm | < 0.1 s | 2026-10-19, laptop |
-| repeat solve of a built-in problem (kernel cache hit) | 0.3–1 s | — | — |
+Shifted geometric mean time (shift 1 s; unsolved instances count at the 60 s
+limit), from the 2026-10-20 re-run above (`benchmarks/rerun_report.py`):
+
+| set | jaxglobal cold | jaxglobal warm | SCIP | ratio, cold / warm |
+|---|---:|---:|---:|---:|
+| global50 | 25.2 s | 7.3 s | 0.56 s | 45× / 13× |
+| `start50` | 22.0 s | 8.6 s | 2.70 s | 8× / 3.2× |
+| `int50` | 28.4 s | 12.7 s | 1.22 s | 23× / 10× |
+| held out | 17.9 s | 6.4 s | 0.55 s | 33× / 12× |
+
+Median jaxglobal time on solved instances, warm: 3.3–9.1 s depending on the
+set. A repeat solve of a built-in problem (kernel cache hit) takes 0.3–1 s.
+The 2026-10-17 cold numbers quoted in the README (30.7 s against 1.93 s on
+`start50`, 31.8 s against 1.35 s on `int50`) predate PR #76 and a different
+machine; use the table above.
 
 ### Scale
 
