@@ -159,6 +159,16 @@ solver) all ran: `eg_disc_s` (8 variables, 110k tape rows) returned after
 overruns by at most one step (`eg_disc_s` with 75 s: 96 s). Smoke check on
 six other instances (`results/smoke_deadline.csv`): unchanged.
 
+Local solver ready-first (2026-11-03): with `local_solver="auto"` pounce is
+built in a background (daemon) thread; the first local solve waits up to
+`local.POUNCE_WAIT` (10 s) for it, and until it is ready the gradient-only
+SciPy solver (L-BFGS-B / SLSQP) is used. pounce's build compiles the exact
+Lagrangian Hessian, which on loop-unrolled code (RK4 by `lax.scan`) takes many
+minutes: `gasoil_h0.1` with a 60 s limit had stayed in setup for more than
+4 min; it now returns at 60 s. On 8 MINLPLib instances from other families
+(`results/smoke_local_ready.csv`) status and node counts are unchanged
+(ex1252a, at the 60 s edge, 8,383 nodes both ways at 120 s).
+
 Compile and setup work (the largest cold-time cost): kernel cache in memory
 and on disk, two kernels per problem instead of four, Kelley rounds as
 `lax.scan`, lean `.nl` tracing, root OBBT skipped when the root closes the
@@ -207,17 +217,41 @@ developed on (`CLAUDE.md`).
    (a) problem-independent kernels (the tape as data, compiled once per shape
    bucket, so the disk cache serves new problems); (b) a cheap first root bound
    (interval / McCormick only) while the full kernel compiles, enough to
-   close many root-solved problems; (c) smaller relaxation code (fewer
+   close many root-solved problems — *measured and ruled out*: without αBB and
+   univariate envelopes, 10 root-solved instances still solve at the root but
+   the mean wall time is unchanged (19.4 against 19.6 s), because the dive and
+   OBBT kernels compile in the same window (`results/lean_*.csv`); (c) smaller relaxation code (fewer
    primitive-rule variants per row). Large tapes (`eg_*`: 110k rows on 8
    variables) spend minutes in tracing alone, in `bound_domain` and the
-   structure analysis.
-2. **minlp.org smoke tests** (issue #87). Stage 1: 10–20 problems with ≤ 50
+   structure analysis. So (a) is the remaining lever: a redesign that passes
+   the tape arrays (`relax_interp`, `fbbt_interp`, αBB, LP rows) as kernel
+   arguments with padded shape buckets instead of baking them in as constants.
+   A multi-day project; not started.
+2. **minlp.org smoke tests** (issue #87). *Blocked on a permission:* the
+   instances are GAMS models (480 at minlp.org; 15 small nonlinear ones are
+   picked, with sizes, in the session notes). `gamspy` installs GAMS with CONVERT
+   (which writes `.nl`), but running downloaded GAMS code was refused by the
+   session's safety check (GAMS can run shell commands). Needs the user's
+   go-ahead, or `.nl` files converted elsewhere. Stage 1: 10–20 problems with ≤ 50
    variables and constraints against SCIP, to find which algorithmic gaps
    matter on applied models. Stage 2: larger problems.
 3. **Flagship smoke tests** (`benchmarks/flagship.py`). The niche is the
    project's main claim, and in the 5-model smoke run jaxglobal loses or times
-   out on 4. Find out why `pipes_parallel` and the kinetics models do not
-   solve.
+   out on 4. *Diagnosed (2026-11-03):* `gasoil_h0.1` (3 variables, RK4 by
+   `lax.scan`) never reached a bound: the relaxation kernel of the unrolled
+   integration still compiled at 60 s, its tracing starved the main thread
+   (the GIL is held for long stretches while lowering: a 2 s analysis took
+   34 s), and building pounce compiled the exact Hessian through every RK4
+   step (> 400 s) and ran far past the time limit. L-BFGS-B with the gradient
+   (5 s compile) finds the reference optimum in 0.02 s. `hx_water` (3 variables,
+   `where` logic): root bound 39 s, root OBBT 13 s, no lower bound at 60 s.
+   Fixed: the local solver no longer blocks setup (see *What is done*). Open:
+   the relaxation kernels of loop-unrolled models (item 1), and an incumbent
+   before the root bound (tried: a local solve while the kernel compiles; under
+   the GIL contention its own gradient compile overran the limit, so it was
+   reverted). The kernel compile threads also keep the Python process alive
+   after `minimize` returns (`benchmarks/run.py` works around it with
+   `os._exit`).
 4. **Node LP beyond polynomials.** Replace the dense IPM with a sparse or
    first-order (PDHG) LP, which the weak-duality certificate keeps safe. This
    is the main blocker at 50–100 variables and also the core of a GPU

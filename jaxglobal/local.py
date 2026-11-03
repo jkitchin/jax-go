@@ -212,6 +212,50 @@ def near_zero_options(fun, abs_tol=1e-6):
     return {"obj_scaling_factor": float(scale), "mu_init": 1e-6}
 
 
+POUNCE_WAIT = 10.0  # s the first solve waits for pounce's build before using the gradient-only solver
+
+
+def _ready_first(f, ineq, eq, lo, hi, patterns):
+    """pounce when its build is ready, else the gradient-only SciPy solver (``solver="auto"``).
+
+    pounce's build compiles the exact Hessian of the Lagrangian (and, without ``patterns``,
+    probes its sparsity). That takes 1-2 s on most models, but on code with long loops (an
+    ODE integrated by ``lax.scan``: forward-over-reverse through every step) it can take many
+    minutes, while the gradient compiles in seconds and L-BFGS-B / SLSQP solve the same
+    problem in milliseconds. So pounce is built in the background; the first solve waits up
+    to ``POUNCE_WAIT`` s for it, and until it is ready every solve uses the SciPy solver
+    (which ignores pounce ``options``). A failed pounce build keeps the SciPy solver."""
+    import threading
+    from concurrent.futures import Future
+
+    fut = Future()
+
+    def build():
+        try:
+            fut.set_result(_pounce_local(f, ineq, eq, lo, hi, patterns=patterns))
+        except BaseException as e:  # noqa: BLE001  (reported through the future)
+            fut.set_exception(e)
+
+    # a daemon thread: a build still compiling when the process ends must not keep it alive
+    threading.Thread(target=build, name="jaxglobal-local", daemon=True).start()
+    state = {"waited": False, "scipy": None}
+
+    def solve(X0, LO=None, HI=None, options=None):
+        if not state["waited"]:
+            state["waited"] = True
+            try:
+                fut.result(timeout=POUNCE_WAIT)
+            except Exception:  # not ready (TimeoutError) or failed: decided below
+                pass
+        if fut.done() and fut.exception() is None:
+            return fut.result()(X0, LO, HI, options=options)
+        if state["scipy"] is None:
+            state["scipy"] = _scipy_local(f, ineq, eq, lo, hi)
+        return state["scipy"](X0, LO, HI)
+
+    return solve
+
+
 def make_local(f, ineq, eq, lo, hi, solver="auto", patterns=None):
     """Batched local solver ``X0 (k, n) -> X (k, n)`` on the box [lo, hi].
 
@@ -221,7 +265,9 @@ def make_local(f, ineq, eq, lo, hi, solver="auto", patterns=None):
     ``patterns`` (a ``structure.Structure``) gives pounce the derivative sparsity patterns."""
     lo, hi = np.asarray(lo, dtype=np.float64), np.asarray(hi, dtype=np.float64)
     if solver == "auto":
-        solver = "pounce" if importlib.util.find_spec("pounce") else "optax"
+        if importlib.util.find_spec("pounce"):
+            return _ready_first(f, ineq, eq, lo, hi, patterns)
+        solver = "optax"
     if solver == "pounce":
         return _pounce_local(f, ineq, eq, lo, hi, patterns=patterns)
     if solver == "scipy":
