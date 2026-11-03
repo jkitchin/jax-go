@@ -1,5 +1,8 @@
 # Roadmap: from prototype to a state-of-the-art solver
 
+> For the current state (what is done, current numbers, what is next) see
+> [`STATUS.md`](STATUS.md). This document keeps the plan and its history.
+
 "State of the art" here means two separate claims, and the plan treats them
 separately:
 

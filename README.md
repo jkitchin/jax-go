@@ -697,9 +697,10 @@ Any AMPL `.nl` model (text or binary) can be loaded with
 
 ## Next steps
 
-The plan, with measurements for each phase, is in
-[`docs/ROADMAP.md`](docs/ROADMAP.md). Development is paused (October 2026);
-if it resumes, next on it are:
+What is done, the current numbers and the prioritized list of what is next
+are in one place: [`docs/STATUS.md`](docs/STATUS.md). The plan, with
+measurements for each phase, is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+Development is paused (October 2026); if it resumes, next on it are:
 
 * a sparse or first-order LP for the node bound beyond polynomial problems;
 * lower setup and compile cost for models with 50 to 100 variables;
