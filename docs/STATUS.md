@@ -242,6 +242,14 @@ developed on (`CLAUDE.md`).
    Smaller waste seen on the way: `pool_judge` starts a second compile of the
    node kernel (without pool rows) even when the time left (smallinvDAX: 0.5 s)
    cannot amortize it.
+   *Tried and reverted:* compiling pounce's evaluation functions in its
+   background build (a one-iteration warm-up solve) instead of on the first
+   local solve. Alone it helped (smallinvDAXr1b020-022: 9 → 333 nodes in 60 s),
+   but in the benchmark setting (two solves at a time on 4 cores) the extra
+   concurrent compile cost as much as it saved: 396 s against 389 s on 10
+   instances, same node counts (`results/smoke_pounce_*.csv`). On this
+   machine the cores are saturated by compilation; moving compile work between
+   threads does not help, only removing it does.
 2. **minlp.org smoke tests** (issue #87). *Blocked on a permission:* the
    instances are GAMS models (480 at minlp.org; 15 small nonlinear ones are
    picked, with sizes, in the session notes). `gamspy` installs GAMS with CONVERT
