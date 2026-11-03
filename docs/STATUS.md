@@ -259,9 +259,32 @@ developed on (`CLAUDE.md`).
    not (318 against 303 s on 12 instances, two at a time,
    `results/smoke_genfbbt_*.csv`). FBBT is the cheap part of the compile;
    the gain depends on the bounder being shared too.
-   *Next increment:* the node bounder (McCormick relaxation, cuts, LP) on the
-   same design, then FBBT and bounder together in the node kernel, compared
-   end to end against the per-problem kernel.
+   *Increment 2 done (2026-11-03): `jaxglobal/bound_generic.py`.* The node
+   bound with the tape as data: `relax_interp`'s McCormick rules (with
+   forward-mode subgradients) row by row over the opcode table, the parts as
+   signed output slots, `_cut_rows` as a mask (dead rows), and
+   `make_constrained_bounder`'s LP, certificate, Kelley rounds and range
+   reduction on padded variables. McCormick only (no univariate hulls, αBB,
+   convexity certificates or cut pool). Relaxation values and subgradients
+   equal the interpreter's to 1e-12; bounds agree to LP accuracy (the padded
+   LP takes other interior-point iterates) and are valid
+   (`tests/test_bound_generic.py`). Cold compile 9–12 s per bucket (the
+   per-problem bounder: 5.5–9 s), reused across problems.
+   *Measured end to end, and the conclusion for the redesign:* with
+   `bnb.GENERIC_EARLY` (shared FBBT and bound used while the problem's node
+   kernel compiles), 8 root-solved instances in sequence with one cache
+   directory took 141 s against 106 s without, same results. The shared
+   kernels bounded only the root (1–2 calls); root OBBT, the dives and the
+   next nodes still waited for the per-problem kernels, and each new bucket
+   added a shared compile. So `GENERIC_EARLY` is off. Sharing kernels pays
+   only when a problem can be solved with no per-problem kernel at all: the
+   whole root pipeline shared (FBBT, bound, OBBT, dives, the incumbent
+   candidates) and its bounds as tight as the default ones (univariate hulls
+   and αBB are what close many root gaps). That is a larger project than
+   these two increments suggested; see *What is next*. Also seen: `ex1221`
+   (same structure as `st_e15`) solves in 4 s cold because the existing
+   per-problem disk cache, keyed by the model's fingerprint, already serves
+   structurally identical models.
    Smaller waste seen on the way: `pool_judge` starts a second compile of the
    node kernel (without pool rows) even when the time left (smallinvDAX: 0.5 s)
    cannot amortize it.

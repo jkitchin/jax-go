@@ -220,6 +220,14 @@ def nonlinear_variables(fns, lo, hi, n_samples=3, seed=0, hessians=None):
 # behavior changes through mutable globals is not recompiled; call
 # ``clear_cache()`` after such a change.
 SYM_SHARE = 0.1  # symmetry detection: at most this share of time_limit (and symmetry.SEARCH_SECONDS)
+# While a problem's own node kernel compiles, bound boxes with the shared kernels (fbbt_generic and
+# bound_generic: compiled once per size bucket, McCormick only) instead of waiting for it. Off:
+# measured on 8 root-solved MINLPLib instances in sequence with one cache directory (2026-11-03),
+# 141 s on against 106 s off, same results. The shared kernel bounded only the root; root OBBT,
+# the dives and the next nodes still waited for the problem's own kernels, and compiling the
+# shared ones for each new bucket added CPU work. It pays only once the whole root pipeline is
+# shared (docs/STATUS.md).
+GENERIC_EARLY = False
 SAFE_DEFAULT = False  # outward rounding of every bound; set after measuring its overhead (docs/ROADMAP.md)
 _CACHE = OrderedDict()
 _CACHE_SIZE = 32
@@ -889,6 +897,26 @@ def _auto_branch_var(imask):
     return "width" if np.asarray(imask).any() else "pseudocost"
 
 
+_GENERIC_POOL = []
+
+
+def _generic_kernels(f, ineq, eq, lo, hi, imask, rounds, feas_tol, safe, n_kelley, batch):
+    """``(fbbt, bound)``: the shared kernels for the problem (``fbbt_generic``, ``bound_generic``),
+    loaded or compiled for ``batch`` boxes; None when the problem does not encode."""
+    from .bound_generic import make_generic_bounder
+    from .fbbt_generic import make_generic_fbbt
+
+    n = lo.size
+    integer = tuple(int(i) for i in np.flatnonzero(imask))
+    fb = make_generic_fbbt(f, ineq, eq, n=n, rounds=rounds, feas_tol=feas_tol, safe=safe, integer=integer)
+    gb = make_generic_bounder(f, ineq, eq, n=n, tol=feas_tol, safe=safe, n_kelley=n_kelley) if fb is not None else None
+    if gb is None:
+        return None
+    L, H = np.tile(lo, (batch, 1)), np.tile(hi, (batch, 1))
+    jax.block_until_ready(gb(*fb(L, H, np.inf)[:2], np.inf))  # load or compile both executables
+    return fb, gb
+
+
 def _mark(stage):
     """Tell ``_PROFILE`` (off by default) that ``minimize`` enters ``stage``."""
     if _PROFILE is not None:
@@ -1287,6 +1315,12 @@ def minimize(
         tracer, compiler = _pools()
         pts, vec = jax.ShapeDtypeStruct((_POOL_CHUNK, lo.size), jnp.float64), jax.ShapeDtypeStruct((lo.size,), jnp.float64)
         pool["exe"] = kcache.track(tracer.submit(lambda: compiler.submit(K.pool_cuts.trace(pts, vec, vec).lower().compile)))
+    generic = None
+    if GENERIC_EARLY and padded.mesh is None and not lifted and not crown:
+        if not _GENERIC_POOL:  # its own worker: not queued behind the node kernel's trace
+            _GENERIC_POOL.append(kcache.DaemonExecutor(1, "jaxglobal-generic"))
+        generic = kcache.track(_GENERIC_POOL[0].submit(_generic_kernels, f, ineq, eq, lo, hi, imask, fbbt_rounds,
+                                                  feas_tol, bool(safe), n_kelley, min(padded.sizes)))  # fmt: skip
     _mark("start_dive_compile")
     if K.dive is not None and padded.mesh is None:  # the dive kernel too, traced after the others
         box, cut = jax.ShapeDtypeStruct((_DIVES, lo.size), jnp.float64), jax.ShapeDtypeStruct((), jnp.float64)
@@ -1526,6 +1560,42 @@ def minimize(
 
     bound_call = [0.0]  # seconds of the slowest bound-kernel call so far (first-dive cost estimate)
 
+    def early_kernels(calls, cutoff, args):
+        """The shared kernels ``(fbbt, bound)`` while this problem's node kernel for ``calls`` is
+        still being built and they are ready; else None (the node kernel is used). Waits for
+        whichever is ready first, checking the deadline."""
+        if generic is None or (generic.done() and generic.exception() is None and generic.result() is None):
+            return None
+        fut = bound_kernel.ready.get(bound_kernel._key(tuple(calls[0]) + (cutoff,) + tuple(args)))
+        if fut is None:
+            return None
+
+        def built():
+            return fut.done() and (fut.exception() is not None or fut.result().done())
+
+        while not built():
+            if generic.done():
+                return generic.result() if generic.exception() is None else None
+            if _past(deadline):
+                raise _CompileTimeout(bound_kernel.name)
+            time.sleep(0.01)
+        return None
+
+    def run_generic(early, calls, cutoff, k):
+        """``evaluate``'s kernel outputs from the shared kernels: FBBT, then the McCormick bound.
+        No incumbent candidate (``fx`` inf: the local solves start from the LP points)."""
+        gfbbt, gbound = early
+        outs = []
+        for c in calls:
+            if _past(deadline):
+                raise _Deadline("bound")
+            tl, th, te = gfbbt(c[0], c[1], cutoff)
+            lb, x, inf, rlo, rhi = gbound(tl, th, cutoff)
+            lb = jnp.where(te, cutoff, lb)
+            outs.append(jax.block_until_ready((lb, x, jnp.full(lb.shape, jnp.inf), jnp.where(te[:, None], tl, rlo),
+                                               jnp.where(te[:, None], th, rhi), x)))  # fmt: skip
+        return [np.concatenate([np.asarray(o[i]) for o in outs])[:k] for i in range(6)]
+
     def run(kernel, calls, cutoff, k, extra=()):
         """Apply ``kernel`` to each padded call; first ``k`` rows.
 
@@ -1563,7 +1633,12 @@ def minimize(
             blo, bhi, empty = np.where(oe[:, None], blo, olo), np.where(oe[:, None], bhi, ohi), oe
         # a pool switched off by the probe: the zero-row variant skips the rows' LP cost
         args = (jnp.zeros((0, lo.size + 2)), pool_args()[1]) if plain_kernel() else pool_args()
-        lb, x, fx, rlo, rhi, xr = run(bound_kernel, padded(blo, bhi), cutoff, k, args)
+        calls = padded(blo, bhi)
+        early = early_kernels(calls, cutoff, args)
+        if early is not None:
+            lb, x, fx, rlo, rhi, xr = run_generic(early, calls, cutoff, k)
+        else:
+            lb, x, fx, rlo, rhi, xr = run(bound_kernel, calls, cutoff, k, args)
         # a NaN bound carries no information: -inf, never a bound that could prune the box
         # or claim optimality (and np.maximum / min would otherwise spread it to other bounds)
         lb = np.where(np.isnan(lb), -np.inf, lb)
