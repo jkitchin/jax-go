@@ -877,7 +877,6 @@ _POLISH_FIRST = 8  # neighbours in the first batch, before the cost of a solve i
 _POLISH_MIN, _POLISH_FRAC = 2.0, 0.1  # polish time budget: _POLISH_MIN s plus this fraction of the elapsed time
 _NEAR_ZERO_STARTS = 4  # extra random starts for the scaled local solves of a near-zero objective
 _STRICT_FRAC = 1e-3  # repair_incumbent: violation (x feas_tol) above which a reported incumbent is repaired
-_REPAIR_SLACK = 100.0  # repair_incumbent: largest accepted rise of f, in units of feas_tol * (1 + |f|)
 _REPAIR_GAP = 100.0  # a repaired incumbent keeps "optimal" only with fun - lower_bound <= this x the gap tolerance
 _ETA, _M = 2, 4  # branch_var="reliability": observations to trust a pseudocost, strong-branching candidates
 _BAL = 10.0  # branch_var="strong": candidates are at least 1/_BAL as wide as the widest variable
@@ -1410,13 +1409,21 @@ def minimize(
 
         The search accepts points with constraint violation up to ``feas_tol``, and relaxation
         minimizers sit exactly there; a violation of 1e-6 in a sensitive constraint can make
-        ``f`` smaller than the problem's true optimum (st_z, ex8_5_3, ex9_2_3). When the
+        ``f`` smaller than the problem's true optimum (st_z, ex8_5_3, ex9_2_3, jit1). When the
         violation exceeds ``_STRICT_FRAC * feas_tol`` one local solve from ``x`` (integers
         fixed, tight constraint tolerance) looks for a point within that; if it finds one it is
         reported instead, with its own objective value (larger when the violation was helping,
         smaller when the solve also improves the point). Pruning and the lower bound are
         unchanged: they are those of the problem relaxed by ``feas_tol``; the status is
-        re-checked against the new gap (``_status_after_repair``).
+        re-checked against the new gap (``_status_after_repair``), so a repair that costs
+        more than the gap tolerance turns "optimal" into "unproven".
+
+        A strictly feasible point is always preferred, however much ``f`` rises: how much a
+        feas_tol violation is worth depends on the model's scaling (small variables with large
+        objective coefficients make it worth far more than ``feas_tol * |f|``), so a large rise
+        is no sign that the repair went astray; it may be the true cost of feasibility.
+        Keeping the relaxed-feasible ``x`` with status "optimal" could then report a value
+        below the true optimum.
         Returns (x, f(x), note)."""
         strict = _STRICT_FRAC * feas_tol
         v = float(np.asarray(K.viol(jnp.asarray(x[None], dtype=jnp.float64)))[0])
@@ -1429,14 +1436,7 @@ def minimize(
             F, vr = screen(X), np.asarray(K.viol(jnp.asarray(X)))
         except Exception:  # an optional improvement: any failure keeps the incumbent
             return x, fx, ""
-        # The lower bound stays that of the feas_tol-relaxed problem, so a repaired point may only
-        # cost what a feas_tol perturbation plausibly does (a multiplier up to _REPAIR_SLACK) or the
-        # gap tolerance: a local solve that walks far away to strict feasibility (f rising by much
-        # more) likely misses a much better strictly feasible point elsewhere. Then keep the
-        # relaxed-feasible incumbent. (With a large feas_tol even an accepted rise can exceed the
-        # gap tolerance: ``_status_after_repair`` then drops "optimal".)
-        rise = max(abs_tol, rel_tol * abs(fx), _REPAIR_SLACK * feas_tol * (1 + abs(fx)))
-        if np.isfinite(F[0]) and vr[0] <= strict and F[0] <= fx + rise:
+        if np.isfinite(F[0]) and vr[0] <= strict:
             return X[0], float(F[0]), (f"incumbent repaired from violation {v:.2g} to {vr[0]:.2g} "
                                        f"(f {fx:.10g} -> {F[0]:.10g})")  # fmt: skip
         return x, fx, ""

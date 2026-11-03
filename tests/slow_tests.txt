@@ -375,3 +375,4 @@ tests/test_pseudoboolean.py::test_search_side_constraint_not_shortcut
 tests/test_symmetry.py::test_minimize_det_with_symmetry
 tests/test_scan.py::test_minimize_fori
 tests/test_scan.py::test_interpreted_relaxer
+tests/test_incumbent.py::test_badly_scaled_repair_never_reports_below_optimum

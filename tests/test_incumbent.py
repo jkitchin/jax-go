@@ -124,14 +124,38 @@ def test_repaired_incumbent_gap_sets_status():
 @needs_pounce
 def test_incumbent_repair_does_not_walk_away():
     """The feas_tol-feasible minimizer (-5, 0) (f = -5) is strictly feasible only at y = 1 (f = 5),
-    while x ~ 0, y = 0 is strictly feasible with f ~ 0. A repair to (-5, 1) would be reported
-    "optimal" with f = 5 against a lower bound of -5: the relaxed incumbent is kept instead."""
+    while x ~ 0, y = 0 is strictly feasible with f ~ 0. A repair to (-5, 1) (f = 5) against a
+    lower bound of -5 must not be reported "optimal"; it is reported with status "unproven"
+    (the strictly feasible point is kept, and the open gap shows that it may not be optimal)."""
     f = lambda x: x[0] + 10 * x[1]  # noqa: E731
     g = lambda x: jnp.atleast_1d(0.9e-6 * (1 - x[1]) - x[0] * (x[0] + 5) ** 2)  # noqa: E731
     r = minimize(f, np.array([-10.0, 0.0]), np.array([10.0, 2.0]), ineq=g, abs_tol=1e-6, rel_tol=1e-6, feas_tol=1e-6)
     assert r.verified
     if r.status == "optimal":
         assert r.fun - r.lower_bound <= 1e-3 * (1 + abs(r.fun))
+
+
+@needs_pounce
+def test_badly_scaled_repair_never_reports_below_optimum():
+    """Small variables tied to integers by equalities (y = a k, a ~ 1e-4) with large objective
+    sensitivity (sum c / y): a feas_tol violation of each equality is worth ~29 in f, far more
+    than feas_tol * |f| = 0.04. The repair finds the strictly feasible point, which used to be
+    rejected as too costly; the relaxed-feasible point was then reported "optimal" below the true
+    optimum (MINLPLib jit1 has the same structure)."""
+    c, a = jnp.array([7.5, 5.6, 11.2, 8.6]), jnp.array([2.5e-4, 5.1e-4, 6.4e-4, 3.0e-4])
+    f = lambda x: jnp.sum(c / x[:4]) + 1e3 * jnp.sum(x[4:])  # noqa: E731
+    eq = lambda x: x[:4] - a * x[4:]  # noqa: E731
+    lo, hi = np.r_[1e-5 * np.ones(4), np.ones(4)], np.r_[1e-2 * np.ones(4), 3 * np.ones(4)]
+    r = minimize(f, lo, hi, eq=eq, integer=[4, 5, 6, 7], time_limit=120)
+    k = np.round(r.x[4:])
+    exact = float(f(jnp.asarray(np.r_[a * k, k])))  # f at the strictly feasible point with these integers
+    assert r.verified and r.max_violation <= 1e-9
+    assert r.fun >= exact - 1e-6 * abs(exact)  # never below the strict optimum at its own integers
+    assert r.lower_bound <= r.fun
+    if r.status == "optimal":
+        assert r.fun - r.lower_bound <= 100 * max(1e-6, 1e-6 * abs(r.fun))
+    else:
+        assert r.status == "unproven" and "gap" in r.message
 
 
 @needs_pounce
