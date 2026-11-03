@@ -226,7 +226,22 @@ developed on (`CLAUDE.md`).
    structure analysis. So (a) is the remaining lever: a redesign that passes
    the tape arrays (`relax_interp`, `fbbt_interp`, αBB, LP rows) as kernel
    arguments with padded shape buckets instead of baking them in as constants.
-   A multi-day project; not started.
+   A multi-day project; not started. *Spike (2026-11-03, st_e15 / nvs08,
+   pieces compiled alone, batch 16):* the FBBT interpreter compiles in 0.7 s
+   (straight-line: 2.8–3.1 s) and runs in 1.7 ms (0.5–0.8 ms); the interpreted
+   bounder compiles *slower* than the straight-line one (full: 5.4–5.7 s against
+   2.9–3.2 s) and runs 2× slower. So interpretation alone does not cut
+   compile time; the gain must come from compiling an interpreted kernel once
+   per shape bucket and reusing it from the disk cache across problems (also
+   across the instances of one benchmark set, which share a cache directory).
+   Work involved: a fixed opcode set with parameters as data (today the
+   per-opcode branches are built from the opcodes a problem uses, e.g.
+   `integer_pow`'s exponent), tape arrays and schedules as kernel arguments
+   padded to buckets, and the same for αBB, the univariate hulls and the LP
+   rows. First increment: FBBT (`fbbt_interp._propagate_steps`).
+   Smaller waste seen on the way: `pool_judge` starts a second compile of the
+   node kernel (without pool rows) even when the time left (smallinvDAX: 0.5 s)
+   cannot amortize it.
 2. **minlp.org smoke tests** (issue #87). *Blocked on a permission:* the
    instances are GAMS models (480 at minlp.org; 15 small nonlinear ones are
    picked, with sizes, in the session notes). `gamspy` installs GAMS with CONVERT
