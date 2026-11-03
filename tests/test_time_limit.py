@@ -19,8 +19,9 @@ def test_time_limit_covers_compilation():
     assert time.perf_counter() - t < 30  # returns promptly instead of waiting for the compile
     assert r.status == "time_limit"
     assert r.lower_bound == -np.inf and r.nodes == 0
-    # still compiling, or (kernels cached on disk) compiled but past the deadline before the call
-    assert "compiling" in r.message or "before the root bound" in r.message
+    # out of time during setup (checked between its steps), still compiling, or (kernels cached on
+    # disk) compiled but past the deadline before the call
+    assert "during setup" in r.message or "compiling" in r.message or "before the root bound" in r.message
 
 
 def test_time_limit_does_not_affect_normal_solves():

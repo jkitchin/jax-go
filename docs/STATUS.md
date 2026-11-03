@@ -150,6 +150,15 @@ objective coefficients up to 1e7). Test:
 other families (`results/smoke_repair_after*.csv`): same status and node
 counts as before.
 
+Time limit during setup (2026-11-03): the limit was only checked by the
+FBBT compile of `bound_domain` and at the root bound, so the uninterruptible
+setup steps in between (tracing, structure analysis, building the local
+solver) all ran: `eg_disc_s` (8 variables, 110k tape rows) returned after
+275 s with a 60 s limit. The limit is now checked between those steps
+(`out_of_time` in `minimize`, `check_time` in `bound_domain`), so a solve
+overruns by at most one step (`eg_disc_s` with 75 s: 96 s). Smoke check on
+six other instances (`results/smoke_deadline.csv`): unchanged.
+
 Compile and setup work (the largest cold-time cost): kernel cache in memory
 and on disk, two kernels per problem instead of four, Kelley rounds as
 `lax.scan`, lean `.nl` tracing, root OBBT skipped when the root closes the
@@ -185,11 +194,23 @@ developed on (`CLAUDE.md`).
 
 1. **Fixed cost per solve.** The largest and most general cost: a median of
    13.6 s cold for problems SCIP solves at once, and 0 nodes in 60 s on some.
-   Profile one instance from each 0-node family and a few 1-node ones
-   (`benchmarks/profile_root.py`), find where setup time goes (tracing,
-   compile, domain derivation, local-solver build, first bound call), and cut
-   the largest piece. Finish A3 (interpreter thresholds) on the way. This also
-   decides the cold-versus-warm gap.
+   *Profiled (2026-11-03, `profile_root.py`, nvs04, st_e15, nvs08, ex1221,
+   eg_disc_s, ghg_1veh):* on 1-node instances with 2–8 variables about 23 s of
+   wall time is the node kernel: trace 3.5–4 s, XLA compile 13–14 s (HLO about
+   17k lines: FBBT about 7k, the bounder about 10k), run 0.05–0.1 s. Ruled out:
+   XLA flags (`xla_llvm_disable_expensive_passes`,
+   `xla_backend_optimization_level=1`: about 10%, and slower solves);
+   compile contention (1 compile worker instead of 4: no change); splitting
+   FBBT and the bounder into two executables (no gain: compile time is about
+   linear in size); no single relaxation dominates (αBB, univariate envelopes
+   or Kelley off: each about −30%). The levers left are structural:
+   (a) problem-independent kernels (the tape as data, compiled once per shape
+   bucket, so the disk cache serves new problems); (b) a cheap first root bound
+   (interval / McCormick only) while the full kernel compiles, enough to
+   close many root-solved problems; (c) smaller relaxation code (fewer
+   primitive-rule variants per row). Large tapes (`eg_*`: 110k rows on 8
+   variables) spend minutes in tracing alone, in `bound_domain` and the
+   structure analysis.
 2. **minlp.org smoke tests** (issue #87). Stage 1: 10–20 problems with ≤ 50
    variables and constraints against SCIP, to find which algorithmic gaps
    matter on applied models. Stage 2: larger problems.

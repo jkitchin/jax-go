@@ -1,0 +1,3 @@
+solver,name,status,time,primal,dual,nodes,message,load
+jaxglobal,kall_congruentcircles_c72,optimal,18.6671333700001,1.9663144714856196,1.9661733882210524,1877,optimal,2.53
+jaxglobal,st_e15,optimal,22.332922757999995,7.667180068813108,7.667176741435306,1,optimal,2.55

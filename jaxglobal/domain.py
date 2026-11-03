@@ -333,8 +333,15 @@ def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed
         except TimeoutError:
             raise DomainTimeout() from None
 
+    def check_time():
+        """``DomainTimeout`` once the deadline has passed (checked between the steps below, which
+        cannot be interrupted themselves)."""
+        if deadline is not None and time.perf_counter() > deadline:
+            raise DomainTimeout()
+
     def tighten(cutoff):
         nonlocal lo, hi
+        check_time()
         a, b, empty = fb(jnp.asarray(lo), jnp.asarray(hi), jnp.asarray(cutoff, jnp.float64))
         lo, hi = np.maximum(lo, np.asarray(a)), np.minimum(hi, np.asarray(b))
         return bool(empty)
@@ -343,6 +350,7 @@ def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed
         return lo, hi, True, None, np.inf
     free = ~(np.isfinite(lo) & np.isfinite(hi))
     if free.any():
+        check_time()
         unused = free & ~used_variables(f, ineq, eq, lo.size)
         pt = np.clip(0.0, lo, hi)
         lo, hi = np.where(unused, pt, lo), np.where(unused, pt, hi)
@@ -354,6 +362,7 @@ def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed
         for _ in range(_SETTLE_ROUNDS):
             if np.all(np.isfinite(lo)) and np.all(np.isfinite(hi)):
                 return
+            check_time()
             if not struct:
                 struct.append(_row_structure(f, ineq, eq, lo.size))
             if struct[0] is None:

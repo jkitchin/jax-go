@@ -1112,7 +1112,8 @@ def minimize(
     seed_x, seed_f = None, np.inf
     imask = _integer_mask(integer, lo.size)
     _mark("bound_domain")
-    if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
+    derived = not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi)))
+    if derived:
         # derive finite bounds from the constraints and a feasible point (domain.py)
         try:
             lo, hi, infeasible0, seed_x, seed_f = bound_domain(f, ineq, eq, lo, hi, feas_tol=feas_tol,
@@ -1137,6 +1138,25 @@ def minimize(
                 converged=bool(infeasible0), iterations=0, nodes=0, time=time.perf_counter() - t0,
                 status=status, message="" if infeasible0 else f"no finite bounds found for variables {free.tolist()}",
             )  # fmt: skip
+
+    def out_of_time(where):
+        """The result when the time limit runs out during setup, before any bound: the feasible
+        point found while deriving bounds, if any. None while there is time left. The setup
+        steps (tracing, structure analysis, building the local solver) cannot be interrupted,
+        so the limit is checked between them: a solve overruns by at most one step."""
+        if time.perf_counter() - t0 <= time_limit:
+            return None
+        x = np.asarray(seed_x if seed_x is not None else np.clip(np.zeros(lo.size), lo, hi), dtype=np.float64)
+        fun = float(seed_f) if seed_x is not None else np.inf
+        maxv, verified, _ = _verify(f, ineq, eq, x, fun, lo_user, hi_user, feas_tol, integer=imask) \
+            if seed_x is not None else (np.inf, False, "")  # fmt: skip
+        return Result(x=x, fun=fun, lower_bound=-np.inf, converged=False, iterations=0, nodes=0,
+                      time=time.perf_counter() - t0, status="time_limit",
+                      message=f"time_limit reached {where}; no bound computed",
+                      max_violation=maxv, verified=verified)  # fmt: skip
+
+    if derived and (late := out_of_time("while deriving bounds")) is not None:
+        return late
     _mark("setup")
     if imask.any():
         lo, hi = _round_bounds(lo, hi, imask)
@@ -1176,6 +1196,8 @@ def minimize(
                            lambda: _pool_parts(f, ineq, eq, lo.size, bool(safe)))  # fmt: skip
         if parts_ok is not None:
             pmask, exact, convex = parts_ok(lo, hi, convex=True)
+    if (late := out_of_time("during setup (convexity analysis)")) is not None:
+        return late
     _mark("kernels")
     opts = dict(n_fw=n_fw, n_kelley=n_kelley, fbbt=bool(fbbt), fbbt_rounds=fbbt_rounds, dbbt=bool(dbbt),
                 obbt=obbt or False, obbt_rounds=obbt_rounds, univariate=univariate, alphabb=alphabb,
@@ -1276,6 +1298,8 @@ def minimize(
     if pool is not None and padded.mesh is None:  # for the pool kernel without rows (pool_judge)
         pool["fp"] = fp
     # integer variables are split even where they enter linearly: that is what makes them integral
+    if (late := out_of_time("during setup (building the kernels)")) is not None:
+        return late
     _mark("nonlinear")
     nl = K.nonlinear(lo.size)
     if nl is None:
@@ -1283,6 +1307,8 @@ def minimize(
     elif not nl.any():
         nl = np.ones(lo.size, bool)  # as nonlinear_variables: nothing nonlinear, split anything
     branchable = nl | imask
+    if (late := out_of_time("during setup (structure analysis)")) is not None:
+        return late
     _mark("quadratic")
     quad = K.quadratic(lo.size) if constrained else None  # the lifted quadratic LP's form, if used
     lf = K.lifted_form(lo.size, sym_seconds) if constrained and not lifted else None
@@ -1301,6 +1327,8 @@ def minimize(
         sym_moved = np.any(P != np.arange(lo.size), axis=0)  # (the support of the elements kept)
     width0 = np.where(branchable, width0, np.inf)  # never split linear variables
 
+    if (late := out_of_time("during setup (quadratic and symmetry analysis)")) is not None:
+        return late
     _mark("make_local")
     solve_local = _cached(("local", f, ineq, eq, local_solver, lo.tobytes(), hi.tobytes()),
                           lambda: make_local(f, ineq, eq, lo, hi, local_solver, patterns=K.structure(lo.size)))
