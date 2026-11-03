@@ -239,3 +239,26 @@ def test_precompiled_builds_are_tracked():
     assert fut in kcache._BUILDS
     assert kcache.wait_for_builds(60.0)
     assert kcache._settled(fut)
+
+
+_SCRIPT_EXIT = """
+import time
+from jaxglobal import kcache
+pool = kcache.DaemonExecutor(2, "test")
+futs = [pool.submit(lambda i=i: i * 10) for i in range(5)]  # FIFO on bounded workers
+assert [f.result(30) for f in futs] == [0, 10, 20, 30, 40]
+err = pool.submit(lambda: 1 / 0)
+assert isinstance(err.exception(30), ZeroDivisionError)
+kcache.track(pool.submit(time.sleep, 300))  # a build still running when the main thread is done
+print("main done", flush=True)
+"""
+
+
+def test_daemon_executor_does_not_hold_the_process():
+    """Background builds still running at exit do not keep the process alive (minimize's time limit)."""
+    env = dict(os.environ, PYTHONPATH=str(ROOT), JAX_PLATFORMS="cpu")
+    t = time.perf_counter()
+    r = subprocess.run([sys.executable, "-c", _SCRIPT_EXIT], env=env, capture_output=True, text=True, timeout=240)
+    assert r.returncode == 0 and "main done" in r.stdout, r.stdout + r.stderr
+    assert "Traceback" not in r.stderr, r.stderr
+    assert time.perf_counter() - t < 120  # (the sleep alone takes 300 s)

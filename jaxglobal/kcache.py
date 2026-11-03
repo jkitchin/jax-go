@@ -31,11 +31,12 @@ from __future__ import annotations
 
 import hashlib
 import os
+import queue
 import re
 import tempfile
 import threading
 import time
-from concurrent.futures import CancelledError
+from concurrent.futures import CancelledError, Future
 from concurrent.futures import TimeoutError as FutureTimeout  # (not the builtin before 3.11)
 
 import jax
@@ -107,6 +108,42 @@ def wait_for_builds(timeout):
             if not hasattr(fut, "result") or not hasattr(fut, "done"):
                 break
     return True
+
+
+class DaemonExecutor:
+    """``submit(fn, *args) -> Future`` on at most ``workers`` daemon threads, first in first out.
+
+    For the background kernel builds. ``ThreadPoolExecutor``'s threads are joined at
+    interpreter exit, so a process whose ``minimize`` returned at its time limit would
+    stay alive until every queued trace and compile finished (minutes on a large
+    model). Daemon threads are not joined: the process exits once the main thread is
+    done, and builds still running are abandoned. A caller that wants them finished
+    (to fill the disk caches) waits with ``wait_for_builds`` first."""
+
+    def __init__(self, workers, name):
+        self._workers, self._name = workers, name
+        self._queue, self._threads, self._lock = queue.SimpleQueue(), [], threading.Lock()
+
+    def submit(self, fn, *args, **kwargs):
+        fut = Future()
+        self._queue.put((fut, fn, args, kwargs))
+        with self._lock:
+            if len(self._threads) < self._workers:  # (idle workers just block on the queue)
+                t = threading.Thread(target=self._work, name=f"{self._name}_{len(self._threads)}", daemon=True)
+                self._threads.append(t)
+                t.start()
+        return fut
+
+    def _work(self):
+        while True:
+            fut, fn, args, kwargs = self._queue.get()
+            if not fut.set_running_or_notify_cancel():
+                continue
+            try:
+                fut.set_result(fn(*args, **kwargs))
+            except BaseException as e:  # noqa: BLE001  (reported through the future)
+                fut.set_exception(e)
+            del fut, fn, args, kwargs  # (drop references while waiting for the next item)
 
 
 def cache_root():

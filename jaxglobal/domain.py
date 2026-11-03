@@ -28,7 +28,6 @@ the global optimum value is preserved.
 from __future__ import annotations
 
 import time
-from concurrent.futures import ThreadPoolExecutor
 
 import jax
 import jax.numpy as jnp
@@ -325,7 +324,7 @@ def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed
     fb = jax.jit(make_fbbt(f, ineq, eq, rounds=rounds, feas_tol=feas_tol))
     if deadline is not None and np.isfinite(deadline):
         if not _POOL:
-            _POOL.append(ThreadPoolExecutor(1, thread_name_prefix="jaxglobal-domain"))
+            _POOL.append(kcache.DaemonExecutor(1, "jaxglobal-domain"))
         spec = jax.ShapeDtypeStruct(lo.shape, jnp.float64)
         fut = kcache.track(_POOL[0].submit(lambda: fb.trace(spec, spec, jax.ShapeDtypeStruct((), jnp.float64)).lower().compile()))
         try:

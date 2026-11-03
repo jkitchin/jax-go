@@ -250,11 +250,8 @@ _POOLS = []
 
 def _pools():
     """(tracer, compiler) thread pools for ``_Precompiled``, created on first use."""
-    if not _POOLS:
-        from concurrent.futures import ThreadPoolExecutor
-
-        _POOLS.extend([ThreadPoolExecutor(1, thread_name_prefix="jaxglobal-trace"),
-                       ThreadPoolExecutor(4, thread_name_prefix="jaxglobal-compile")])  # fmt: skip
+    if not _POOLS:  # (daemon threads: builds still running when the process ends do not keep it alive)
+        _POOLS.extend([kcache.DaemonExecutor(1, "jaxglobal-trace"), kcache.DaemonExecutor(4, "jaxglobal-compile")])
     return _POOLS
 
 
