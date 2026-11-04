@@ -340,9 +340,16 @@ need; the difference is in how bounds improve per split and in node
 throughput (SCIP about 1,500 nodes/s here, jaxglobal about 285).
 `branch_point="relax"` (split at the relaxation point, pulled toward the
 midpoint) is mixed: wastewater15m1 bound 2,124 → 2,217, ex5_4_4 8,580 →
-8,151, ex7_3_5 0.146 → 0.0 (383 nodes instead of 3,059). Next diagnostic:
-bound progress per node against SCIP's on the same model, to tell per-node
-bound quality from branching choice.
+8,151, ex7_3_5 0.146 → 0.0 (383 nodes instead of 3,059).
+*Bound per node against SCIP (`benchmarks/scip_bound_per_node.py`):*
+jaxglobal needs about 10× more nodes than SCIP for the same bound.
+wastewater15m1: SCIP 1,984 / 2,175 / 2,426 at 1,000 / 3,000 / 10,000 nodes,
+jaxglobal 2,054 / 2,248 / 2,400 at 11,223 / 36,823 / 112,343; ex5_4_4: SCIP
+solves at 1,328 nodes, jaxglobal at about 9,150. With SCIP's ~4× node rate
+(1,500 against ~370 nodes/s) that is ~40× in time, of which per-node
+effectiveness is the larger factor: from the same root bound, each split
+raises jaxglobal's bound much less. Candidates: the child boxes' bounds
+(range reduction and propagation after a split) and the branching variable.
 
 ## What is next
 
