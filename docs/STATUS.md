@@ -261,9 +261,27 @@ ex9_1_5, ex9_1_8, two of them with truly unbounded feasible sets), none
 wrong. The other 12 now run instead of being refused: ex8_1_4, ex8_1_5,
 mhw4d and ex9_1_2 find the optimum but cannot prove it (boxes that touch
 `t = ±1` keep a bound of −∞); ex8_5_1/2/6, prob07 and prolog do not get past
-setup in 60 s; wallfix finds no feasible point. Next for this group: valid
-bounds on the boxes at `t = ±1` (the functions' behaviour as `x → ∞`), and
-why the five stall in setup.
+setup in 60 s; wallfix finds no feasible point.
+
+*Sublevel-set bounds for polynomial objectives (2026-11-04,
+`domain.coercive_bounds`):* boxes touching `t = ±1` were not the only problem:
+near the endpoint the relaxations are loose by many orders of magnitude
+(six-hump camel, `t₁ ∈ [0.99, 0.9999]`: bound −1.0e15 where the minimum is
+5.0e9), because large terms cancel (`x₁⁶ − 2.1x₁⁴`, `x₁x₂ − 4x₂²`). So the
+bounds are now derived before compactification: for a polynomial `f` (from
+`quadratic.polynomial_form`), Young's inequality bounds every mixed monomial by
+pure powers, giving `f(x) ≥ const + Σ h_i(|x_i|)` with univariate `h_i`; with
+the cutoff `f ≤ ub` from the feasible point, each `h_j` with a positive leading
+coefficient confines `|x_j|` to a Cauchy-type radius (rigorous, widened for
+rounding). ex8_1_5 gets `[−2.6, 2.6] × [−1.13, 1.13]`. On the five
+unconstrained or polynomial unsupported models (`results/coercive_unconstrained.csv`):
+ex8_1_4, ex4_1_5 and ex8_1_5 now solve (9–14 s cold); least (exponential,
+not polynomial) and mhw4d (a cubic term: not coercive) do not. Regression
+check on 12 solved models with unbounded variables
+(`results/coercive_regression.csv`): same status and node counts.
+**Unsupported group now: 7 of 16 solved.** Left: ex9_1_2 (bound stalls at
+−17 against −16), mhw4d and least (optimum found, not proven), wallfix (no
+feasible point), and ex8_5_1/2/6, prob07, prolog (no node in 60 s).
 
 ## What is next
 

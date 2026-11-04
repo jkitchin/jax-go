@@ -151,6 +151,127 @@ def _row_upper(f, ineq, eq, lo, hi):
     return _row_upper_fn(f, ineq, eq, np.asarray(lo).size)(lo, hi)
 
 
+# ---------------------------------------------------------------------------------------------
+# Sublevel-set bounds of a polynomial objective (``coercive_bounds``)
+# ---------------------------------------------------------------------------------------------
+
+_COERCIVE_SLACK = 1e-9  # relative outward widening of every derived quantity (rounding)
+
+
+def polynomial_terms(f, n):
+    """``(const, [(coef, exponents)])`` of ``f`` when it is a polynomial (``quadratic.polynomial_form``
+    of the objective alone, degree at most ``quadratic.MAX_DEGREE``), else None."""
+    from .quadratic import polynomial_form
+
+    try:
+        Q = polynomial_form(f, None, None, n, sym_seconds=0.0)
+    except Exception:
+        return None
+    if Q is None or Q.n_g or Q.n_h:
+        return None
+    N = Q.E.shape[1]
+    ex = np.zeros((N, n), np.int64)
+    ex[np.arange(n), np.arange(n)] = 1
+    for p, (a, b) in enumerate(Q.pairs):  # a lifted column is the product of two earlier columns
+        ex[n + p] = ex[a] + ex[b]
+    return float(Q.c[0]), [(float(Q.E[0, k]), ex[k]) for k in range(N) if Q.E[0, k] != 0.0]
+
+
+def _separable(terms, n):
+    """Coefficients ``B (n, D+1)`` with ``f(x) >= const + sum_i sum_k B[i, k] |x_i|^k`` for all x.
+
+    A pure power ``a x_i^k`` gives ``a`` (k even) or ``-|a|`` (k odd: its sign is unknown); a mixed
+    monomial ``c prod x_i^e_i`` of degree ``D`` is at least ``-|c| sum_i (e_i / D) |x_i|^D`` (Young's
+    inequality ``prod |x_i|^e_i <= sum_i (e_i / D) |x_i|^D``), and at least 0 when ``c > 0`` and every
+    ``e_i`` is even."""
+    D = max((int(e.sum()) for _, e in terms), default=0)
+    B = np.zeros((n, D + 1))
+    for c, e in terms:
+        nz = np.flatnonzero(e)
+        d = int(e.sum())
+        if nz.size == 1:
+            i, k = int(nz[0]), int(e[nz[0]])
+            B[i, k] += c if k % 2 == 0 else -abs(c) * (1 + _COERCIVE_SLACK)
+        elif not (c > 0 and np.all(e[nz] % 2 == 0)):
+            for i in nz:
+                B[i, d] -= abs(c) * e[i] / d * (1 + _COERCIVE_SLACK)
+    return B
+
+
+def _cauchy_radius(b, c):
+    """A radius ``R`` with ``sum_k b[k] r^k > c`` for every ``r > R`` (``b[-1] > 0``): for ``r >= 1``
+    the polynomial minus ``c`` is at least ``b_d r^(d-1) (r - sum_(k<d) |b'_k| / b_d)``."""
+    bp = np.array(b, np.float64)
+    bp[0] -= c
+    d = len(bp) - 1
+    return max(1.0, float(np.sum(np.abs(bp[:d])) / bp[d])) * (1 + _COERCIVE_SLACK) + _COERCIVE_SLACK
+
+
+def _min_on(b, rlo, rhi, pieces=512):
+    """A lower bound of ``h(r) = sum_k b[k] r^k`` on ``[rlo, rhi]`` (``0 <= rlo``, ``rhi`` may be inf):
+    interval evaluation on ``pieces`` subintervals (``r^k`` is increasing on r >= 0, so a positive
+    coefficient takes its value at the left end, a negative one at the right end); beyond the
+    Cauchy radius of ``h > 0`` it is positive. ``-inf`` when ``h`` is not bounded below there."""
+    b = np.trim_zeros(np.asarray(b, np.float64), "b")
+    if b.size == 0:
+        return 0.0
+    if not np.isfinite(rhi):
+        if b.size == 1 or b[-1] <= 0:
+            return -np.inf if b.size > 1 else float(b[0])
+        rhi = max(rlo, _cauchy_radius(b, 0.0))
+        tail = 0.0  # h > 0 beyond rhi
+    else:
+        tail = np.inf
+    a = np.linspace(rlo, rhi, pieces + 1)
+    lo_end, hi_end = a[:-1], a[1:]
+    k = np.arange(b.size)
+    vals = np.where(b[None, :] > 0, b[None, :] * lo_end[:, None] ** k, b[None, :] * hi_end[:, None] ** k).sum(1)
+    m = float(np.min(vals))
+    m -= _COERCIVE_SLACK * (1 + np.abs(b) @ (max(rhi, 1.0) ** k))
+    return min(m, tail)
+
+
+def coercive_bounds(f, lo, hi, cutoff, rounds=2):
+    """Bounds on the variables from ``f(x) <= cutoff`` when ``f`` is a polynomial that grows in them.
+
+    ``f(x) >= const + sum_i h_i(|x_i|)`` with univariate ``h_i`` (``_separable``). A point with
+    ``f <= cutoff`` therefore has ``h_j(|x_j|) <= cutoff - const - sum_(i != j) min h_i`` (the minima
+    over each variable's range of ``|x_i|``), and where ``h_j``'s leading coefficient is positive that
+    confines ``|x_j|`` to a radius (``_cauchy_radius``). This is the sublevel-set argument interval
+    FBBT cannot make when large terms cancel (``x^6 - 6.3 x^4``, ``x y - 4 y^2``). Every point of
+    ``[lo, hi]`` with ``f <= cutoff`` stays in the returned box."""
+    lo, hi = np.array(lo, np.float64), np.array(hi, np.float64)
+    if not np.isfinite(cutoff):
+        return lo, hi
+    pt = polynomial_terms(f, lo.size)
+    if pt is None:
+        return lo, hi
+    const, terms = pt
+    B = _separable(terms, lo.size)
+    for _ in range(rounds):
+        rlo = np.where(lo > 0, lo, np.where(hi < 0, -hi, 0.0))
+        rhi = np.maximum(np.abs(lo), np.abs(hi))
+        mins = np.array([_min_on(B[i], rlo[i], rhi[i]) for i in range(lo.size)])
+        if not np.all(np.isfinite(mins)) and np.sum(~np.isfinite(mins)) > 1:
+            return lo, hi  # two parts unbounded below: no variable can be confined
+        changed = False
+        for j in range(lo.size):
+            if np.isfinite(lo[j]) and np.isfinite(hi[j]):
+                continue
+            others = np.sum(np.delete(mins, j))
+            b = np.trim_zeros(B[j], "b")
+            if not np.isfinite(others) or b.size < 2 or b[-1] <= 0:
+                continue
+            c = cutoff - const - others
+            c += _COERCIVE_SLACK * (1 + abs(c))
+            R = _cauchy_radius(b, c)
+            lo[j], hi[j] = max(lo[j], -R), min(hi[j], R)
+            changed = True
+        if not changed:
+            break
+    return lo, hi
+
+
 def monotone_bounds(f, ineq, eq, lo, hi, integer=None, struct=None):
     """Finite bounds for free variables that only ever help by moving toward a bound.
 
@@ -438,6 +559,12 @@ def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed
             if tighten(cutoff):  # cannot happen for a truly feasible point; be safe
                 lo, hi = keep
             settle(cutoff)
+            if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
+                check_time()
+                keep = lo.copy(), hi.copy()
+                lo, hi = coercive_bounds(f, lo, hi, cutoff)
+                if tighten(cutoff):  # (cannot happen: every point with f <= cutoff stays in the box)
+                    lo, hi = keep
         linear(cutoff)
         settle(cutoff)
         if xf is not None:

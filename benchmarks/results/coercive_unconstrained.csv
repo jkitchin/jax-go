@@ -1,0 +1,6 @@
+solver,name,status,time,primal,dual,nodes,message,load
+jaxglobal,ex8_1_4,optimal,14.331710406000013,0.0,0.0,25,optimal,0.25
+jaxglobal,ex4_1_5,optimal,14.363406491999996,0.0,0.0,25,optimal,0.25
+jaxglobal,ex8_1_5,optimal,9.08704057,-1.0316284534898,-1.0316388934686782,39,optimal,1.13
+jaxglobal,least,time_limit,60.346381611,14085.1398489284,0.0,198459,time_limit,1.13
+jaxglobal,mhw4d,time_limit,60.22378552300003,0.029310830720598834,nan,10999,time_limit,1.97

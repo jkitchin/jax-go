@@ -2,6 +2,7 @@
 
 import pathlib
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -260,3 +261,31 @@ def test_jitted_sweeps_match_eager(case, monkeypatch):
         mb = D.monotone_bounds(f, g, h, lo.copy(), hi.copy(), struct=s) if s is not None else None
         out[mode] = (D.used_variables(f, g, h, lo.size), rows, mb, D.bound_domain(f, g, h, lo, hi)[:3])
     assert _same(out["jit"], out["eager"])
+
+
+# ---------------------------------------------------------------- sublevel-set bounds (domain.coercive_bounds)
+
+
+def test_coercive_bounds_contain_the_sublevel_set():
+    """Six-hump camel, free variables: the box from f <= cutoff contains every sampled point with
+    f <= cutoff (and both global minimizers), and is finite."""
+    from jaxglobal.domain import coercive_bounds
+
+    f = lambda x: 4 * x[0] ** 2 - 2.1 * x[0] ** 4 + x[0] ** 6 / 3 + x[0] * x[1] - 4 * x[1] ** 2 + 4 * x[1] ** 4  # noqa: E731
+    cutoff = 0.5
+    lo, hi = coercive_bounds(f, np.array([-INF, -INF]), np.array([INF, INF]), cutoff)
+    assert np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))
+    X = np.random.default_rng(0).uniform(-6, 6, (400000, 2))
+    fv = np.asarray(jax.vmap(f)(jnp.asarray(X)))
+    inside = X[fv <= cutoff]
+    assert inside.size and np.all(inside >= lo) and np.all(inside <= hi)
+    for xm in ([0.0898, -0.7126], [-0.0898, 0.7126]):
+        assert np.all(np.array(xm) >= lo) and np.all(np.array(xm) <= hi)
+
+
+def test_coercive_bounds_leave_non_coercive_polynomials_alone():
+    from jaxglobal.domain import coercive_bounds
+
+    for f in (lambda x: x[0] ** 3 + x[1] ** 2, lambda x: x[0] ** 4 - 3 * x[0] ** 3 * x[1] + x[1] ** 2):
+        lo, hi = coercive_bounds(f, np.array([-INF, -INF]), np.array([INF, INF]), 1.0)
+        assert not np.isfinite(lo[0]) or not np.isfinite(hi[0])
