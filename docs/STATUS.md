@@ -301,8 +301,33 @@ developed on (`CLAUDE.md`).
    So a shared pipeline does not need αBB or univariate hulls, but must have
    the lifted LP (the main bounder of two thirds of the models) and the
    convexity outer approximation, plus OBBT, the dives and the local
-   solver's functions. *Next increment:* the lifted LP
-   (`quadratic.make_quadratic_bounder`) with the `QuadraticForm` as data. Also seen: `ex1221`
+   solver's functions.
+   *Increment 3 done (2026-11-04): `jaxglobal/quadratic_generic.py`,* the
+   lifted LP with the `QuadraticForm` as data (padded block layout; no
+   separation pool or lattice). Bounds agree with `make_quadratic_bounder` to
+   LP accuracy (`tests/test_quadratic_generic.py`).
+   *Whole-pipeline measurement (`bnb.GENERIC_ONLY`, experiment):* every node
+   bounded by shared kernels only (shared FBBT, then the shared lifted LP or
+   McCormick bound, with `f` at the LP point as the incumbent candidate);
+   root OBBT, cut pool and dives off. On the 20 instances
+   (`results/tight_genonly_*.csv`): solved 11 cold / 12 warm, against the
+   defaults' 14 cold / 16 warm; on the 11 solved cold by both, 162 s against
+   148 s. Three causes, each measured:
+   1. The shared kernels are 3–6× slower per node (row-by-row interpretation):
+      inscribedsquare01 5,835 nodes in 43 s against 5,775 in 13 s with the
+      problem's own McCormick kernel; kriging_peaks-red030 747 nodes in 60 s
+      against 973 in 11.6 s.
+   2. A cold compile of the shared kernels for a new bucket costs 20–50 s
+      (mathopt5_8: 55.7 s cold, 5 s warm), which on this sample cancels the
+      per-problem compiles saved.
+   3. Missing pieces: cvxnonsep_normcon30 (convexity certificates), nous1
+      (root OBBT or the cut pool), fac2.
+   So the redesign as built does not reach the warm ceiling: interpretation
+   costs per-node speed and the shared kernels are large to compile. Reaching
+   it would need shared kernels that are both fast per node and cheap to
+   compile (e.g. the scheduled interpreter over a fixed opcode table with
+   vectorized steps), plus the missing pieces; open whether that is
+   achievable. `GENERIC_ONLY` stays off. Also seen: `ex1221`
    (same structure as `st_e15`) solves in 4 s cold because the existing
    per-problem disk cache, keyed by the model's fingerprint, already serves
    structurally identical models.
