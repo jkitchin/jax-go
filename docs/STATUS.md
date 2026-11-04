@@ -283,6 +283,38 @@ check on 12 solved models with unbounded variables
 −17 against −16), mhw4d and least (optimum found, not proven), wallfix (no
 feasible point), and ex8_5_1/2/6, prob07, prolog (no node in 60 s).
 
+### The bound-limited group (2026-11-04)
+
+Option sweep on the 23 bound-limited or "both" failures (cold, 60 s, two at
+a time; `results/bl_sweep_{default,obbttree,strong,lifted}.csv`): relative
+bound gap per instance and setting.
+
+- No existing option fixes the group; each helps some and hurts others.
+  `obbt="tree"` solves inscribedsquare02 (gap 0.48 → 5e-6) but runs 10–200×
+  fewer nodes and widens most other gaps. `branch_var="strong"` solves tln4
+  and narrows tln5 (0.051 → 0.018), ex1252a (0.065 → 0.015) and ex8_4_4
+  (0.35 → 0.054), but loses both convex models.
+- `lifted=True` reaches 0 nodes on every instance in 60 s: the general lifted
+  LP is unusable at this size (opt-in; to be looked at separately).
+- Since the October re-run, cvxnonsep_normcon40, cvxnonsep_pcon40 and
+  kall_diffcircles_8 solve with the defaults; chenery and ex8_4_4 reach at
+  most one node cold (setup-bound, not bound-limited).
+- SCIP also fails on kall_circles_c6a/c6b/c6c/c7a (gaps 0.65–0.74 here): poor
+  targets.
+- The SCIP-solved ones that remain: packing models with distance constraints
+  (pointpack08, himmel16, kall_circlespolygons_c1p13,
+  kall_circlesrectangles_c1r13, inscribedsquare02; gaps 1–48%), pooling-like
+  bilinear models with wide declared ranges (wastewater15m1: 16 variables
+  of width up to 1e6, gap 0.14; ex5_4_4 0.29; ex7_3_5 0.55), nested `exp`
+  products (ex14_1_7, absolute gap 322 at optimum 0), integer bilinear
+  (tln4, tln5), ex1252a.
+
+Evidence for the next step: the two options that help (tree OBBT on a
+packing model, strong branching on integer bilinear models) help where they
+are applied and hurt through their cost elsewhere. That points to using
+them selectively (a budgeted tree OBBT, reliability-style strong branching
+on integer variables) rather than to a new relaxation; to be measured.
+
 ## What is next
 
 In priority order, based on the measurements above. Work from smoke tests
