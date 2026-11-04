@@ -350,6 +350,19 @@ solves at 1,328 nodes, jaxglobal at about 9,150. With SCIP's ~4× node rate
 effectiveness is the larger factor: from the same root bound, each split
 raises jaxglobal's bound much less. Candidates: the child boxes' bounds
 (range reduction and propagation after a split) and the branching variable.
+*One-node split oracle (`benchmarks/split_oracle.py`, wastewater15m1, root
+bound 975.4, gap ~1,470):* no single split helps: the best of 33 variables
+raises the weaker child's bound by 0.020 (midpoint) or 0.054 (relaxation
+point); jaxglobal's own pick ranks 3rd; OBBT on the children adds nothing.
+SCIP gains ~374 in its first 100 nodes from the same root bound. So neither
+the variable choice nor child range reduction is the cause: the relaxation
+barely responds to a smaller box. Hypothesis to test next: the lifted LP's
+product columns get their ranges only from their factors' ranges, while
+propagation (FBBT) can bound the products themselves far more tightly
+(pooling quality constraints bound flow × concentration directly); SCIP
+keeps such bounds on its auxiliary variables and uses them in the facets.
+This is the documented open item "FBBT's tightened intermediate ranges are
+not yet fed back into the relaxations".
 
 ## What is next
 
