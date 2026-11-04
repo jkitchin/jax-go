@@ -228,6 +228,10 @@ SYM_SHARE = 0.1  # symmetry detection: at most this share of time_limit (and sym
 # shared ones for each new bucket added CPU work. It pays only once the whole root pipeline is
 # shared (docs/STATUS.md).
 GENERIC_EARLY = False
+# Experiment (off): bound every node with the shared kernels only (shared FBBT, then the shared lifted
+# LP where minimize would use the lifted LP, else the shared McCormick bound), never compiling the
+# problem's own node kernel. Root OBBT, the cut pool and the dives are off (not shared yet).
+GENERIC_ONLY = False
 SAFE_DEFAULT = False  # outward rounding of every bound; set after measuring its overhead (docs/ROADMAP.md)
 _CACHE = OrderedDict()
 _CACHE_SIZE = 32
@@ -900,16 +904,23 @@ def _auto_branch_var(imask):
 _GENERIC_POOL = []
 
 
-def _generic_kernels(f, ineq, eq, lo, hi, imask, rounds, feas_tol, safe, n_kelley, batch):
-    """``(fbbt, bound)``: the shared kernels for the problem (``fbbt_generic``, ``bound_generic``),
-    loaded or compiled for ``batch`` boxes; None when the problem does not encode."""
+def _generic_kernels(f, ineq, eq, lo, hi, imask, rounds, feas_tol, safe, n_kelley, batch, lifted_form=None):
+    """``(fbbt, bound)``: the shared kernels for the problem (``fbbt_generic``, then
+    ``quadratic_generic`` on ``lifted_form`` when given, else ``bound_generic``), loaded or
+    compiled for ``batch`` boxes; None when the problem does not encode."""
     from .bound_generic import make_generic_bounder
     from .fbbt_generic import make_generic_fbbt
+    from .quadratic_generic import make_generic_quadratic_bounder
 
     n = lo.size
     integer = tuple(int(i) for i in np.flatnonzero(imask))
     fb = make_generic_fbbt(f, ineq, eq, n=n, rounds=rounds, feas_tol=feas_tol, safe=safe, integer=integer)
-    gb = make_generic_bounder(f, ineq, eq, n=n, tol=feas_tol, safe=safe, n_kelley=n_kelley) if fb is not None else None
+    if fb is None:
+        return None
+    if lifted_form is not None:
+        gb = make_generic_quadratic_bounder(lifted_form, n, tol=feas_tol, safe=safe, n_kelley=n_kelley)
+    else:
+        gb = make_generic_bounder(f, ineq, eq, n=n, tol=feas_tol, safe=safe, n_kelley=n_kelley)
     if gb is None:
         return None
     L, H = np.tile(lo, (batch, 1)), np.tile(hi, (batch, 1))
@@ -1131,6 +1142,8 @@ def minimize(
     ``devices=jax.devices()[:1]`` to disable splitting).
     """
     t0 = time.perf_counter()
+    if GENERIC_ONLY:
+        obbt, cut_pool = False, 0
     lo = np.asarray(lo, dtype=np.float64)
     hi = np.asarray(hi, dtype=np.float64)
     lo_user, hi_user = lo, hi
@@ -1307,7 +1320,8 @@ def minimize(
     if padded.mesh is None:  # compile the kernels in the background while the setup below runs
         fp = functools.partial(K.fingerprint, lo.size) if kcache.cache_root() else None
         for b in padded.sizes:
-            bound_kernel.start(b, lo.size, fp, extra)
+            if not GENERIC_ONLY:
+                bound_kernel.start(b, lo.size, fp, extra)
         if obbt == "tree":  # obbt="root": started once the root shows OBBT will run (``need_obbt``)
             for b in padded.sizes:
                 K.obbt.start(b, lo.size, fp)
@@ -1322,7 +1336,7 @@ def minimize(
         generic = kcache.track(_GENERIC_POOL[0].submit(_generic_kernels, f, ineq, eq, lo, hi, imask, fbbt_rounds,
                                                   feas_tol, bool(safe), n_kelley, min(padded.sizes)))  # fmt: skip
     _mark("start_dive_compile")
-    if K.dive is not None and padded.mesh is None:  # the dive kernel too, traced after the others
+    if K.dive is not None and padded.mesh is None and not GENERIC_ONLY:  # the dive kernel too, traced after the others
         box, cut = jax.ShapeDtypeStruct((_DIVES, lo.size), jnp.float64), jax.ShapeDtypeStruct((), jnp.float64)
         flag, step = jax.ShapeDtypeStruct((_DIVES,), jnp.bool_), jax.ShapeDtypeStruct((), jnp.int32)
         K.dive.start(_DIVES, lo.size, fp, args=(box, box, box, cut, flag, step, step))
@@ -1343,6 +1357,11 @@ def minimize(
     _mark("quadratic")
     quad = K.quadratic(lo.size) if constrained else None  # the lifted quadratic LP's form, if used
     lf = K.lifted_form(lo.size, sym_seconds) if constrained and not lifted else None
+    if GENERIC_ONLY and padded.mesh is None:
+        if not _GENERIC_POOL:
+            _GENERIC_POOL.append(kcache.DaemonExecutor(1, "jaxglobal-generic"))
+        generic = kcache.track(_GENERIC_POOL[0].submit(_generic_kernels, f, ineq, eq, lo, hi, imask, fbbt_rounds,
+                                                  feas_tol, bool(safe), n_kelley, min(padded.sizes), lf))  # fmt: skip
     if lf is not None and lf.flip >= 0 and np.all(lo[imask] == 0.0) and np.all(hi[imask] == 1.0):
         lo = lo.copy()  # complement symmetry (quadratic._flip): x_flip = 1 keeps an optimal point
         lo[lf.flip] = 1.0
@@ -1634,7 +1653,14 @@ def minimize(
         # a pool switched off by the probe: the zero-row variant skips the rows' LP cost
         args = (jnp.zeros((0, lo.size + 2)), pool_args()[1]) if plain_kernel() else pool_args()
         calls = padded(blo, bhi)
-        early = early_kernels(calls, cutoff, args)
+        if GENERIC_ONLY and generic is not None:
+            wait = None if deadline is None else max(deadline - time.perf_counter(), 0.0)
+            try:
+                early = generic.result(timeout=wait)
+            except TimeoutError:
+                raise _CompileTimeout("bound") from None
+        else:
+            early = early_kernels(calls, cutoff, args)
         if early is not None:
             lb, x, fx, rlo, rhi, xr = run_generic(early, calls, cutoff, k)
         else:
@@ -1852,6 +1878,8 @@ def minimize(
         a dive is skipped when the dives' total wall time with its estimated cost (the last
         dive's, else the steps times the per-step estimate) would pass ``_DIVE_FRAC`` of the
         elapsed time."""
+        if GENERIC_ONLY:  # (the dive kernel is not shared yet)
+            return
         nonlocal ub, xbest
         if K.dive is None or not len(points):
             return
