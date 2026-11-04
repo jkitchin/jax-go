@@ -523,7 +523,7 @@ class _Kernels:
             ``node`` (FBBT included), so for ``obbt="root"`` the leading FBBT
             is left out: it would only add its trace and compile time."""
             empty = jnp.array(False)
-            if tighten is not None and obbt == "tree":
+            if tighten is not None and obbt in ("tree", "budget"):
                 blo, bhi, empty = tighten(blo, bhi, cutoff)
             blo, bhi, e = lp_tighten(blo, bhi, cutoff)
             blo, bhi, e2 = round_box(blo, bhi)
@@ -905,6 +905,7 @@ def _auto_branch_var(imask):
 # instead of refusing the problem. MINLPLib (2026-11-04): of 9 such constrained models, 4 solve with it
 # (ex9_1_1, ex9_1_5, ex9_1_8, ex9_2_5; two have truly unbounded feasible sets), none wrong.
 COMPACTIFY = True
+OBBT_BUDGET = 0.25  # obbt="budget": OBBT on the children only while it has taken at most this share of the time
 _FAR = 1e10  # a compactified incumbent this far out suggests an objective unbounded below
 
 
@@ -1274,8 +1275,8 @@ def minimize(
         )
     if branch_var == "auto":
         branch_var = _auto_branch_var(imask)
-    if obbt not in (False, None, "root", "tree"):
-        raise ValueError(f"obbt must be False, 'root' or 'tree', not {obbt!r}")
+    if obbt not in (False, None, "root", "tree", "budget"):
+        raise ValueError(f"obbt must be False, 'root', 'tree' or 'budget', not {obbt!r}")
     if crown not in (False, None, True, "auto"):
         raise ValueError(f"crown must be False, True or 'auto', not {crown!r}")
     if crown == "auto":
@@ -1380,7 +1381,7 @@ def minimize(
         for b in padded.sizes:
             if not GENERIC_ONLY:
                 bound_kernel.start(b, lo.size, fp, extra)
-        if obbt == "tree":  # obbt="root": started once the root shows OBBT will run (``need_obbt``)
+        if obbt in ("tree", "budget"):  # obbt="root": started once the root shows OBBT will run (``need_obbt``)
             for b in padded.sizes:
                 K.obbt.start(b, lo.size, fp)
     if pool is not None:  # the pool's tangent kernel, traced after the bound kernels
@@ -1695,6 +1696,15 @@ def minimize(
                 bound_call[0] = max(bound_call[0], time.perf_counter() - kernel.dispatched)
         return [np.concatenate([np.asarray(o[i]) for o in outs])[:k] for i in range(len(outs[0]))]
 
+    obbt_time = [0.0]  # seconds spent in OBBT calls (``obbt="budget"``)
+
+    def tree_obbt():
+        """Whether this iteration's children get OBBT: always for ``obbt="tree"``; for ``"budget"``
+        while OBBT has taken at most ``OBBT_BUDGET`` of the elapsed time."""
+        if obbt == "tree":
+            return True
+        return obbt == "budget" and obbt_time[0] <= OBBT_BUDGET * (time.perf_counter() - t0)
+
     def evaluate(blo, bhi, with_obbt=False):
         """Tighten and bound a batch of boxes: (lb, x, f(x), lo', hi', xr)."""
         nonlocal evaluations
@@ -1705,8 +1715,10 @@ def minimize(
         if with_obbt:
             # the root OBBT pass runs on one box: do not pad it to a full batch
             # (padding would compile the OBBT kernel at the batch shape as well)
-            calls = padded(blo, bhi) if obbt == "tree" else [[jnp.asarray(blo), jnp.asarray(bhi)]]
+            calls = padded(blo, bhi) if obbt in ("tree", "budget") else [[jnp.asarray(blo), jnp.asarray(bhi)]]
+            t_obbt = time.perf_counter()
             olo, ohi, oe = run(K.obbt, calls, cutoff, k)
+            obbt_time[0] += time.perf_counter() - t_obbt
             blo, bhi, empty = np.where(oe[:, None], blo, olo), np.where(oe[:, None], bhi, ohi), oe
         # a pool switched off by the probe: the zero-row variant skips the rows' LP cost
         args = (jnp.zeros((0, lo.size + 2)), pool_args()[1]) if plain_kernel() else pool_args()
@@ -2283,12 +2295,12 @@ def minimize(
                 clb, cx, cf = np.full(len(clo), np.inf), 0.5 * (clo + chi), np.full(len(clo), np.inf)
                 cxr = 0.5 * (clo + chi)
                 if live.size:
-                    out = evaluate(clo[live], chi[live], with_obbt=obbt == "tree")
+                    out = evaluate(clo[live], chi[live], with_obbt=tree_obbt())
                     clo, chi = clo.copy(), chi.copy()
                     for dst, src in zip((clb, cx, cf, clo, chi, cxr), out):
                         dst[live] = src
             else:
-                clb, cx, cf, clo, chi, cxr = evaluate(clo, chi, with_obbt=obbt == "tree")
+                clb, cx, cf, clo, chi, cxr = evaluate(clo, chi, with_obbt=tree_obbt())
         except _CompileTimeout:  # out of time while a kernel compiles; the open boxes are unchanged
             break
         pool_judge(nlp_do, clb, np.concatenate([plb[pp], plb[pp]]))
