@@ -1,0 +1,17 @@
+solver,name,status,time,primal,dual,nodes,message,load
+jaxglobal,ex4_1_5,time_limit,60.36831325000003,1.262177448353619e-29,nan,376177,time_limit,2.20
+jaxglobal,ex8_1_4,time_limit,60.36439787500058,0.0,nan,379815,time_limit,2.20
+jaxglobal,ex8_1_5,time_limit,60.08097507899947,-1.0316284534898774,nan,389355,time_limit,3.94
+jaxglobal,least,time_limit,60.393557553999926,14085.1398489284,0.0,190779,time_limit,3.94
+jaxglobal,mhw4d,time_limit,60.27542377099962,0.029310830720598834,nan,12023,time_limit,3.92
+jaxglobal,ex8_5_1,time_limit,60.001969810000446,nan,nan,0,time_limit,3.92
+jaxglobal,ex8_5_2,time_limit,60.006545943000674,nan,nan,0,time_limit,3.57
+jaxglobal,ex8_5_6,time_limit,60.00209694200021,nan,nan,0,time_limit,3.87
+jaxglobal,wallfix,time_limit,61.31224238800041,nan,nan,177,time_limit,3.82
+jaxglobal,ex9_2_5,optimal,31.51210299700051,5.0,4.999734005592342,121,optimal,4.18
+jaxglobal,ex9_1_2,time_limit,60.401966802999596,-15.999999997494099,-17.00000166666667,10709,time_limit,4.17
+jaxglobal,ex9_1_1,optimal,43.95019922500069,-12.999999999989999,-13.000002921641075,1,optimal,4.53
+jaxglobal,ex9_1_5,optimal,40.75994774699939,-0.9999999899688629,-1.0000012941284784,1,optimal,4.30
+jaxglobal,ex9_1_8,optimal,52.62796554599936,-3.2499999999897637,-3.250001628541497,1,optimal,4.41
+jaxglobal,prob07,time_limit,60.005080158000055,nan,nan,0,time_limit,5.27
+jaxglobal,prolog,time_limit,60.001956412000254,nan,nan,0,time_limit,4.89

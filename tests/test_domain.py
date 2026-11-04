@@ -35,9 +35,31 @@ def test_unused_variable_is_fixed():
 
 
 def test_unbounded_problem_is_reported():
-    r = minimize(lambda x: x[0] + x[1] ** 2, [-INF, -1], [INF, 1])
+    """x[0] is free and the objective decreases along it: the variable is compactified, no optimum
+    is claimed, and the message says what happened."""
+    r = minimize(lambda x: x[0] + x[1] ** 2, [-INF, -1], [INF, 1], max_iter=100, time_limit=60)
+    assert r.status != "optimal" and not r.converged
+    assert "unbounded variables [0] compactified" in r.message
+    assert "may be unbounded below" in r.message
+    assert r.verified and r.fun < -1e10  # feasible points with arbitrarily low values were found
+
+
+def test_unbounded_integer_variable_is_reported():
+    """Integer variables cannot be compactified: an unbounded one is still reported."""
+    r = minimize(lambda x: x[0] + x[1] ** 2, [-INF, -1], [INF, 1], integer=[0])
     assert r.status == "unbounded_domain"
     assert "[0]" in r.message
+
+
+def test_compactified_bounded_feasible_set():
+    """Free variables whose feasible range is bounded only through two constraints together:
+    solved after compactification, at the right optimum (x = y = 1, f = 2)."""
+    f = lambda x: x[0] ** 2 + x[1] ** 2  # noqa: E731
+    g = lambda x: jnp.array([1.0 - x[0] * x[1], x[0] - x[1]])  # x y >= 1, x <= y
+    h = lambda x: jnp.array([x[0] + x[1] - 2.0])  # noqa: E731
+    r = minimize(f, [-INF, -INF], [INF, INF], ineq=g, eq=h, time_limit=120)
+    assert r.status == "optimal" and r.verified
+    assert abs(r.fun - 2.0) <= 1e-5
 
 
 def test_infeasible_free_problem():
@@ -49,9 +71,10 @@ def test_infeasible_free_problem():
 def test_known_problems_with_upper_bounds_removed(name):
     """Dropping the upper bounds of the test problems must not change the optimum."""
     p = next(q for q in CONSTRAINED_PROBLEMS if q.name == name)
-    r = minimize(p.f, p.lo, np.full_like(p.hi, INF), ineq=p.ineq, eq=p.eq, max_iter=3000)
-    if r.status == "unbounded_domain":
-        pytest.skip(f"{name}: {r.message}")  # nothing bounds these without the declared box
+    r = minimize(p.f, p.lo, np.full_like(p.hi, INF), ineq=p.ineq, eq=p.eq, max_iter=3000, time_limit=60)
+    if r.status != "optimal":  # nothing bounds G24 (unbounded below) or haverly without the declared box
+        assert not r.converged and "compactified" in r.message
+        pytest.skip(f"{name}: {r.status}, {r.message}")
     assert r.status == "optimal"
     assert abs(r.fun - p.fstar) <= 1e-4 * (1 + abs(p.fstar))
     assert r.lower_bound <= p.fstar + 1e-4 * (1 + abs(p.fstar))

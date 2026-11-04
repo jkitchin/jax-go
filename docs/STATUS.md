@@ -249,6 +249,22 @@ kernel to accept infinite bounds), or compactification
 bounded box so every kernel applies; boxes near `t = 1` are pruned by
 propagation when the feasible set is bounded.
 
+*Compactification implemented (2026-11-04, `bnb.COMPACTIFY`, on):* when
+bound derivation leaves only continuous variables unbounded, `minimize`
+solves the problem in `t` on the bounded box and maps the point back
+(verified in the original variables; the message names the compactified
+variables, and hints when an incumbent far out suggests an objective
+unbounded below). Unbounded integer variables are still reported as
+`unbounded_domain`. On the 16 unsupported models (cold, 60 s, two at a time,
+`results/compactify_unsupported.csv`): **4 solved** (ex9_2_5, ex9_1_1,
+ex9_1_5, ex9_1_8, two of them with truly unbounded feasible sets), none
+wrong. The other 12 now run instead of being refused: ex8_1_4, ex8_1_5,
+mhw4d and ex9_1_2 find the optimum but cannot prove it (boxes that touch
+`t = ±1` keep a bound of −∞); ex8_5_1/2/6, prob07 and prolog do not get past
+setup in 60 s; wallfix finds no feasible point. Next for this group: valid
+bounds on the boxes at `t = ±1` (the functions' behaviour as `x → ∞`), and
+why the five stall in setup.
+
 ## What is next
 
 In priority order, based on the measurements above. Work from smoke tests

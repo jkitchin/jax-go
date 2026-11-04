@@ -901,6 +901,57 @@ def _auto_branch_var(imask):
     return "width" if np.asarray(imask).any() else "pseudocost"
 
 
+# Continuous variables that bound derivation leaves unbounded are compactified (``_compactified``)
+# instead of refusing the problem. MINLPLib (2026-11-04): of 9 such constrained models, 4 solve with it
+# (ex9_1_1, ex9_1_5, ex9_1_8, ex9_2_5; two have truly unbounded feasible sets), none wrong.
+COMPACTIFY = True
+_FAR = 1e10  # a compactified incumbent this far out suggests an objective unbounded below
+
+
+def _compactified(call, lo, hi, t0):
+    """Solve ``minimize``'s problem ``call`` (its arguments) with the unbounded continuous variables
+    of the derived box ``[lo, hi]`` compactified: ``x = l + t / (1 - t)`` (``[l, inf)``),
+    ``u - t / (1 - t)`` (``(-inf, u]``), ``t / (1 - t^2)`` (the line), ``t`` in ``[0, 1]``
+    (``[-1, 1]``); the other variables are unchanged. Each map is an increasing (decreasing)
+    bijection onto the variable's range, so the problems have the same values and ``t`` at an
+    endpoint ``+-1`` is ``x`` at infinity (where the functions are not finite, so no point there is
+    feasible). The result's ``x`` is mapped back and re-verified in the original variables."""
+    up, down = np.isfinite(lo) & ~np.isfinite(hi), ~np.isfinite(lo) & np.isfinite(hi)
+    line = ~np.isfinite(lo) & ~np.isfinite(hi)
+    L0, H0 = np.where(np.isfinite(lo), lo, 0.0), np.where(np.isfinite(hi), hi, 0.0)
+    tlo = np.where(up | down, 0.0, np.where(line, -1.0, lo))
+    thi = np.where(up | down | line, 1.0, hi)
+    U, D, B = jnp.asarray(up), jnp.asarray(down), jnp.asarray(line)
+
+    def to_x(t):
+        s = t / (1.0 - t)
+        return jnp.where(U, L0 + s, jnp.where(D, H0 - s, jnp.where(B, t / (1.0 - t * t), t)))
+
+    f, ineq, eq = call["f"], call["ineq"], call["eq"]
+    kw = {k: v for k, v in call.items() if k not in ("f", "lo", "hi", "ineq", "eq")}
+    kw["time_limit"] = max(call["time_limit"] - (time.perf_counter() - t0), 0.0)
+    r = minimize(lambda t: f(to_x(t)), tlo, thi, ineq=None if ineq is None else (lambda t: ineq(to_x(t))),
+                 eq=None if eq is None else (lambda t: eq(to_x(t))), **kw)  # fmt: skip
+    x = np.asarray(to_x(jnp.asarray(r.x, jnp.float64)), np.float64)
+    imask = _integer_mask(call["integer"], lo.size)
+    lo_user, hi_user = np.asarray(call["lo"], np.float64), np.asarray(call["hi"], np.float64)
+    maxv, verified, why = _verify(f, ineq, eq, x, r.fun, lo_user, hi_user, call["feas_tol"], integer=imask)
+    comp = up | down | line
+    note = f"unbounded variables {np.flatnonzero(comp).tolist()} compactified"
+    status, converged, message = r.status, r.converged, f"{note}; {r.message}" if r.message else note
+    big = float(np.max(np.abs(x[comp]), initial=0.0)) if np.isfinite(r.fun) else 0.0
+    if status != "optimal" and big > _FAR:  # (not a proof: that would need a recession direction)
+        message = f"{message}; the objective may be unbounded below (an incumbent with |x| = {big:.3g})"
+    if np.isfinite(r.fun) and not verified:
+        message = f"{message}; incumbent failed float64 verification: {why}"
+        if status == "optimal":
+            status, converged = "unverified", False
+    import dataclasses
+
+    return dataclasses.replace(r, x=x, status=status, converged=converged, message=message, max_violation=maxv,
+                               verified=verified, time=time.perf_counter() - t0)  # fmt: skip
+
+
 _GENERIC_POOL = []
 
 
@@ -1066,7 +1117,11 @@ def minimize(
 
     Bounds may be infinite: finite ones are derived first from the constraints,
     unused variables, and FBBT against a feasible point found by local solves
-    (``domain.py``). If some variable stays unbounded the result has status
+    (``domain.py``). Continuous variables that stay unbounded are compactified
+    (``COMPACTIFY``): ``x = l + t / (1 - t)`` on ``[l, inf)``, ``x = u - t / (1 - t)``
+    on ``(-inf, u]``, ``x = t / (1 - t^2)`` on the whole line, with ``t`` in
+    ``[0, 1]`` (``[-1, 1]``), and the problem in ``t`` is solved on that bounded box
+    (``message`` says so). If an integer variable stays unbounded the result has status
     ``"unbounded_domain"`` and ``message`` names the variables.
 
     Bound tightening against the incumbent: ``fbbt`` (forward-backward interval
@@ -1141,6 +1196,7 @@ def minimize(
     imported. ``devices`` overrides the device list (e.g.
     ``devices=jax.devices()[:1]`` to disable splitting).
     """
+    call = dict(locals())  # the arguments, for the compactified problem (``_compactified``)
     t0 = time.perf_counter()
     if GENERIC_ONLY:
         obbt, cut_pool = False, 0
@@ -1166,8 +1222,10 @@ def minimize(
             return Result(x=np.clip(np.zeros(lo.size), lo, hi), fun=np.inf, lower_bound=-np.inf, converged=False,
                           iterations=0, nodes=0, time=time.perf_counter() - t0, status="time_limit",
                           message="time_limit reached while deriving bounds for unbounded variables")  # fmt: skip
+        free = np.flatnonzero(~(np.isfinite(lo) & np.isfinite(hi)))
+        if not infeasible0 and free.size and COMPACTIFY and not imask[free].any():
+            return _compactified(call, lo, hi, t0)
         if infeasible0 or not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
-            free = np.flatnonzero(~(np.isfinite(lo) & np.isfinite(hi)))
             status = "infeasible" if infeasible0 else "unbounded_domain"
             return Result(
                 x=np.asarray(seed_x if seed_x is not None else np.clip(0.0, lo, hi)),
