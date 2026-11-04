@@ -329,6 +329,21 @@ fixes them. What remains is relaxation strength for their structures:
 packing distance constraints, pooling bilinears with wide ranges, nested
 `exp` products.
 
+*Pooling-like models, root against tree (2026-11-04):* the root relaxation
+is **not** the weak point. Root bounds: wastewater15m1 jaxglobal 975.42,
+SCIP 975.48 (optimum 2,446); ex7_3_5 both 0 (optimum 1.21); ex5_4_4
+jaxglobal 3,821, SCIP 4,406 (optimum 10,078). SCIP closes the gap in the tree
+(11,441 nodes in 7.6 s; 3,627 in 3.2 s; 1,328 in 0.8 s), where jaxglobal,
+from the same root bound, stays open after 17,111 nodes (wastewater15m1,
+bound 2,124 at 60 s). So a stronger bilinear relaxation is not what these
+need; the difference is in how bounds improve per split and in node
+throughput (SCIP about 1,500 nodes/s here, jaxglobal about 285).
+`branch_point="relax"` (split at the relaxation point, pulled toward the
+midpoint) is mixed: wastewater15m1 bound 2,124 → 2,217, ex5_4_4 8,580 →
+8,151, ex7_3_5 0.146 → 0.0 (383 nodes instead of 3,059). Next diagnostic:
+bound progress per node against SCIP's on the same model, to tell per-node
+bound quality from branching choice.
+
 ## What is next
 
 In priority order, based on the measurements above. Work from smoke tests
