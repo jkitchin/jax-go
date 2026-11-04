@@ -1582,8 +1582,13 @@ def eval_jaxpr_mc(jaxpr, consts, args, ctx: Ctx = Ctx()):
                 env[v] = o
         else:
             outs = monos.observe(name, ins, invals, eqn.outvars[0], outs)
+            if FUSION_BARRIER and is_mc(outs) and name not in STRUCTURAL:
+                outs = MC(*jax.lax.optimization_barrier(tuple(outs)))
             env[eqn.outvars[0]] = terms.observe(name, ins, invals, eqn.outvars[0], outs, eqn)
     return [read(v) for v in jaxpr.outvars]
+
+
+FUSION_BARRIER = False  # experiment: a fusion barrier after every relaxed row
 
 
 def relax(f, multivariate=False, safe=False):
