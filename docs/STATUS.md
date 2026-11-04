@@ -325,9 +325,34 @@ developed on (`CLAUDE.md`).
    So the redesign as built does not reach the warm ceiling: interpretation
    costs per-node speed and the shared kernels are large to compile. Reaching
    it would need shared kernels that are both fast per node and cheap to
-   compile (e.g. the scheduled interpreter over a fixed opcode table with
-   vectorized steps), plus the missing pieces; open whether that is
-   achievable. `GENERIC_ONLY` stays off. Also seen: `ex1221`
+   compile, plus the missing pieces. `GENERIC_ONLY` stays off.
+   *Spike on fast shared kernels (2026-11-04, time-boxed;
+   `benchmarks/spikes/`): no viable design found.* McCormick bound, 16
+   boxes, per call:
+
+   | model (rows) | per-problem straight-line | shared, row by row | shared, scheduled (all opcodes per level) |
+   |---|---:|---:|---:|
+   | st_e15 (32) | 3.1 ms (compile 6.6 s) | 12 ms (10 s) | 66 ms (12 s) |
+   | pooling_haverly1pq (80) | 9.0 ms (5.0 s) | 160 ms (12 s) | 1,022 ms (9 s) |
+   | ex2_1_7 (409) | 9.8 ms (9.7 s) | 813 ms (9.4 s) | — |
+   | clay0203m (384) | 52 ms (10.4 s) | 896 ms (12 s) | — |
+   | kriging_peaks-red030 (1,162) | 8.5 ms (123 s) | 232 ms (8.7 s) | — |
+
+   Cause, measured (`shared_sweep_scaling.py`): for one box and one point a
+   row costs a constant 7–24 µs (loop overhead), but batched over 16 boxes ×
+   17 cut points it grows with slots × variables (104, 204, 884 µs per row at
+   64×8, 256×16, 1,024×32): each row update moves memory in proportion to
+   the carried state (forward-mode subgradients, an S × 2 × N array per point
+   and box), not to its arithmetic. Applying every opcode per level trades
+   loop steps for 22× the work and is slower still. The best interpreter in
+   the code (`relax_interp`'s, problem-specific widths per opcode) runs about
+   2× slower than straight-line code; a shared kernel cannot have
+   problem-specific widths without padding to every opcode. A faster shared
+   design would need another layout (boxes innermost, block writes per level,
+   subgradients by reverse sweeps): untested, and nothing measured so far
+   suggests it would reach straight-line speed. **Conclusion: the kernel
+   redesign is stopped.** The shared kernels stay in the code, off; what they
+   showed is recorded above. Also seen: `ex1221`
    (same structure as `st_e15`) solves in 4 s cold because the existing
    per-problem disk cache, keyed by the model's fingerprint, already serves
    structurally identical models.
