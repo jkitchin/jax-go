@@ -281,7 +281,28 @@ developed on (`CLAUDE.md`).
    whole root pipeline shared (FBBT, bound, OBBT, dives, the incumbent
    candidates) and its bounds as tight as the default ones (univariate hulls
    and αBB are what close many root gaps). That is a larger project than
-   these two increments suggested; see *What is next*. Also seen: `ex1221`
+   these two increments suggested; see *What is next*.
+   *Evidence for the scope (2026-11-03/04):*
+   - Why instances fail (the 2026-10-20 re-run, cold against warm): 26 fail
+     only cold (compile-bound), 36 fail even warm (algorithmic; SCIP solves
+     25 of them), 16 are unsupported. Against the pass rule, removing compile
+     turns 157 failures into passes (6 → 33, 15 → 36, 9 → 27, 66 → 157 by set),
+     the algorithmic items can touch at most 52: the redesign's ceiling is the
+     larger, if it is finished.
+   - Tightness (20 instances, warm, `results/tight_*.csv`): McCormick alone
+     (no αBB, no univariate hulls) solves the same 16 of 20 as the defaults
+     (319 s against 337 s). With the lifted LP, cut pool and convexity
+     certificates off as well, 14 of 20 (388 s): `nous1` needs the lifted
+     quadratic LP, `cvxnonsep_normcon30` the convexity certificates.
+   - Which bounder models use (`benchmarks/structure_census.py`, all 357,
+     `results/structure_census.csv`): the lifted quadratic/polynomial LP for
+     230 (64%), convexity certificates for 97 (27%), either for 278; plain
+     reduced-space McCormick only for 79.
+   So a shared pipeline does not need αBB or univariate hulls, but must have
+   the lifted LP (the main bounder of two thirds of the models) and the
+   convexity outer approximation, plus OBBT, the dives and the local
+   solver's functions. *Next increment:* the lifted LP
+   (`quadratic.make_quadratic_bounder`) with the `QuadraticForm` as data. Also seen: `ex1221`
    (same structure as `st_e15`) solves in 4 s cold because the existing
    per-problem disk cache, keyed by the model's fingerprint, already serves
    structurally identical models.
