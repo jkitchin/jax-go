@@ -339,10 +339,30 @@ def _bound_one(lo, hi, cutoff, tol, d: Data, m, n_kelley, ipm_iters, safe):
 
     init = (vals, b, jnp.array(-jnp.inf), lo, hi, vlo + 0.5 * scale, jnp.array(True))
     (_, _, best, rlo, rhi, x, _), _ = jax.lax.scan(round_, init, jnp.arange(n_kelley + 1))
-    x = x[:nb]
+    x = jnp.clip(x[:nb], lo, hi)
     infeasible = best == jnp.inf
     rlo, rhi = jnp.where(finite, rlo, lo), jnp.where(finite, rhi, hi)
-    return best, jnp.clip(x, lo, hi), infeasible, rlo, rhi
+    return best, x, infeasible, rlo, rhi, _value_at(x, d, tol)
+
+
+def _value_at(x, d: Data, tol):
+    """``f(x)`` if ``x`` satisfies the rows to ``tol``, else inf (an incumbent candidate; the caller
+    re-checks it). The rows are linear in ``v = (x, products)``: the products level by level."""
+    nb, Pb = x.shape[0], d.I.shape[0]
+    v = jnp.concatenate([x, jnp.zeros(Pb)])
+    v = jax.lax.fori_loop(1, d.max_level + 1,
+                          lambda k, v: v.at[nb:].set(jnp.where(d.level == k, v[d.I] * v[d.J], v[nb:])), v)  # fmt: skip
+    Sb, Rb = d.static_vals.shape[0], d.s_kind.shape[0]
+    at = 12 * Pb  # the static block's nonzeros
+    srow = d.rows[at:at + Sb] - 4 * Pb
+    rowv = jax.ops.segment_sum(d.static_vals * v[d.cols[at:at + Sb]], jnp.clip(srow, 0, Rb - 1), Rb) + d.s_c
+    vmag = jnp.abs(v)
+    dmag = jax.ops.segment_sum(jnp.abs(d.d_coef) * jnp.prod(vmag[:nb][None, :] ** d.d_pow, axis=1), d.d_row, Rb)
+    th = jnp.where(d.s_den, tol * dmag * (1 + 1e-12), tol)
+    k = d.s_kind
+    viol = jnp.where(k == K_G, rowv - tol, jnp.where(k == K_HP, jnp.abs(rowv) - th, -1.0))
+    f = d.cf + d.Ef @ v
+    return jnp.where(jnp.all(viol <= 0) & jnp.isfinite(f), f, jnp.inf)
 
 
 @functools.lru_cache(maxsize=None)
@@ -406,8 +426,8 @@ class GenericQuadraticBounder:
         lo, hi = jnp.asarray(lo, F64), jnp.asarray(hi, F64)
         z = jnp.zeros(lo.shape[:-1] + (nb - n,), F64)
         args = (jnp.concatenate([lo, z], -1), jnp.concatenate([hi, z], -1), jnp.asarray(cutoff, F64), self.tol, self.data)
-        lb, x, inf, rlo, rhi = executable(self.g.m, self.n_kelley, self.ipm_iters, self.safe, args)(*args)
-        return lb, x[..., :n], inf, rlo[..., :n], rhi[..., :n]
+        lb, x, inf, rlo, rhi, fx = executable(self.g.m, self.n_kelley, self.ipm_iters, self.safe, args)(*args)
+        return lb, x[..., :n], inf, rlo[..., :n], rhi[..., :n], fx
 
 
 def make_generic_quadratic_bounder(Q, n, tol=0.0, safe=False, n_kelley=4, ipm_iters=40):

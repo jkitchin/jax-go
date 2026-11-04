@@ -276,12 +276,26 @@ def _bound_one(lo, hi, cutoff, tol, d: Data, safe, tier, n_kelley, ipm_iters):
     init = (0, const, coef, best, rlo, rhi, u, _kelley_go(best0, best, cutoff, first=True))
     _, _, _, best, rlo, rhi, u, _ = jax.lax.while_loop(lambda c: (c[0] < n_kelley) & c[7], kelley, init)
     lb = jnp.where(infeasible, jnp.inf, best)
-    return lb, lo + w * u, infeasible, rlo, rhi
+    x = lo + w * u
+    return lb, x, infeasible, rlo, rhi, _value_at(x, d, tol, safe, tier)
+
+
+def _value_at(x, d: Data, tol, safe, tier):
+    """``f(x)`` if ``x`` satisfies the constraints to ``tol``, else inf: an incumbent candidate (the
+    caller re-checks it). The relaxation's sweep on the point box ``[x, x]``, where every
+    interval rule gives the function's value."""
+    V, _ = _sweep(x, x, x, d, safe, tier)
+    Vp = V[d.part_slot]
+    val = jnp.where(d.part_sign > 0, Vp[:, 0], -Vp[:, 1])  # f, g..., h..., -h...
+    feas = jnp.all(jnp.where(d.part_live & (jnp.arange(val.shape[0]) > 0), val <= tol, True))
+    f = val[0]
+    return jnp.where(feas & jnp.isfinite(f), f, jnp.inf)
 
 
 @functools.lru_cache(maxsize=None)
 def kernel(safe=False, tier="full", n_kelley=4, ipm_iters=40):
-    """Batched ``(lo (B, N), hi (B, N), cutoff, tol, data) -> (lb, x, infeasible, lo', hi')``."""
+    """Batched ``(lo (B, N), hi (B, N), cutoff, tol, data) -> (lb, x, infeasible, lo', hi', f(x))``
+    (``f(x)`` inf where ``x`` is not feasible)."""
 
     def run(lo, hi, cutoff, tol, data):
         one = functools.partial(_bound_one, safe=safe, tier=tier, n_kelley=n_kelley, ipm_iters=ipm_iters)
@@ -328,7 +342,8 @@ def executable(safe, tier, n_kelley, ipm_iters, args):
 
 
 class GenericBounder:
-    """``bound(lo, hi, cutoff) -> (lb, x_lp, infeasible, lo', hi')`` on batches ``(B, n)``."""
+    """``bound(lo, hi, cutoff) -> (lb, x_lp, infeasible, lo', hi', fx)`` on batches ``(B, n)``;
+    ``fx``: ``f(x_lp)`` when ``x_lp`` is feasible, else inf."""
 
     def __init__(self, g: Generic, tol, safe=False, n_kelley=4, ipm_iters=40):
         self.g, self.safe, self.n_kelley, self.ipm_iters = g, bool(safe), int(n_kelley), int(ipm_iters)
@@ -340,8 +355,8 @@ class GenericBounder:
         lo, hi = jnp.asarray(lo, F64), jnp.asarray(hi, F64)
         z = jnp.zeros(lo.shape[:-1] + (N - n,), F64)
         args = (jnp.concatenate([lo, z], -1), jnp.concatenate([hi, z], -1), jnp.asarray(cutoff, F64), self.tol, self.data)
-        lb, x, inf, rlo, rhi = executable(self.safe, self.g.tier, self.n_kelley, self.ipm_iters, args)(*args)
-        return lb, x[..., :n], inf, rlo[..., :n], rhi[..., :n]
+        lb, x, inf, rlo, rhi, fx = executable(self.safe, self.g.tier, self.n_kelley, self.ipm_iters, args)(*args)
+        return lb, x[..., :n], inf, rlo[..., :n], rhi[..., :n], fx
 
 
 def make_generic_bounder(f, ineq=None, eq=None, n=None, tol=0.0, safe=False, n_kelley=4, ipm_iters=40):

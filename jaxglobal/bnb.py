@@ -1601,17 +1601,17 @@ def minimize(
         return None
 
     def run_generic(early, calls, cutoff, k):
-        """``evaluate``'s kernel outputs from the shared kernels: FBBT, then the McCormick bound.
-        No incumbent candidate (``fx`` inf: the local solves start from the LP points)."""
+        """``evaluate``'s kernel outputs from the shared kernels: FBBT, then the bound, with ``f`` at
+        the LP point as the incumbent candidate (inf where it is not feasible)."""
         gfbbt, gbound = early
         outs = []
         for c in calls:
             if _past(deadline):
                 raise _Deadline("bound")
             tl, th, te = gfbbt(c[0], c[1], cutoff)
-            lb, x, inf, rlo, rhi = gbound(tl, th, cutoff)
+            lb, x, inf, rlo, rhi, fx = gbound(tl, th, cutoff)
             lb = jnp.where(te, cutoff, lb)
-            outs.append(jax.block_until_ready((lb, x, jnp.full(lb.shape, jnp.inf), jnp.where(te[:, None], tl, rlo),
+            outs.append(jax.block_until_ready((lb, x, jnp.where(te, jnp.inf, fx), jnp.where(te[:, None], tl, rlo),
                                                jnp.where(te[:, None], th, rhi), x)))  # fmt: skip
         return [np.concatenate([np.asarray(o[i]) for o in outs])[:k] for i in range(6)]
 
