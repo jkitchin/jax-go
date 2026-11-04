@@ -1,0 +1,17 @@
+instance,variant,trace_lower_s,hlo_lines,compile_s,run_ms_per_call,rc
+cvxnonsep_psig30,default,11.59,32148,108.61,692.07ms,0
+cvxnonsep_psig30,interp,7.33,13101,7.16,510.18ms,0
+ex6_2_14,default,11.14,55475,59.20,29.39ms,0
+ex6_2_14,interp,9.89,35551,21.38,144.43ms,0
+kriging_peaks-red010,default,10.85,59677,129.21,71.63ms,0
+kriging_peaks-red010,interp,6.67,38404,10.18,45.83ms,0
+launch,default,22.56,93461,105.98,3260.63ms,0
+launch,interp,13.44,38828,25.72,3180.80ms,0
+nvs08,default,4.86,17877,10.47,14.24ms,0
+nvs08,interp,9.89,26279,16.29,41.47ms,0
+nvs09,default,6.76,29331,,124
+nvs09,interp,6.61,22836,11.37,180.51ms,0
+st_e15,default,4.23,17351,7.35,6.84ms,0
+st_e15,interp,8.96,23118,13.34,13.28ms,0
+ex1221,default,4.70,17351,7.51,,0
+ex1221,interp,7.68,23118,9.09,,0

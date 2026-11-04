@@ -364,13 +364,70 @@ keeps such bounds on its auxiliary variables and uses them in the facets.
 This is the documented open item "FBBT's tightened intermediate ranges are
 not yet fed back into the relaxations".
 
+### The setup-stall group (2026-11-04)
+
+The 16 models that ran at most a few nodes in 60 s warm, profiled with
+`profile_root.py` (prime and warm runs, 60 s, commit 9772580, 2026-11-04,
+4-core VM; `results/setup_stall_profile.csv`). Rule fixed beforehand: work
+on the stage that dominates the most models, only if it covers at least 4.
+
+| dominant stage (warm) | models |
+|---|---|
+| XLA compile of the node `bound` kernel, never finished in the run | kriging_peaks-red010, ex6_2_14, nvs09, cvxnonsep_psig30, launch, clay0303hfsg, ex8_5_6, prob07, prolog (9) |
+| compile ≥ 49 s, then a short search | ex8_5_1, ex8_5_2 (2) |
+| root bound + an unfinished OBBT compile | kriging_peaks-full020 (1) |
+| search (not setup) | chenery; ex8_4_4 and nous1 now solve (3) |
+| root dives | tanksize (1) |
+
+**12 of 16 are compile-bound.** "Warm" is not warm for them: a kernel that
+takes longer than the time limit to compile is never finished, so never
+cached. These are small models (n = 2–99, 84–1,818 rows; nvs09 has 93).
+
+*Bound kernel alone (`spikes/bound_kernel_attribution.py`, batch 16, two
+compiles at a time, `results/bound_kernel_interp_vs_straight.csv`):*
+
+| model | straight-line compile | interpreted (`relax_interp`) | run per call (straight / interp) |
+|---|---:|---:|---|
+| nvs09 | > 300 s | 11 s | – / 181 ms |
+| kriging_peaks-red010 | 129 s | 10 s | 72 / 46 ms |
+| cvxnonsep_psig30 | 109 s | 7 s | 692 / 510 ms |
+| launch | 106 s | 26 s | 3,261 / 3,181 ms |
+| ex6_2_14 | 59 s | 21 s | 29 / 144 ms |
+| controls: st_e15, nvs08, ex1221 | 7–10 s | 9–16 s | 2–3× slower interpreted |
+
+- The relaxation interpreter compiles these kernels 3–20× faster; the
+  straight-line McCormick code is the cost. Today's switch
+  (`relax_interp.MIN_ROWS = 600` rows) misses all of them, and no tape-size
+  measure separates them from the controls (nvs09: 93 rows).
+- Where the compile time goes differs: nvs09 is stuck in LLVM's loop
+  vectorizer (`LoopVectorizePass` → `vputils::onlyFirstLaneUsed`, a
+  recursive walk that is exponential on a deep reconvergent select DAG, as
+  the McCormick product/max rules make); cvxnonsep_psig30 and launch spend
+  it in XLA's fusion compiler over many kernels, kriging_peaks-red010 in
+  LLVM's SparseSolver. jax 0.12.0 stalls on nvs09 the same way.
+- Ruled out: per-row fusion cuts in `eval_jaxpr_mc`
+  (`lax.optimization_barrier` is expanded away by XLA CPU before fusion; a
+  reduce as cut leaves the large fusions and the stall); XLA flags
+  `--xla_llvm_disable_expensive_passes`, LLVM `-vectorize-loops=false` and
+  `-force-vector-width=1` (XLA sets the pipeline options itself); the CPU
+  `DebugOptions` fields for size/vectorization are not accepted as compile
+  options by this jaxlib.
+- Proposed (not started): since compile time is not predictable from the
+  tape, hedge instead of predicting. When the straight-line bound kernel
+  has not compiled after a budget (about the 10–15 s a normal kernel
+  needs), compile the interpreted kernel as well and use whichever is ready
+  first, switching to the straight-line one if it finishes later (it is
+  faster per call on most models). No threshold to tune per model; the cost
+  is one extra compile on the models that are already slow.
+
 ## What is next
 
 In priority order, based on the measurements above. Work from smoke tests
 and profiles, not long runs, and validate each fix on instances it was not
 developed on (`CLAUDE.md`).
 
-1. **Fixed cost per solve.** The largest and most general cost: a median of
+1. **Fixed cost per solve.** *Next concrete step:* the compile hedge for the
+   12 compile-bound models of the setup-stall group (see that section). The largest and most general cost: a median of
    13.6 s cold for problems SCIP solves at once, and 0 nodes in 60 s on some.
    *Profiled (2026-11-03, `profile_root.py`, nvs04, st_e15, nvs08, ex1221,
    eg_disc_s, ghg_1veh):* on 1-node instances with 2–8 variables about 23 s of
