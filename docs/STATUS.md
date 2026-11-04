@@ -313,7 +313,21 @@ Evidence for the next step: the two options that help (tree OBBT on a
 packing model, strong branching on integer bilinear models) help where they
 are applied and hurt through their cost elsewhere. That points to using
 them selectively (a budgeted tree OBBT, reliability-style strong branching
-on integer variables) rather than to a new relaxation; to be measured.
+on integer variables) rather than to a new relaxation.
+
+*Measured (2026-11-04; `results/sel_*.csv`), and neither is a net win:*
+`obbt="budget"` (new, opt-in: tree OBBT while it has taken at most
+`OBBT_BUDGET` = 25% of the time) solves 2 of the 23 (default 3) and widens
+most gaps (himmel16 0.021 → 0.51, ex1252a 0.065 → 0.76); it does not keep
+full tree OBBT's inscribedsquare02, and costs 19% on the 12-instance
+regression set (all still solved). `branch_var="reliability"` narrows
+several gaps (tln4 0.052 → 0.011, tln5 0.051 → 0.018, ex14_1_7 322 → 68,
+kall_circles_c7a 0.73 → 0.43) but solves none and loses the three the default
+solves; neutral on the regression set. So the bound-limited families are not
+a branching or OBBT-policy problem: no setting of the existing mechanisms
+fixes them. What remains is relaxation strength for their structures:
+packing distance constraints, pooling bilinears with wide ranges, nested
+`exp` products.
 
 ## What is next
 
