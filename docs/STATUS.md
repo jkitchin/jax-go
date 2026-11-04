@@ -227,6 +227,28 @@ _ModuleLock('scipy.linalg.cython_blas')`). `jaxglobal/__init__.py` now imports
 the lazily used scipy modules up front; re-run now, flay03m and ex14_2_1
 solve, wastewater05m1 times out at 17,053 nodes (an algorithmic failure).
 
+### The 16 unsupported models (2026-11-04)
+
+`benchmarks/unsupported_diag.py` (which variables stay unbounded after
+`bound_domain`, and how they enter the model) and `benchmarks/scip_var_range.py`
+(SCIP maximizing / minimizing each such variable over the feasible set):
+
+| subgroup | models | finding | what would solve it |
+|---|---|---|---|
+| feasible set truly unbounded | prolog (all 7 variables), prob07 (≥ 3), ex9_1_8 (≥ 4), ex9_1_1 (2 of 5) | SCIP: unbounded | a search that accepts unbounded variables |
+| bounded, not derived | wallfix, ex9_2_5, ex9_1_2, ex9_1_5, ex8_5_1 (ex8_5_2, ex8_5_6 alike) | SCIP finds finite ranges | the bounds follow from disjunctions (complementarity `x·s = 0` of KKT systems) or chains of reciprocal equalities: an LP relaxation cannot express them, branching can |
+| unconstrained | ex4_1_5, ex8_1_4, ex8_1_5, least | bounded only by `f ≤ f(incumbent)` and the objective's growth | sublevel-set reasoning (interval FBBT loses it to cancelling terms, e.g. x1⁶ − 6.3 x1⁴ − 6 x1 x2) |
+| unknown | mhw4d | SCIP's LP failed | — |
+
+`LinearRelaxation` already keeps the McCormick facets that use only finite
+bounds; that is not what is missing. Two of the three subgroups need the
+search itself to handle unbounded variables. Two established ways:
+branching on unbounded domains (`[l, ∞) → [l, M] ∪ [M, ∞)`, which needs every
+kernel to accept infinite bounds), or compactification
+(`x = l + t / (1 − t)`, `t ∈ [0, 1]`), which keeps the model a JAX function on a
+bounded box so every kernel applies; boxes near `t = 1` are pruned by
+propagation when the feasible set is bounded.
+
 ## What is next
 
 In priority order, based on the measurements above. Work from smoke tests
