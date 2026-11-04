@@ -302,3 +302,15 @@ def test_root_obbt_kernel_started_when_dives_find_first_incumbent(monkeypatch):
                  local_solve=False, time_limit=120)  # fmt: skip
     assert np.isfinite(r.fun)
     assert calls == [True]
+
+
+def test_threaded_imports_are_done_at_import_time():
+    """scipy.linalg / scipy.optimize are imported by jaxglobal itself, before any background
+    thread can race the main thread on their first import (``_DeadlockError`` on
+    ``scipy.linalg.cython_blas`` crashed three MINLPLib runs)."""
+    import subprocess
+    import sys
+
+    code = "import sys, jaxglobal; print(all(m in sys.modules for m in ('scipy.linalg', 'scipy.optimize', 'scipy.sparse', 'jax.scipy.linalg')))"
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
+    assert out.stdout.strip() == "True", out.stderr[-500:]

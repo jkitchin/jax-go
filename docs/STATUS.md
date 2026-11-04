@@ -196,6 +196,37 @@ warm, 68 cold). A3 (interpreter thresholds) has tooling but no valid timing, so
 | `smallinvDAX*` (cold) | stop at 1 node in 60 s | profile the root |
 | badly scaled models in general | `feas_tol` is absolute, so on rows over small variables it is worth far more than intended; the repair now reports the strict point, but the bound is still that of the relaxed problem, so such solves can end `unproven` | row- or variable-scaled feasibility tolerance |
 
+## Failure census (2026-11-04)
+
+`benchmarks/failure_census.py` classifies every instance of the 2026-10-20
+re-run that jaxglobal did not solve **warm** (kernels cached, so not a
+compile problem) by comparing its incumbent and bound with the MINLPLib
+optimum (`results/failure_census.csv`). 51 instances (an instance in two
+sets counted once):
+
+| cause | count | SCIP solves | what it means |
+|---|---:|---:|---|
+| bound-limited | 16 | 11 | incumbent within tolerance of the optimum, the bound is not: cannot prove it |
+| unsupported | 16 | 12 | no finite bounds derived for some variables (mostly tiny models SCIP solves in < 0.1 s) |
+| setup-bound | 9 | 7 | at most one node in 60 s: the root never finishes even warm |
+| both | 7 | 4 | neither incumbent nor bound within tolerance |
+| error | 3 | 3 | crashed: `_DeadlockError` in scipy's import lock (fixed, see below) |
+
+No failure is incumbent-limited only: where the search runs, it finds the
+optimum; the bound is what is missing (23 instances bound-limited or both).
+The bound-limited ones fall into families: circle packing and point packing
+(kall_circles*, pointpack08, himmel16, inscribedsquare02), pooling-like
+bilinear models with large dual gaps (wastewater15m1: 392, chenery: 114,
+ex5_4_4: 1,885), convex MINLPs (cvxnonsep_normcon40, pcon40), integer
+bilinear (tln4, tln5), and single models (tspn05, ex6_1_3, ex7_3_5, ex8_4_4,
+ex14_1_7, ex1252a).
+
+The three errors were a real bug: two threads importing `scipy.linalg` for
+the first time at once (`_DeadlockError: deadlock detected by
+_ModuleLock('scipy.linalg.cython_blas')`). `jaxglobal/__init__.py` now imports
+the lazily used scipy modules up front; re-run now, flay03m and ex14_2_1
+solve, wastewater05m1 times out at 17,053 nodes (an algorithmic failure).
+
 ## What is next
 
 In priority order, based on the measurements above. Work from smoke tests
