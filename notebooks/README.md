@@ -1,6 +1,6 @@
 # Notebooks
 
-Executed notebooks with prose, math and figures. Notebooks 01–06 show how jaxglobal works and how it performs; 07–13 write the
+Executed notebooks with prose, math and figures. Notebooks 01–06 and 14 show how jaxglobal works and how it performs; 07–13 write the
 same optimization models in Pyomo and as plain Python/JAX functions for jaxglobal, solve both, and compare objective, certified
 bound, time and status, with Pyomo's strengths (integers, mature solvers, sparse structure, duals, ecosystem) discussed alongside
 jaxglobal's.
@@ -15,6 +15,7 @@ jaxglobal's.
 | `04-equation-based-solvers.ipynb` | The same problems in SCIP, Couenne, BARON and LindoGlobal via a `jnp`→Pyomo shim; what has to be reformulated by hand; who solves what and how fast. Writes `figures/benchmark.png` and updates the jaxglobal column of `results/compare_results.json`. |
 | `05-throughput.ipynb` | Throughput of the batched `jit(vmap)` bounding kernel vs batch size, compile cost, and where a full solve spends its time. Writes `results/throughput_results.json`. |
 | `06-gaussian-processes.ipynb` | Optimizing over trained Gaussian processes, after Schweidtmann et al. (2021), with the kernels from `jaxglobal.kernels` and the mean, standard deviation, EI and PI from `jaxglobal.gp` (8 to 45 times fewer nodes than the `jnp` formulas, and everything certified): GP-mean minimization of the peaks function for N = 20 to 400 and four kernels, LCB/EI/PI acquisition functions (and why PI needs a margin), a chance constraint built from a second GP, and a short Bayesian-optimization loop. Compares against the `jnp` formulas, which leave the chance constraint and the loop uncertified. Takes about 10 minutes. |
+| `14-noisy-expected-improvement.ipynb` | Global optimization of noisy expected improvement (NEI, [letham2019constrained]) for active learning with noisy measurements: NEI as an average of EI over noise-free fantasy GPs with fixed QMC samples, written with `gp_mean`, `gp_std` and `expected_improvement`; NEI vs EI with noisy and posterior-mean incumbents in 1-D, the number of fantasies, a certified 2-D step against multistart L-BFGS-B, and a 10-step active-learning loop on noisy peaks against EI with the noisy incumbent. |
 
 ## Comparison with Pyomo
 
