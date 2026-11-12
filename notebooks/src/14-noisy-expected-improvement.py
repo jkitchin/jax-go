@@ -73,6 +73,7 @@ import pandas as pd
 from scipy.optimize import minimize as sp_minimize
 from scipy.stats import norm, qmc
 
+import jaxglobal.bnb
 from jaxglobal import minimize
 from jaxglobal.gp import expected_improvement, gp_mean, gp_std
 
@@ -183,7 +184,12 @@ class NoisyGP:
 def solve(f, lo, hi, **kw):
     t = time.perf_counter()
     r = minimize(f, lo, hi, **TOL, **kw)
-    return r, time.perf_counter() - t
+    t = time.perf_counter() - t
+    # every acquisition function here is a new problem that is solved once: drop its compiled
+    # kernels (jaxglobal keeps the last 32 problems in memory), or a long loop runs out of memory
+    jaxglobal.bnb.clear_cache()
+    jax.clear_caches()
+    return r, t
 
 
 # %% [markdown]
@@ -274,7 +280,7 @@ plt.show()
 
 # %%
 rows = []
-for m in (4, 8, 16, 32):
+for m in (4, 8, 16):
     for seed in (0, 1):
         r, t = solve(gp1.nei(m, seed=seed), LO1, HI1)
         rows.append(dict(M=m, seed=seed, status=r.status, x_next=r.x[0], NEI=-r.fun, nodes=r.nodes, time_s=t))
@@ -282,7 +288,10 @@ pd.DataFrame(rows)
 
 # %% [markdown]
 # Each row is a certified maximum of its own (deterministic) approximation.
-# $M = 8$ is what the loop below uses.
+# $M = 8$ is what the loop below uses. The function is unrolled into $M$
+# `gp_mean` and EI terms, and the compile time grows faster than linearly:
+# at $M = 32$ the XLA compile alone took more than 10 minutes on this
+# machine, so the sweep stops at 16.
 
 # %% [markdown]
 # ## 2. One NEI step in 2-D: certificate and multistart
