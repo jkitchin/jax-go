@@ -20,9 +20,7 @@
 # everywhere else, so the search keeps resampling near the lucky point.
 #
 # Noisy expected improvement (NEI), from Letham, Karrer, Ottoni and Bakshy
-# (*Constrained Bayesian optimization with noisy experiments*, Bayesian
-# Analysis 14, 2019, doi:10.1214/18-BA1110), integrates over that uncertainty
-# instead. The GP posterior gives a joint distribution of the noise-free values
+# [letham2019constrained], integrates over that uncertainty instead. The GP posterior gives a joint distribution of the noise-free values
 # $f(X) = (f(x_1), \dots, f(x_N))$ at the data. For one sample $f_m$ of it the
 # best value is known, $f^*_m = \min_i f_{m,i}$, and EI is computed for a
 # noise-free GP conditioned on $f_m$. NEI is the average:

@@ -470,6 +470,11 @@
   "title": "Deterministic global optimization with Gaussian processes embedded"
  },
  {
+  "key": "letham2019constrained",
+  "doi": "10.1214/18-BA1110",
+  "title": "Constrained Bayesian Optimization with Noisy Experiments"
+ },
+ {
   "key": "kronqvist2025psplit",
   "doi": "10.1007/s10107-025-02232-1",
   "title": "P-split formulations: a class of intermediate formulations between big-M and convex hull for disjunctive constraints"
