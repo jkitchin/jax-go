@@ -256,7 +256,7 @@ ax.legend(fontsize=7, ncol=2, loc="upper right")
 ax.set_ylabel("f")
 ax = axes[1]
 for (name, (r, vals)), col in zip(picks.items(), (ORANGE, YELLOW, AQUA)):
-    v = -vals / -vals.max()
+    v = -vals / (-vals).max()
     ax.plot(xg, v, color=col, label=name)
     ax.plot(r.x, [1.0], "*", color=col, mec=INK, ms=13)
 ax.set_ylabel("acquisition / its max")
@@ -265,12 +265,17 @@ ax.legend(fontsize=8)
 plt.show()
 
 # %% [markdown]
-# With these data, the best observation is a lucky draw: the measured $y$ is
-# well below both the true $f$ and the GP mean there. EI with that incumbent
-# sees almost no chance of beating it and is driven by $\sigma$ alone. With the
-# posterior-mean incumbent, EI is larger but still treats $f^*$ as known. NEI
-# also accounts for the fact that the best point itself is uncertain: in some
-# fantasies another data point is the best one.
+# With these data the best observation is a lucky draw: $y = -1.23$ at
+# $x = 5.54$, where $f = -1.04$ and the GP mean is $-1.02$. The three
+# acquisition functions agree on *where* to look next (all pick
+# $x \approx 5.42$ to $5.51$, between that point and the true minimum at
+# 5.15) but not on how much there is to gain. EI below the lucky $y$ is the
+# most pessimistic (0.041); EI below the best posterior mean is the most
+# optimistic (0.106), because it treats that mean as the exact best value;
+# NEI is in between (0.066), because in each fantasy the best value, and
+# sometimes the best point, is different. In a loop these magnitudes matter:
+# they decide how exploration and exploitation are traded off at the next
+# step, and when a stopping rule based on the acquisition value fires.
 #
 # ### How many fantasies?
 #
@@ -288,7 +293,9 @@ pd.DataFrame(rows)
 
 # %% [markdown]
 # Each row is a certified maximum of its own (deterministic) approximation.
-# $M = 8$ is what the loop below uses. The function is unrolled into $M$
+# The maximizer moves by less than 0.02 between $M = 4$ and $M = 16$, and the
+# NEI value by about 0.02 at $M = 4$ and 0.002 at $M = 16$ between the two
+# seeds. $M = 8$ is what the loop below uses. The function is unrolled into $M$
 # `gp_mean` and EI terms, and the compile time grows faster than linearly:
 # at $M = 32$ the XLA compile alone took more than 10 minutes on this
 # machine, so the sweep stops at 16.
@@ -361,9 +368,13 @@ for k in (1, 2, 5, 10, 20):
 pd.DataFrame(rows)
 
 # %% [markdown]
-# Multistart is fast and usually close, and it has no way to tell when it
-# missed: the same number of starts can return the global maximum or a
-# smaller local one, depending on the seed. The branch-and-bound result
+# One start finds the global maximum in 31 of 100 runs, two starts in 70,
+# five in 97, and ten or more in all of them here. A run that misses can return
+# a much smaller value (with one start, as low as 0: a flat region where NEI
+# is zero to machine precision), and nothing in the result says that it
+# missed. Multistart is much faster than branch and bound (milliseconds against
+# a minute), so in practice it is the right tool for the loop; the certified
+# solve tells you how many starts were enough on a problem like this one. The branch-and-bound result
 # comes with a proven upper bound, so there is no question of how many starts
 # were enough.
 
@@ -456,10 +467,21 @@ plt.show()
 
 # %% [markdown]
 # Every acquisition step in both loops ends with a certificate (`status`,
-# and `acq_bound` within the tolerance of `acq`), so the difference between
-# the two runs comes from the acquisition functions, not from how well each
-# was optimized. With global optimization that separation is guaranteed;
-# with multistart, a poor step could be either.
+# and `acq_bound` within the tolerance of `acq`). A NEI step took about 55 s
+# and an EI step 17 s on the first run on a 4-core VM, almost all of it
+# compiling; with jaxglobal's on-disk kernel cache filled by that run, the
+# stored outputs show about 7 s and 2 s. So the difference between the two runs comes from the
+# acquisition functions, not from how well each was optimized; with
+# multistart a poor step could be either.
+#
+# Both strategies find the valley of the global minimum by iteration 3. After
+# 10 steps, NEI's recommendation has true $f = -6.19$, 0.20 from the true
+# minimizer, and EI's has $-5.85$, 0.28 away. In its last two steps EI with
+# the noisy incumbent spends its measurements on the boundary
+# ($x_2 = -3$, and the corner $(3, -3)$): its incumbent $-5.79$ is a lucky draw
+# below the GP mean, so improving on it looks unlikely near the data and EI
+# turns to the least-known regions. NEI keeps refining the valley. This is one
+# run with one noise sequence, an illustration rather than a benchmark.
 #
 # Note the dotted lines: the best *observed* $y$ goes below the true
 # minimum of $-6.55$ as soon as a point near it is measured, because of noise.
@@ -471,10 +493,16 @@ plt.show()
 # * NEI is a sum of $M$ expected-improvement terms over noise-free "fantasy"
 #   GPs, with fixed QMC samples. Written with `gp_mean`, `gp_std` and
 #   `expected_improvement` from `jaxglobal.gp`, it is a plain JAX function,
-#   and `minimize` returns its maximum with a proven bound: in about a
-#   minute in 2-D with $M = 8$ on a 4-core VM, most of it compiling.
-# * The cost grows about linearly in $M$ (one `gp_mean` and one EI term per
-#   fantasy). The fantasies share their $\sigma_0$, which is computed once.
+#   and `minimize` returns its maximum with a proven bound: in 2-D with
+#   $M = 8$, about a minute on a 4-core VM when the kernels are compiled
+#   for the first time and 6 s from jaxglobal's on-disk kernel cache.
+# * The solve time grows with $M$ (one `gp_mean` and one EI term per
+#   fantasy, about 540 nodes in 2-D either way), and the compile time faster
+#   than that: $M = 32$ did not compile in 10 minutes. The fantasies share
+#   their $\sigma_0$, which is computed once.
+# * Each new GP is a new problem for jaxglobal, so `solve` drops its compiled
+#   kernels after every call; without that, a loop of 20 steps ran out of
+#   memory (16 GB).
 # * The certified maximum is a deterministic reference that multistart local
 #   search can be checked against, and in the active-learning loop it removes
 #   "the optimizer missed" as an explanation for a poor step.
