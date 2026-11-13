@@ -524,3 +524,114 @@ def _pi_rule(ctx, eqn, mu, sigma, t):
 
 RULES["probability_of_improvement"] = _pi_rule
 
+
+# ---------------------------------------------------------------------------
+# Posterior covariance and the integrated posterior variance (NIPV)
+# ---------------------------------------------------------------------------
+#
+# The posterior covariance of f(x) with f at M reference points X'_j is
+#
+#     c_j(x) = k(x, X'_j) - k(x)^T A k(Z, X'_j) = k([Z; X'], x)^T Wt_j,   Wt = [-A K(Z, X'); I_M],
+#
+# a kernel expansion over the N + M centers [Z; X'] like the posterior mean: ``gp_cov`` evaluates the M
+# of them at once and its rule is the posterior mean's (the formula's relaxation intersected with the
+# first-order Taylor model with RKHS remainder, ``||c_j||_H^2 = Wt_j^T K_f Wt_j``) for each column.
+#
+# Observing y(x) = f(x) + noise with variance tau2 lowers the posterior variance at X'_j by
+# c_j(x)^2 / (sigma^2(x) + tau2), so the integrated (mean) posterior variance over X' after that
+# observation is
+#
+#     IPV(x) = mean_j sigma^2(X'_j) - sum_j c_j(x)^2 / (M (sigma^2(x) + tau2)),
+#
+# and NIPV = -IPV is the active-learning acquisition to maximize (BoTorch's
+# qNegIntegratedPosteriorVariance with q = 1 and X' its mc_points). ``integrated_posterior_variance``
+# composes it from ``gp_cov`` and ``gp_std``, so ``minimize`` of IPV is the global maximization of NIPV.
+
+gp_cov_p = Primitive("gp_cov")
+gp_cov_p.multiple_results = False
+gp_cov_p.def_impl(_mean)  # k(x, centers) @ Wt with Wt a matrix: the (M,) vector of covariances
+gp_cov_p.def_abstract_eval(
+    lambda x, C, lengthscale, Wt, sf2, rkhs, **_: x.update(shape=x.shape[:-1] + Wt.shape[1:]))
+mlir.register_lowering(gp_cov_p, mlir.lower_fun(_mean, multiple_results=False))
+ad.defjvp(gp_cov_p, lambda g, x, *rest, **p: jax.jvp(lambda u: _mean(u, *rest, **p), (x,), (g,))[1],
+          None, None, None, None, None)  # fmt: skip
+batching.primitive_batchers[gp_cov_p] = _batch_of(_mean)
+
+
+def _cov_weights(Z, lengthscale, A, sf2, Xref, kernel):
+    """Centers ``[Z; X']``, weights ``Wt = [-A K(Z, X'); I]`` and the posterior variances at ``X'``."""
+    d = jnp.sum(((Z[:, None, :] - Xref[None, :, :]) / lengthscale) ** 2, axis=-1)
+    Kzr = sf2 * KERNELS[kernel](d)  # (N, M)
+    B = A @ Kzr
+    Wt = jnp.concatenate([-B, jnp.eye(Xref.shape[0])], axis=0)
+    v_ref = sf2 - jnp.sum(Kzr * B, axis=0)
+    return jnp.concatenate([Z, Xref], axis=0), Wt, v_ref
+
+
+def _rkhs_cols(C, lengthscale, Wt, sf2, kernel):
+    """``||c_j||_H`` for each column of ``Wt`` (as ``_rkhs``), rounded up."""
+    d = jnp.sum(((C[:, None, :] - C[None, :, :]) / lengthscale) ** 2, axis=-1)
+    q = jnp.sum(Wt * ((sf2 * KERNELS[kernel](d)) @ Wt), axis=0)
+    return jnp.sqrt(jnp.maximum(q, 0.0) + 4 * (C.shape[0] + 2) * _EPS * sf2 * jnp.sum(jnp.abs(Wt), axis=0) ** 2)
+
+
+def gp_cov(x, Z, lengthscale, A, sf2, Xref, kernel="matern52"):
+    """Posterior covariances ``k(x, X'_j) - k(x)^T A k(Z, X'_j)`` of ``f(x)`` with ``f(Xref)``, shape (M,).
+
+    ``Z`` (N, n) training inputs, ``lengthscale`` (n,), ``A`` the inverse of the training covariance
+    including noise, ``sf2`` the signal variance, ``Xref`` (M, n) the reference points.
+    """
+    f = jnp.asarray
+    Z, lengthscale, A, sf2, Xref = (f(v, dtype=float) for v in (Z, lengthscale, A, sf2, Xref))
+    C, Wt, _ = _cov_weights(Z, lengthscale, A, sf2, Xref, kernel)
+    rkhs = _rkhs_cols(C, lengthscale, Wt, sf2, kernel)
+    return gp_cov_p.bind(f(x, dtype=float), C, lengthscale, Wt, sf2, rkhs, kernel=kernel)
+
+
+def _cov_rule(ctx, eqn, x, C, lengthscale, Wt, sf2, rkhs):
+    kernel = eqn.params["kernel"]
+    x = as_mc(x)
+    fn = lambda u: _mean(u, C, lengthscale, Wt, sf2, rkhs, kernel=kernel)  # noqa: E731
+    base = _relax_formula(fn, [x], ctx)
+    if kernel not in _SMOOTH or any(isinstance(v, MC) for v in (C, lengthscale, Wt, sf2, rkhs)):
+        return base
+    c, h, fin = _box(x)
+    m0, G = fn(c), jax.jacfwd(fn)(c)  # (M,), (M, n)
+    e = rkhs * _remainder(jnp.sum((h / lengthscale) ** 2), sf2, kernel)
+    # rounding, column by column as in _mean_model
+    e = e + 4 * (C.shape[0] + c.size + 2) * _EPS * (sf2 * jnp.sum(jnp.abs(Wt), axis=0) + jnp.abs(G) @ (jnp.abs(c) + h))
+    span = jnp.abs(G) @ h
+    lin_cv = m0 + jnp.sum(jnp.where(G >= 0, G * (x.cv - c), G * (x.cc - c)), axis=-1)
+    lin_cc = m0 + jnp.sum(jnp.where(G >= 0, G * (x.cc - c), G * (x.cv - c)), axis=-1)
+    lo, hi, cv, cc = m0 - span - e, m0 + span + e, lin_cv - e, lin_cc + e
+    ok = fin & jnp.isfinite(lo) & jnp.isfinite(hi) & jnp.isfinite(cv) & jnp.isfinite(cc)
+    return tighten(MC(jnp.where(ok, jnp.maximum(base.lo, lo), base.lo),
+                      jnp.where(ok, jnp.minimum(base.hi, hi), base.hi),
+                      jnp.where(ok, jnp.maximum(base.cv, cv), base.cv),
+                      jnp.where(ok, jnp.minimum(base.cc, cc), base.cc)))  # fmt: skip
+
+
+RULES["gp_cov"] = _cov_rule
+SMOOTH_IF["gp_cov"] = lambda p: p["kernel"] in _SMOOTH
+
+
+def integrated_posterior_variance(x, Z, lengthscale, A, sf2, Xref, noise, kernel="matern52", eps=1e-12):
+    """Mean posterior variance over ``Xref`` after observing ``f(x)`` with noise variance ``noise``.
+
+    ``mean_j sigma^2(X'_j) - sum_j c_j(x)^2 / (M (sigma^2(x) + noise))``, ``c = gp_cov(x, ...)``. Minimizing
+    it over ``x`` maximizes the NIPV acquisition (``negative_integrated_posterior_variance``). ``Xref``
+    (M, n) are the integration points (a grid or a space-filling sample of the domain); ``A`` the inverse
+    of the training covariance including noise, as for ``gp_std``.
+    """
+    f = jnp.asarray
+    Z, lengthscale, A, sf2, Xref = (f(v, dtype=float) for v in (Z, lengthscale, A, sf2, Xref))
+    _, _, v_ref = _cov_weights(Z, lengthscale, A, sf2, Xref, kernel)
+    c = gp_cov(x, Z, lengthscale, A, sf2, Xref, kernel=kernel)
+    s = gp_std(x, Z, lengthscale, A, sf2, kernel=kernel, eps=eps)
+    return jnp.mean(v_ref) - jnp.sum(c * c, axis=-1) / (Xref.shape[0] * (s * s + noise))
+
+
+def negative_integrated_posterior_variance(x, Z, lengthscale, A, sf2, Xref, noise, kernel="matern52", eps=1e-12):
+    """The NIPV acquisition, ``-integrated_posterior_variance(...)``: to be maximized."""
+    return -integrated_posterior_variance(x, Z, lengthscale, A, sf2, Xref, noise, kernel=kernel, eps=eps)
+
