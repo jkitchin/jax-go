@@ -29,3 +29,5 @@ jaxglobal,m424_kClus_5_10_3_BM_1,time_limit,60.227729340000224,0.373698927836883
 jaxglobal,m425_kClus_5_10_5_BM_1,time_limit,60.36894276299972,1.2429860623069797,0.007840983427809839,2047,time_limit,4.03
 jaxglobal,m469_Adhya1_2Player_PriceTaker_FixedCharge0,time_limit,60.46678869900006,1087.7240538171627,1507.3666502588123,1561,time_limit,3.66
 jaxglobal,m470_Adhya1_2Player_PriceTaker_FixedCharge1,time_limit,60.23947544400016,363.19878134624514,1088.3965590361731,255,time_limit,4.13
+jaxglobal,m471_Adhya1_2Player_NashCournot_FixedCharge0,time_limit,60.65003770399926,892.7240538171627,1343.4798575203909,877,time_limit,5.67
+jaxglobal,m480_OPF_33_SBB,time_limit,60.00051711499964,nan,nan,0,time_limit,5.57

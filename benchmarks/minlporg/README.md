@@ -239,6 +239,94 @@ neither finishes, jaxglobal's incumbent is the better one only on m128 (1.11e6 a
 The Belgian chocolate problems m48-m50 are unsolved by both solvers, and m20/m21/m425/m480 by
 SCIP as well.
 
+## Stage 2: gaps 2 and 3
+
+**Gap 2, unbounded variables.** Of the four unsupported instances:
+
+* m77 and m78 (heat-exchanger networks) are now bounded. Their free variables are heat loads
+  `q(i,j,3)` of a temperature location that is not a stage: no constraint uses them, only the
+  area cost, which sums over all locations and rises with `q`. `domain.objective_only_bounds`
+  fixes a free variable that no constraint uses (structurally) where the interval of the
+  objective's partial derivative over the box has one sign (smooth objectives only: no `abs`,
+  `max`, `where`, ...), at the bound the objective decreases toward. This needed `x**p`, `p < 0`,
+  on a box touching 0 to be `[hi**p, inf]` (as `1/x` in gap 1; `relax.mc_pow_const`). Both now
+  run; neither has a result at 60 s (m78 has SCIP's 154,997.33 after about 180 s).
+* m76 still is not bounded: its free variables are log-mean temperature differences defined by
+  `lmtd = (dt1 - dt2) / log(dt1 / dt2)`, whose interval needs a rule for the log mean.
+* m4 still is not bounded: `yyp`, `yyn` are bounded only through the bilinear penalty
+  `uup * yyp + uun * yyn` with `uup + uun = 2`, which needs joint reasoning.
+* m19 is unsupported in both runs here (in stage 2 only in the warm run): its bounds depend on a
+  feasible point found within `bound_domain`'s deadline.
+
+**Gap 3, time-limit overruns.** Profiles of m31, m49 and m50, cold and under the load of a second
+solve, showed four steps that run past the deadline: a batch of local solves (only the polish
+passed pounce's `max_wall_time`), the first compile of the local solver's callbacks inside the
+first local solve, a new compile of the candidate screen (`viol`, `fvals`) for each new number of
+candidates, and the root OBBT kernel (one call, 30.6 s on m49, started with 11.6 s left). Now
+every local-solve batch gets `max_wall_time` from the time left, the callbacks and the smallest
+screen batch compile in background threads when the solver is built, screens run on power-of-two
+batches, and the root OBBT is skipped with less than 10 times the slowest bound-kernel call left.
+Cold, two solves at a time, 60 s limit: m49 147 -> 60-62 s, m50 130 -> 61 s, m32 70 -> 60 s, m31
+72 -> 66-68 s.
+
+What is left: the first call of the root bound kernel cannot be interrupted, and on a machine
+oversubscribed by two solves (each with multithreaded XLA kernels and compile threads; load 6.4
+on 4 cores) it ran 9 times longer than alone (90 s against 9.7 s on m48). In the warm rerun below
+this made m48 and m49 return after 143 s and 137 s; run the same way by hand they returned after
+60-63 s (and after 88 s without the background compiles). Limiting XLA's threads per worker when
+running jobs in parallel would address it on the benchmark side.
+
+**Rerun** (`benchmarks/results/minlporg_stage2_g23_cold.csv`, `minlporg_stage2_g23_warm.csv`;
+SCIP rows from the stage 2 run):
+
+| | before cold | after cold | before warm | after warm |
+|---|---:|---:|---:|---:|
+| solved (SCIP 20) | 8 | 9 | 8 | 9 |
+| unsupported | 4 | 3 | 5 | 3 |
+| longest run | 147 s | 68 s | 105 s | 143 s |
+| runs over 65 s | 3 | 1 | 2 | 4 |
+
+No wrong answers. Solved where both runs solve are also faster (cold: m33 46 -> 30 s, m274
+43 -> 24 s, m390 44 -> 25 s, m392 32 -> 16 s; mostly the gap 2 callbacks of stage 1), m127 is now
+solved (54 s), and m31, m48, m49, m128 and m425 have better or first incumbents.
+
+| instance | type | vars (bin) | cons | reference | SCIP | jaxglobal cold | jaxglobal warm | class | pass (cold / warm) |
+|---|---|---:|---:|---:|---|---|---|---|---|
+| m3_del_asl_miqp | MIQP | 71 (10) | 79 | 1.47378 | optimal 0.00775 s, 1.47378 | optimal 16.5 s, 1.47378 | optimal 12.1 s, 1.47378 | solved | - / - |
+| m4_del_asl_hfix | NLP | 121 (0) | 99 | 1.4735 | optimal 0.0474 s, 1.4735 | unsupported | unsupported | unsupported | - / - |
+| m5_del_asl_minlp | MINLP | 81 (10) | 100 | 1.5364 | optimal 0.544 s, 1.53642 | time_limit 60.3 s, 1.53642 | time_limit 60.5 s, 1.53642 | unsolved | - / - |
+| m19_MTG_EX1 | MINLP | 125 (48) | 196 | 352.446 | optimal 48.9 s, 352.446 | unsupported | unsupported | unsupported | - / - |
+| m20_MTG_EX1a | MINLP | 194 (93) | 257 | 391.613 | time_limit 60 s, 388.489 | time_limit 62.3 s,  | time_limit 65.8 s,  | unsolved | - / - |
+| m21_MTG_EX1b | MINLP | 194 (93) | 257 | 450.548 | time_limit 60 s, 382.95 | time_limit 62 s,  | time_limit 61.6 s,  | unsolved | - / - |
+| m31_nonconvex1 | MINLP | 34 (12) | 67 | 285506 | optimal 0.628 s, 285507 | time_limit 68 s, 374648 | time_limit 60.8 s, 347643 | unsolved | - / - |
+| m32_nonconvex2 | MINLP | 76 (36) | 205 | 2.68703e+06 | optimal 0.752 s, 2.68703e+06 | time_limit 60 s,  | time_limit 73.2 s,  | unsolved | - / - |
+| m33_convex1 | MINLP | 46 (24) | 73 | 285506 | optimal 0.403 s, 285507 | optimal 30.1 s, 285507 | optimal 16.1 s, 285507 | solved | - / - |
+| m48_bcp7 | MINLP | 134 (8) | 153 | 0.9629 | time_limit 60 s,  | time_limit 60.7 s, 0.957333 | time_limit 143 s,  | unsolved | - / - |
+| m49_bcp6 | MINLP | 118 (7) | 134 | 0.9609 | time_limit 60 s,  | time_limit 61.1 s, 0.951269 | time_limit 137 s,  | unsolved | - / - |
+| m50_bcp5 | MINLP | 90 (6) | 103 | 0.9519 | time_limit 60 s,  | time_limit 60.7 s, 0.95098 | time_limit 62.1 s, 0.95098 | unsolved | - / - |
+| m60_GMA_ethanol_model_BigM | MINLP | 37 (24) | 72 | -157.587 | optimal 0.226 s, -157.587 | time_limit 60 s,  | time_limit 60 s,  | unsolved | - / - |
+| m61_GMA_ethanol_model_CH | MINLP | 61 (24) | 80 | -157.587 | optimal 0.134 s, -157.587 | time_limit 60 s,  | time_limit 60 s,  | unsolved | - / - |
+| m76_General_Model_Case1 | MINLP | 112 (12) | 120 | 170750 | time_limit 60 s, 170750 | unsupported | unsupported | unsupported | - / - |
+| m77_Specilized_Model_Case2_NLP_Improvement | MINLP | 76 (16) | 90 | 634978 | optimal 38.8 s, 634978 | time_limit 60 s,  | time_limit 60 s,  | unsolved | - / - |
+| m78_Specilized_Model_Case1 | MINLP | 56 (12) | 64 | 154997 | time_limit 60 s, 154997 | time_limit 60 s,  | time_limit 61.8 s, 197983 | unsolved | - / - |
+| m126_generalizedpooling_lee1 | MIQCP | 49 (9) | 82 | -4640.08 | optimal 2.09 s, -4640.08 | optimal 36.3 s, -4640.08 | optimal 36 s, -4640.08 | solved | - / - |
+| m127_generalizedpooling_lee2 | MIQCP | 53 (9) | 92 | -3849.27 | optimal 4.46 s, -3849.27 | optimal 54.1 s, -3849.27 | optimal 54.5 s, -3849.27 | solved | - / - |
+| m128_generalizedpooling_meyer4 | MIQCP | 118 (55) | 141 | 1.24981e+06 | time_limit 60 s, 1.24981e+06 | time_limit 60.4 s, 1.11235e+06 | time_limit 60.4 s, 1.12278e+06 | unsolved | - / - |
+| m274_MPBP_029 | MIQCP | 102 (36) | 213 | 13.3594 | optimal 2.22 s, 13.3594 | optimal 24.1 s, 13.3594 | optimal 19.5 s, 13.3594 | solved | - / - |
+| m384_pareto_linear_convex | MINLP | 49 (40) | 96 | 0.992899 | optimal 0.0215 s, 0.992899 | optimal 20.5 s, 0.992899 | optimal 16.5 s, 0.992899 | solved | - / - |
+| m390_CLay0204BM | MIQCP | 52 (32) | 90 | 6545 | optimal 1.01 s, 6545 | optimal 24.8 s, 6545 | optimal 21.1 s, 6545 | solved | - / - |
+| m392_CLay0303BM | MIQCP | 33 (21) | 66 | 26669.1 | optimal 0.627 s, 26669.1 | optimal 15.8 s, 26669.1 | optimal 12.2 s, 26669.1 | solved | - / - |
+| m393_CLay0304BM | MIQCP | 56 (36) | 106 | 40262.4 | optimal 1.63 s, 40262.4 | optimal 29.8 s, 40262.4 | optimal 24.9 s, 40262.4 | solved | - / - |
+| m423_kClus_5_10_2_BM_1 | MIQCP | 70 (50) | 69 | 0.101129 | optimal 3.97 s, 0.10115 | time_limit 60.3 s, 0.126211 | time_limit 60.2 s, 0.107641 | unsolved | - / - |
+| m424_kClus_5_10_3_BM_1 | MIQCP | 75 (50) | 69 | 0.373649 | optimal 20.2 s, 0.373697 | time_limit 60.2 s, 0.515463 | time_limit 60.2 s, 0.373699 | unsolved | - / - |
+| m425_kClus_5_10_5_BM_1 | MIQCP | 85 (50) | 69 | 0.991268 | time_limit 60 s, 0.999356 | time_limit 60.4 s, 1.11339 | time_limit 60.4 s, 1.24299 | unsolved | - / - |
+| m469_Adhya1_2Player_PriceTaker_FixedCharge0 | MIQCP | 75 (0) | 99 | 1089.18 | time_limit 60 s, 1089.18 | time_limit 60.4 s, 1087.72 | time_limit 60.5 s, 1087.72 | unsolved | - / - |
+| m470_Adhya1_2Player_PriceTaker_FixedCharge1 | MIQCP | 85 (10) | 119 | 545 | optimal 43.2 s, 545 | time_limit 60.2 s, 363.199 | time_limit 60.2 s, 363.199 | unsolved | - / - |
+| m471_Adhya1_2Player_NashCournot_FixedCharge0 | MIQCP | 75 (0) | 99 | 894.175 | time_limit 60 s, 894.175 | time_limit 60.2 s, 892.724 | time_limit 60.7 s, 892.724 | unsolved | - / - |
+| m480_OPF_33_SBB | MINLP | 134 (33) | 133 | 0.7279 | time_limit 60 s, 2.10987 | time_limit 60.8 s,  | time_limit 60 s,  | unsolved | - / - |
+
+classes (cold): solved 9, unsolved 20, unsupported 3
+
 ## Notes on the instances
 
 * **mps2gms changed the quadratic MPS models.** Converted with GAMS `mps2gms`, the four Haverly
