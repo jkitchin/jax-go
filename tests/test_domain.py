@@ -382,3 +382,63 @@ def test_objective_only_model_solved():
     a = np.clip(np.maximum(1 - t, 1.0), 0, 4)
     ref = np.min((a - 1) ** 2 + t**2)
     assert r.fun <= ref + 1e-6 and r.lower_bound <= ref + 1e-9
+
+
+# --- feasible-point search: pounce, MILP projection of the integers (minlp.org m19-m21) ---------
+
+from jaxglobal.domain import _feasible_points, _milp_projection  # noqa: E402
+
+
+def _assignment_model(k=6):
+    """Binaries y (k x k) with every row and column summing to 1, continuous t >= 0 free above,
+    and t >= sum_ij c_ij y_ij: a fractional relaxation (all y = 1/k) rounds to all zeros or all
+    ones, which break the assignment rows; the objective cutoff is what bounds t."""
+    rng = np.random.default_rng(3)
+    C = rng.uniform(1, 5, (k, k))
+    n = k * k + 1
+
+    def f(x):
+        return x[-1] + 0.01 * jnp.sum(x[:-1] ** 2)
+
+    def g(x):
+        y = x[:-1].reshape(k, k)
+        return jnp.atleast_1d(jnp.sum(C * y) - x[-1])
+
+    def h(x):
+        y = x[:-1].reshape(k, k)
+        return jnp.concatenate([y.sum(0) - 1.0, y.sum(1) - 1.0])
+
+    lo, hi = np.zeros(n), np.r_[np.ones(n - 1), INF]
+    imask = np.r_[np.ones(n - 1, bool), False]
+    return f, g, h, lo, hi, imask, k
+
+
+def test_milp_projection_meets_linear_integer_rows():
+    f, g, h, lo, hi, imask, k = _assignment_model()
+    c = lambda x: jnp.concatenate([g(x), h(x)])  # noqa: E731
+    r = np.r_[np.full(k * k, 1.0 / k), 10.0]
+    x = _milp_projection(c, 1, r, lo, hi, imask, 5.0)
+    assert x is not None
+    y = x[:-1].reshape(k, k)
+    assert np.all(np.isin(y, [0.0, 1.0]))
+    np.testing.assert_allclose(y.sum(0), 1.0)
+    np.testing.assert_allclose(y.sum(1), 1.0)
+
+
+def test_feasible_points_finds_integer_point_and_bounds_free_variable():
+    f, g, h, lo, hi, imask, k = _assignment_model()
+    x, fx = _feasible_points(f, g, h, lo, hi, 1e-6, 6, 0, integer=imask)
+    assert x is not None and np.isfinite(fx)
+    assert np.max(np.asarray(g(jnp.asarray(x)))) <= 1e-6 and np.max(np.abs(np.asarray(h(jnp.asarray(x))))) <= 1e-6
+    L, H, infeasible, xf, ff = bound_domain(f, g, h, lo, hi, integer=imask)
+    assert not infeasible and np.isfinite(H[-1])
+
+
+def test_assignment_model_solved():
+    f, g, h, lo, hi, imask, k = _assignment_model(4)
+    r = minimize(f, lo, hi, ineq=g, eq=h, integer=imask)
+    assert r.status == "optimal"
+    from itertools import permutations
+    C = np.random.default_rng(3).uniform(1, 5, (4, 4))
+    best = min(sum(C[i, p[i]] for i in range(4)) for p in permutations(range(4))) + 0.01 * 4
+    assert abs(r.fun - best) <= 1e-4 * (1 + abs(best)) and r.lower_bound <= best + 1e-6

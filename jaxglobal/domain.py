@@ -229,7 +229,151 @@ def monotone_bounds(f, ineq, eq, lo, hi, integer=None, struct=None):
     return lo, hi
 
 
+_MILP_JAC_MAX = 2_000_000  # dense constraint Jacobian entries above which no MILP projection is tried
+_MILP_TIME = 10.0  # s per MILP projection (scipy HiGHS), at most
+_MILP_POINTS = 4  # relaxation points projected
+
+
+def _starts(lo, hi, k, seed):
+    """``k`` scattered starts in the box (infinite ends allowed), inset from finite bounds."""
+    rng = np.random.default_rng(seed)
+    fin = np.isfinite(lo) & np.isfinite(hi)
+    mid = np.where(fin, 0.5 * (np.where(fin, lo, 0.0) + np.where(fin, hi, 0.0)), np.clip(0.0, lo, hi))
+    S = np.stack([mid] + [mid + rng.normal(size=lo.size) * 10.0 ** (j % 3) for j in range(1, k)])
+    S = np.clip(S, lo, hi)
+    inset = 1e-3 * np.where(fin, np.minimum(hi - lo, 1.0), 1.0)
+    S = np.where(np.isfinite(lo) & (S - lo < inset) & (hi - lo > 2 * inset), lo + inset, S)
+    return np.where(np.isfinite(hi) & (hi - S < inset) & (hi - lo > 2 * inset), hi - inset, S)
+
+
+def _milp_projection(c, m_ineq, r, lo, hi, imask, time_limit):
+    """Integers near the relaxation point ``r`` that satisfy the constraints linearized at ``r``.
+
+    One MILP (scipy's HiGHS): minimize ``sum |x_i - r_i|`` over the integer variables subject to
+    ``g(r) + J_g (x - r) <= 0``, ``h(r) + J_h (x - r) = 0`` and the box, the continuous variables
+    free in it. Rows linear in ``x`` (assignment rows ``sum_j y_ij = 1``, budgets, big-M links)
+    hold exactly, which independent rounding of a fractional ``r`` rarely achieves. Returns the
+    MILP's ``x`` (integers rounded) or None. Only a candidate: it is fix-and-solved and
+    screened like any other.
+    """
+    from scipy.optimize import Bounds, LinearConstraint, milp
+
+    with jax.ensure_compile_time_eval():
+        J = np.asarray(jax.jacfwd(c)(jnp.asarray(r)), np.float64)
+        cr = np.asarray(c(jnp.asarray(r)), np.float64)
+    if not (np.all(np.isfinite(J)) and np.all(np.isfinite(cr))):
+        return None
+    n, ii = r.size, np.flatnonzero(imask)
+    k, m = ii.size, cr.size
+    b = J @ r - cr
+    lin_lo = np.where(np.arange(m) < m_ineq, -np.inf, b) - 1e-9 * (1 + np.abs(b))
+    E = np.zeros((k, n))
+    E[np.arange(k), ii] = 1.0
+    cons = [LinearConstraint(np.hstack([J, np.zeros((m, k))]), lin_lo, b + 1e-9 * (1 + np.abs(b))),
+            LinearConstraint(np.hstack([E, -np.eye(k)]), -np.inf, r[ii]),  # d >= x - r
+            LinearConstraint(np.hstack([-E, -np.eye(k)]), -np.inf, -r[ii])]  # d >= r - x
+    try:
+        res = milp(np.r_[np.zeros(n), np.ones(k)], constraints=cons, integrality=np.r_[imask.astype(int), np.zeros(k, int)],
+                   bounds=Bounds(np.r_[lo, np.zeros(k)], np.r_[hi, np.full(k, np.inf)]),
+                   options={"time_limit": float(max(time_limit, 0.1))})  # fmt: skip
+    except Exception:
+        return None
+    if res.x is None:
+        return None
+    x = np.clip(res.x[:n], lo, hi)
+    return np.where(imask, np.clip(np.round(x), lo, hi), x)
+
+
+def _pounce_points(f, ineq, eq, lo, hi, feas_tol, n_starts, seed, deadline, imask):
+    """Feasible points by pounce local solves; ``(x, f)`` of the best, or ``(None, inf)``.
+
+    The continuous relaxation is solved from ``n_starts`` scattered starts (one batch). With
+    integers, the ``_MILP_POINTS`` least violated relaxation points are projected
+    (``_milp_projection``) and their integers fixed for a solve of the continuous variables; if
+    that gives no feasible point, each relaxation point is rounded at the ``bnb.ROUNDINGS``
+    thresholds and fix-and-solved, as ``minimize`` does. On minlp.org m19-m21 (periodic scheduling, 48 to 93 binaries in
+    assignment rows) rounding gave no feasible point and SLSQP none in 20-30 s; the projection
+    gives one in 3-5 s."""
+    import importlib.util
+
+    if importlib.util.find_spec("pounce") is None:
+        return None, np.inf
+    from .bnb import ROUNDINGS
+    from .local import _vec, make_local
+
+    g, h = _vec(ineq), _vec(eq)
+    c = lambda x: jnp.concatenate([g(x), h(x)])  # noqa: E731
+    n = lo.size
+    with jax.ensure_compile_time_eval():
+        m_ineq = int(np.size(jax.eval_shape(g, jax.ShapeDtypeStruct((n,), jnp.float64))))
+        m = m_ineq + int(np.size(jax.eval_shape(h, jax.ShapeDtypeStruct((n,), jnp.float64))))
+
+    def left():
+        return np.inf if deadline is None else deadline - time.perf_counter()
+
+    def opts():
+        o = {"max_iter": 300}
+        if np.isfinite(left()):
+            o["max_wall_time"] = float(max(left(), 0.05))
+        return o
+
+    try:
+        solve = make_local(f, ineq, eq, lo, hi, "pounce")
+        R = np.clip(np.asarray(solve(_starts(lo, hi, n_starts, seed), options=opts())), lo, hi)
+    except Exception:
+        return None, np.inf
+    viol = jax.jit(jax.vmap(lambda x: jnp.maximum(jnp.max(jnp.append(g(x), -jnp.inf)), jnp.max(jnp.append(jnp.abs(h(x)), 0.0)))))
+    fv = jax.jit(jax.vmap(f))
+
+    def best_of(X):
+        X = np.asarray(X, np.float64)
+        V, F = np.asarray(viol(jnp.asarray(X))), np.asarray(fv(jnp.asarray(X)))
+        ok = (V <= feas_tol) & np.isfinite(F)
+        if imask.any():
+            ok &= np.all(np.abs(X[:, imask] - np.round(X[:, imask])) <= 1e-9, axis=1)
+        if not ok.any():
+            return None, np.inf
+        i = int(np.argmin(np.where(ok, F, np.inf)))
+        return X[i], float(F[i])
+
+    def fix_and_solve(P):
+        L, H = np.where(imask, P, lo), np.where(imask, P, hi)
+        return np.clip(np.asarray(solve(P, L, H, options=opts())), L, H)
+
+    if not imask.any():
+        return best_of(R)
+    best = (None, np.inf)
+    try:
+        # the MILP projection first (it keeps linear rows on the integers); the roundings only if it
+        # finds nothing: on m19-m21 they cost 15 to 25 s and found nothing
+        if left() > 0 and m and m * n <= _MILP_JAC_MAX:
+            V = np.asarray(viol(jnp.asarray(R)))
+            Q = [_milp_projection(c, m_ineq, R[i], lo, hi, imask, min(_MILP_TIME, left())) for i in np.argsort(V)[:_MILP_POINTS]
+                 if left() > 0]  # fmt: skip
+            Q = [q for q in Q if q is not None]
+            if Q and left() > 0:
+                best = best_of(fix_and_solve(np.unique(np.array(Q), axis=0)))
+        if best[0] is None and left() > 0:
+            fl = np.floor(R)
+            P = np.unique(np.concatenate([np.where(imask, np.clip(fl + (R - fl > t), lo, hi), R) for t in ROUNDINGS]), axis=0)
+            best = best_of(fix_and_solve(P))
+    except DomainTimeout:
+        pass
+    return best
+
+
 def _feasible_points(f, ineq, eq, lo, hi, feas_tol, n_starts, seed, deadline=None, integer=None):
+    """A feasible point and its value, or ``(None, inf)``: pounce local solves with rounding and
+    MILP projection of the integers (``_pounce_points``), then, if they find none and time is
+    left, the scipy SLSQP search (``_slsqp_points``)."""
+    imask = np.zeros(lo.size, bool) if integer is None else np.asarray(integer, bool)
+    x, fx = _pounce_points(f, ineq, eq, lo, hi, feas_tol, n_starts, seed, deadline, imask)
+    if x is not None or (deadline is not None and time.perf_counter() > deadline):
+        return x, fx
+    return _slsqp_points(f, ineq, eq, lo, hi, feas_tol, n_starts, seed, deadline, integer)
+
+
+def _slsqp_points(f, ineq, eq, lo, hi, feas_tol, n_starts, seed, deadline=None, integer=None):
     """Local solves (scipy SLSQP, infinite bounds allowed) from scattered starts.
 
     With ``integer`` (a mask) a point counts only when it is integral: each
