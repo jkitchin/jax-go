@@ -101,6 +101,7 @@ nav:
           - "05 Throughput": notebooks/05-throughput.ipynb
           - "06 Gaussian processes": notebooks/06-gaussian-processes.ipynb
           - "14 Noisy expected improvement": notebooks/14-noisy-expected-improvement.ipynb
+          - "15 Integrated posterior variance": notebooks/15-integrated-posterior-variance.ipynb
       - Comparison with Pyomo:
           - "07 Overview": notebooks/07-pyomo-overview.ipynb
           - "08 Basics": notebooks/08-pyomo-basics.ipynb

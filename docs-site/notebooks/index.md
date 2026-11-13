@@ -16,6 +16,7 @@ call.
 | [05 Throughput](05-throughput.ipynb) | Throughput of the batched `jit(vmap)` bounding kernel vs batch size, compile cost, and where a full solve spends its time. |
 | [06 Gaussian processes](06-gaussian-processes.ipynb) | Optimizing over trained Gaussian processes with the kernels from `jaxglobal.kernels` and the standard deviation, EI and PI from `jaxglobal.gp`: GP-mean minimization, acquisition functions, a chance constraint built from a second GP, and a short Bayesian-optimization loop. |
 | [14 Noisy expected improvement](14-noisy-expected-improvement.ipynb) | Active learning with noisy measurements: noisy expected improvement (NEI) as a sum of EI terms over noise-free fantasy GPs, built from `jaxglobal.gp` and maximized with a certificate; NEI vs EI with a noisy incumbent in 1-D, a certified 2-D step checked against multistart L-BFGS-B, and an active-learning loop on noisy peaks. |
+| [15 Integrated posterior variance](15-integrated-posterior-variance.ipynb) | Active learning for a globally accurate model: the NIPV acquisition (`integrated_posterior_variance`, built from `gp_cov` and `gp_std`) maximized with a certificate in 2-D and 4-D, against random sampling, sampling + L-BFGS-B and multistart L-BFGS-B on time and value found, and along an 8-step loop. |
 
 ## Comparison with Pyomo
 

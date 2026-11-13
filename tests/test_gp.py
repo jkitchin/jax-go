@@ -448,3 +448,105 @@ def test_erfc_relaxation_sound():
         X = jnp.asarray(np.concatenate([rng.uniform(a, a + w, (200, 1)), [[a], [a + w]]]))
         m, V = R(X, jnp.array([a]), jnp.array([a + w])), jax.vmap(F)(X)
         assert float(jnp.max(m.cv - V)) <= 1e-13 and float(jnp.max(V - m.cc)) <= 1e-13
+
+
+# ---------------------------------------------------------------------------
+# Posterior covariance and the integrated posterior variance (NIPV)
+# ---------------------------------------------------------------------------
+
+from jaxglobal.gp import gp_cov, integrated_posterior_variance, negative_integrated_posterior_variance  # noqa: E402
+
+XREF = np.array([[a, b] for a in np.linspace(-1, 1, 5) for b in np.linspace(-1, 1, 5)])
+
+
+def kmat(P, Q, ls, sf2, kernel):
+    return sf2 * np.asarray(kernels.KERNELS[kernel](jnp.asarray((((P[:, None] - Q[None]) / ls) ** 2).sum(-1))))
+
+
+def cov_formula(Z, ls, A, sf2, Xr, kernel):
+    ker, B = kernels.KERNELS[kernel], A @ kmat(Z, Xr, ls, sf2, kernel)
+
+    def cov(x):
+        kz, kr = sf2 * ker(jnp.sum(((x - Z) / ls) ** 2, -1)), sf2 * ker(jnp.sum(((x - Xr) / ls) ** 2, -1))
+        return kr - kz @ B
+
+    return cov
+
+
+@pytest.mark.parametrize("kernel", ["matern52", "se", "matern32"])
+def test_cov_and_ipv_match_formula(kernel):
+    """gp_cov is the posterior covariance; IPV is the mean posterior variance at XREF after adding (x, noise)."""
+    noise = 1e-4
+    Z, ls, A, _, sf2 = trained(kernel, noise, n_train=10)
+    f = jax.jit(jax.vmap(lambda x: gp_cov(x, Z, ls, A, sf2, XREF, kernel=kernel)))
+    g = jax.vmap(cov_formula(Z, ls, A, sf2, XREF, kernel))
+    X = np.random.default_rng(11).uniform(-1, 1, (12, 2))
+    np.testing.assert_allclose(f(jnp.asarray(X)), g(jnp.asarray(X)), rtol=1e-9, atol=1e-10)
+    np.testing.assert_allclose(jax.jacfwd(lambda x: gp_cov(x, Z, ls, A, sf2, XREF, kernel=kernel))(X[0]),
+                               jax.jacfwd(cov_formula(Z, ls, A, sf2, XREF, kernel))(jnp.asarray(X[0])), rtol=1e-7, atol=1e-9)
+    for x in X:  # condition on Z and x explicitly
+        Za = np.vstack([Z, x])
+        Ka, Kr = kmat(Za, Za, ls, sf2, kernel) + noise * np.eye(len(Za)), kmat(Za, XREF, ls, sf2, kernel)
+        brute = np.mean(sf2 - np.sum(Kr * np.linalg.solve(Ka, Kr), 0))
+        ipv = float(integrated_posterior_variance(jnp.asarray(x), Z, ls, A, sf2, XREF, noise, kernel=kernel))
+        assert abs(ipv - brute) <= 1e-9
+        nipv = float(negative_integrated_posterior_variance(jnp.asarray(x), Z, ls, A, sf2, XREF, noise, kernel=kernel))
+        assert nipv == -ipv
+
+
+@pytest.mark.parametrize("safe", [False, True], ids=["plain", "safe"])
+@pytest.mark.parametrize("noise", [1e-6, 1e-2])
+@pytest.mark.parametrize("kernel", ["matern52", "se", "matern32"])
+def test_cov_relaxation_sound(kernel, noise, safe):
+    Z, ls, A, _, sf2 = trained(kernel, noise, n_train=10)
+    f = lambda x: gp_cov(x, Z, ls, A, sf2, XREF, kernel=kernel)  # noqa: E731
+    g = jax.vmap(cov_formula(Z, ls, A, sf2, XREF, kernel))
+    rf = jax.jit(jax.vmap(relax(f, safe=safe), in_axes=(0, None, None)))
+    rng = np.random.default_rng(12)
+    for lo, hi in boxes(rng, 10):
+        X = np.concatenate([rng.uniform(lo, hi, (300, 2)), np.array([lo, hi, [lo[0], hi[1]], [hi[0], lo[1]]])])
+        m, F = rf(X, lo, hi), np.asarray(g(jnp.asarray(X)))
+        tol = 1e-9 * (1 + np.abs(F).max())
+        assert np.all(m.lo <= F + tol) and np.all(F <= m.hi + tol)
+        assert np.all(m.cv <= F + tol) and np.all(F <= m.cc + tol)
+
+
+def test_cov_interval_converges():
+    """On small boxes each covariance's interval approaches its true range (the formula's stays wider)."""
+    Z, ls, A, _, sf2 = trained(noise=1e-4, n_train=10)
+    f = lambda x: gp_cov(x, Z, ls, A, sf2, XREF)  # noqa: E731
+    rp, rf = jax.jit(relax(f)), jax.jit(relax(cov_formula(Z, ls, A, sf2, XREF, "matern52")))
+    rng = np.random.default_rng(13)
+    ratios = []
+    for _ in range(10):
+        c = rng.uniform(-0.99, 0.99, 2)
+        lo, hi = jnp.asarray(c - 0.005), jnp.asarray(c + 0.005)
+        F = jax.vmap(f)(jnp.asarray(rng.uniform(lo, hi, (2000, 2))))
+        true = F.max(0) - F.min(0)
+        mp, mf = rp(jnp.asarray(c), lo, hi), rf(jnp.asarray(c), lo, hi)
+        ratios.append((float(jnp.median((mp.hi - mp.lo) / true)), float(jnp.median((mf.hi - mf.lo) / true))))
+    r = np.median(np.array(ratios), axis=0)
+    assert r[0] <= 2.0 and r[1] >= 5 * r[0], r  # measured: about 1.7 and 17
+
+
+def test_ipv_node_bound_below_sampled_min():
+    Z, ls, A, _, sf2 = trained(noise=1e-4, n_train=10)
+    ipv = lambda x: integrated_posterior_variance(x, Z, ls, A, sf2, XREF, 1e-4)  # noqa: E731
+    bound = jax.jit(make_bounder(ipv, univariate=True, alphabb=True))
+    fv = jax.jit(jax.vmap(ipv))
+    rng = np.random.default_rng(14)
+    for lo, hi in boxes(rng, 8):
+        lb = float(bound(jnp.asarray(lo), jnp.asarray(hi))[0])
+        fmin = float(np.min(fv(jnp.asarray(rng.uniform(lo, hi, (4000, 2))))))
+        assert lb <= fmin + 1e-9 * (1 + abs(fmin))
+
+
+def test_nipv_global_max_certified():
+    """max NIPV = min IPV: certified, and no grid point does better."""
+    Z, ls, A, _, sf2 = trained(noise=1e-4, n_train=10)
+    ipv = lambda x: integrated_posterior_variance(x, Z, ls, A, sf2, XREF, 1e-4)  # noqa: E731
+    r = minimize(ipv, LO, HI, abs_tol=1e-4, rel_tol=1e-4, time_limit=120)
+    assert r.status == "optimal"
+    G = np.linspace(-1, 1, 201)
+    v = np.asarray(jax.jit(jax.vmap(ipv))(jnp.asarray([[a, b] for a in G for b in G])))
+    assert r.lower_bound <= v.min() + 1e-9 and r.fun <= v.min() + 1e-6
