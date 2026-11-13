@@ -1,0 +1,17 @@
+solver,name,status,time,primal,dual,nodes,message,load
+jaxglobal,m8_Model_P2,optimal,14.752924713999619,2260.256562836033,2260.093210472956,197,optimal,1.43
+jaxglobal,m245_Model_E2,optimal,27.01053842400006,2068.200555453746,2068.2000614140907,1,optimal,1.71
+jaxglobal,m7_Model_P1,time_limit,60.18593064100014,2261.1276428722636,2224.500580021855,2131,time_limit,1.43
+jaxglobal,m266_Formulation_MINLP,time_limit,60.02144562800004,nan,nan,0,time_limit,4.10
+jaxglobal,m383_single_obj,optimal,11.347975626999869,335.1435362656437,335.1488013302631,355,optimal,3.31
+jaxglobal,m267_Formulation_MIQP,time_limit,60.02109837299986,nan,nan,0,time_limit,3.69
+jaxglobal,m389_CLay0203BM,optimal,14.157244710999748,41573.26252221357,41573.25255897416,149,optimal,3.55
+jaxglobal,m417_kClus_3_10_2_BM_1,optimal,32.04057817099965,0.32892289079402515,0.3288976803382727,2659,optimal,3.50
+jaxglobal,m418_kClus_3_10_3_BM_1,optimal,26.268744717000118,0.9836792813411219,0.9835960766177896,1561,optimal,3.35
+jaxglobal,m465_Haverly_2Player_PriceTaker_FixedCharge0,optimal,6.959941270999934,1749.9999999998195,1750.0038603150062,73,optimal,3.75
+jaxglobal,m466_Haverly_2Player_PriceTaker_FixedCharge1,optimal,19.00850399000001,1524.9999999999761,1525.0057484854103,93,optimal,3.48
+jaxglobal,m467_Haverly_2Player_NashCournot_FixedCharge0,optimal,6.90822591999995,1062.4999999998504,1062.5072420594956,207,optimal,3.46
+jaxglobal,m468_Haverly_2Player_NashCournot_FixedCharge1,optimal,21.03411991200028,837.4999999999304,837.5059642949138,487,optimal,3.40
+jaxglobal,m419_kClus_3_10_5_BM_1,time_limit,60.21906025300041,1.8475367073619586,1.7705132183213852,5109,time_limit,3.90
+jaxglobal,m478_MINLP_example_case1_2,time_limit,60.00509573099998,nan,nan,0,time_limit,3.87
+jaxglobal,m479_MINLP_example_case2_1,time_limit,60.00291322300018,nan,nan,0,time_limit,3.72

@@ -1,0 +1,33 @@
+solver,name,status,time,primal,dual,nodes,message,load
+jaxglobal,m4_del_asl_hfix,unsupported,6.659838472000047,,,,"unbounded variables: no finite bounds found for variables [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80]",0.96
+jaxglobal,m3_del_asl_miqp,optimal,16.50652658900026,1.473777777696758,1.4737685684617,1,optimal,0.96
+jaxglobal,m5_del_asl_minlp,time_limit,60.29781385999968,1.536415162226583,1.5251986719841395,2161,time_limit,1.12
+jaxglobal,m19_MTG_EX1,unsupported,54.778913874999944,,,,"unbounded variables: no finite bounds found for variables [25, 74, 75, 76]",1.56
+jaxglobal,m20_MTG_EX1a,time_limit,62.3017225829999,nan,nan,0,time_limit,4.28
+jaxglobal,m21_MTG_EX1b,time_limit,61.95752879800011,nan,nan,0,time_limit,4.10
+jaxglobal,m31_nonconvex1,time_limit,67.98594665199971,374647.8209231299,157761.77662023297,1,time_limit,5.89
+jaxglobal,m33_convex1,optimal,30.132532792999882,285506.508244175,285505.9105149665,3,optimal,6.55
+jaxglobal,m32_nonconvex2,time_limit,60.00155594199987,nan,nan,0,time_limit,5.89
+jaxglobal,m48_bcp7,time_limit,60.68959003400005,0.9573325081877392,0.9999900465180421,1,time_limit,6.95
+jaxglobal,m49_bcp6,time_limit,61.07797314000027,0.9512685940223713,0.9999875137106097,3,time_limit,6.56
+jaxglobal,m50_bcp5,time_limit,60.69743613699984,0.9509799570769613,0.999980328825148,1,time_limit,10.88
+jaxglobal,m60_GMA_ethanol_model_BigM,time_limit,60.00039638599992,nan,nan,0,time_limit,9.94
+jaxglobal,m76_General_Model_Case1,unsupported,19.056756992000373,,,,"unbounded variables: no finite bounds found for variables [68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79]",3.39
+jaxglobal,m61_GMA_ethanol_model_CH,time_limit,60.00044200699995,nan,nan,0,time_limit,7.74
+jaxglobal,m77_Specilized_Model_Case2_NLP_Improvement,time_limit,60.01732399899993,nan,nan,0,time_limit,3.54
+jaxglobal,m78_Specilized_Model_Case1,time_limit,60.003756365999834,nan,nan,0,time_limit,3.20
+jaxglobal,m126_generalizedpooling_lee1,optimal,36.30972634099999,-4640.0823978281005,-4640.4564184610235,1605,optimal,4.91
+jaxglobal,m127_generalizedpooling_lee2,optimal,54.098485891000564,-3849.265423726437,-3849.5495646832346,3117,optimal,5.77
+jaxglobal,m128_generalizedpooling_meyer4,time_limit,60.43398174699996,1112345.0794329913,652403.1055389144,1549,time_limit,5.26
+jaxglobal,m274_MPBP_029,optimal,24.117541245999746,13.359399999970003,13.35968599787181,353,optimal,4.91
+jaxglobal,m384_pareto_linear_convex,optimal,20.510886142000345,0.992898880307372,0.9929028614530468,5627,optimal,5.12
+jaxglobal,m390_CLay0204BM,optimal,24.800905375000184,6545.000000000691,6544.996121596143,1571,optimal,5.19
+jaxglobal,m392_CLay0303BM,optimal,15.822916940000141,26669.10957248642,26669.107437270588,131,optimal,4.78
+jaxglobal,m393_CLay0304BM,optimal,29.836854776999644,40262.38753060867,40262.38378719995,743,optimal,4.62
+jaxglobal,m423_kClus_5_10_2_BM_1,time_limit,60.34503112399943,0.12621103618073248,0.08247705820531163,4231,time_limit,4.49
+jaxglobal,m424_kClus_5_10_3_BM_1,time_limit,60.18192435000037,0.5154631308164845,0.05445784059161516,2773,time_limit,4.74
+jaxglobal,m425_kClus_5_10_5_BM_1,time_limit,60.44785128999956,1.1133874183512218,-2.3948468214996656e-08,1783,time_limit,4.35
+jaxglobal,m469_Adhya1_2Player_PriceTaker_FixedCharge0,time_limit,60.3531205850004,1087.7240538171627,1507.3666502588123,1561,time_limit,3.83
+jaxglobal,m470_Adhya1_2Player_PriceTaker_FixedCharge1,time_limit,60.23673435300043,363.19878134624514,1088.3965590361731,255,time_limit,3.87
+jaxglobal,m471_Adhya1_2Player_NashCournot_FixedCharge0,time_limit,60.23672313200041,892.7240538171627,1343.4798575203909,877,time_limit,4.62
+jaxglobal,m480_OPF_33_SBB,time_limit,60.83096404200023,nan,nan,0,time_limit,5.04

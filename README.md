@@ -687,7 +687,8 @@ Any AMPL `.nl` model (text or binary) can be loaded with
   `NotImplementedError` naming the primitive.
 * **Unbounded variables.** Finite bounds are derived first
   (`jaxglobal/domain.py`): FBBT from the declared box, unused variables fixed,
-  then FBBT against `f <= UB` once a local solve finds a feasible point. A
+  variables seen only through `sin`/`cos` limited to one period, then FBBT and
+  LP bounds against `f <= UB` once a local solve finds a feasible point. A
   variable that nothing bounds gives status `"unbounded_domain"` rather than a
   guessed box. FBBT cannot prove bounds that need joint reasoning over several
   constraints.

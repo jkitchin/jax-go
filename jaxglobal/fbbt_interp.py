@@ -89,7 +89,14 @@ def _scalarize(tape, n):
     rows, opcodes, opkey = [], [], {}
     for node in tape.nodes:
         eqn, name = node.eqn, node.eqn.primitive.name
-        if len(node.outs) != 1 or stops_nan(node):  # rows would pass NaN through an int cast or x**0
+        if len(node.outs) == 1 and name == "integer_pow" and eqn.params["y"] == 0:
+            # x**0 is 1 for every x (NaN included, as in IEEE pow): a constant slot, which also does
+            # not pass the operand's NaN on (what ``stops_nan`` guards). Refusing it sent whole models
+            # to the straight-line FBBT kernel: minlp.org m60 (five x**0 among power-law kinetics)
+            # built 6.6 MB of HLO that XLA did not compile in 10 minutes.
+            ids[node.outs[0]] = np.full(tuple(tape.shapes[node.outs[0]][0]), const_slot(1.0), np.int64)
+            continue
+        if len(node.outs) != 1 or stops_nan(node):  # rows would pass NaN through an int cast
             return None
         shape = tuple(tape.shapes[node.outs[0]][0])
         if name in STRUCTURAL:

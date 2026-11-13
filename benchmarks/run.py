@@ -16,6 +16,7 @@ Solvers:
 Usage:
   python benchmarks/run.py --solvers jaxglobal,scip,couenne,baron --time-limit 60
   python benchmarks/run.py --max-vars 10 --jobs 4 --tag small
+  python benchmarks/run.py --lib minlporg --solvers jaxglobal,scip --tag minlporg_stage1
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ from concurrent.futures import ThreadPoolExecutor
 _T_START = time.time()  # the worker's start (see _drain)
 HERE = pathlib.Path(__file__).resolve().parent
 LIB = HERE / "minlplib"
+INSTANCES = "instances.csv"  # the instance list of a library other than minlplib (--instances)
 REL_GAP, ABS_GAP, FEAS_TOL = 1e-4, 1e-6, 1e-6
 EXTRA = {"safe": True} if os.environ.get("JAXGLOBAL_SAFE") == "1" else {}  # check_wrong.py --safe
 EXTRA.update(json.loads(os.environ.get("JAXGLOBAL_OPTS", "{}")))  # extra minimize options, e.g. '{"branch_var": "reliability"}'
@@ -54,7 +56,7 @@ COUENNE = shutil.which("couenne") or "/Applications/AMPL/couenne"
 
 def run_jaxglobal(name, tl):
     """Runs in a child Python process (see worker()), so a crash or hang is contained."""
-    cmd = [sys.executable, __file__, "--worker", name, "--time-limit", str(tl)]
+    cmd = [sys.executable, __file__, "--worker", name, "--time-limit", str(tl), "--lib", LIB.name]
     out = _run(cmd, tl)
     if isinstance(out, dict):
         return out
@@ -257,9 +259,13 @@ def _num(v):
 
 
 def instances(max_vars, names=None):
-    from minlplib.fetch import references
+    if LIB.name == "minlplib":
+        from minlplib.fetch import references
 
-    rows = list(references().values())
+        rows = list(references().values())
+    else:  # another library laid out the same way (nl/<name>.nl and instances.csv), e.g. minlporg
+        with open(LIB / INSTANCES) as fh:
+            rows = list(csv.DictReader(fh))
     rows = [r for r in rows if int(r["nvars"]) <= max_vars]
     return [r for r in rows if r["name"] in names] if names else rows
 
@@ -293,8 +299,12 @@ def main():
     ap.add_argument("--names", default="", help="comma-separated instance names")
     ap.add_argument("--jobs", type=int, default=4, help="instances run concurrently")
     ap.add_argument("--tag", default="baseline")
+    ap.add_argument("--lib", default="minlplib", help="instance library under benchmarks/: minlplib or minlporg")
+    ap.add_argument("--instances", default="instances.csv", help="instance list in --lib (not minlplib), e.g. instances_stage2.csv")
     ap.add_argument("--worker", help=argparse.SUPPRESS)
     a = ap.parse_args()
+    global LIB, INSTANCES
+    LIB, INSTANCES = HERE / a.lib, a.instances
     if a.worker:
         print(TAG + json.dumps(worker(a.worker, a.time_limit)), flush=True)
         sys.stdout.flush()

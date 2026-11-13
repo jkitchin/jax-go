@@ -54,8 +54,9 @@ def cost(x):
 
 `lo` and `hi` are sequences or arrays of length `n`. Bounds may be infinite:
 finite ones are derived first (`jaxglobal/domain.py`) by FBBT from the
-declared box, fixing unused variables, and then FBBT against `f <= UB` once a
-local solve finds a feasible point. A variable that nothing bounds gives status
+declared box, fixing unused variables, windows of one period for variables the
+model only sees through `sin`/`cos` (such as voltage angles), and then FBBT and
+LP bounds against `f <= UB` once a local solve finds a feasible point. A variable that nothing bounds gives status
 `"unbounded_domain"` (with `message` naming the variables) rather than a
 guessed box. FBBT cannot prove bounds that need joint reasoning over several
 constraints, so give finite bounds whenever you know them: tighter boxes give

@@ -1,0 +1,33 @@
+solver,name,status,time,primal,dual,nodes,message,load
+jaxglobal,m8_Model_P2,optimal,19.742849686,2260.256562836033,2260.093210472956,197,optimal,0.08
+jaxglobal,m245_Model_E2,unsupported,4.4309651279999684,,,,"unbounded variables: no finite bounds found for variables [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]",2.00
+jaxglobal,m7_Model_P1,time_limit,60.168042489000015,2260.340123942402,2224.500580021855,3155,time_limit,0.08
+jaxglobal,m266_Formulation_MINLP,time_limit,60.021064208999974,nan,nan,0,time_limit,2.16
+jaxglobal,m383_single_obj,optimal,18.90923214700001,335.1435362656437,335.1488013302631,355,optimal,3.19
+jaxglobal,m267_Formulation_MIQP,time_limit,60.00928284700001,nan,nan,0,time_limit,2.89
+jaxglobal,m389_CLay0203BM,optimal,25.44498987299994,41573.26252221357,41573.25255897416,149,optimal,3.33
+jaxglobal,m418_kClus_3_10_3_BM_1,optimal,35.30028159300002,0.9836792813411219,0.9835960766177896,1561,optimal,4.03
+jaxglobal,m417_kClus_3_10_2_BM_1,optimal,48.471479497999894,0.32892289081547266,0.3288931466388734,4707,optimal,4.03
+jaxglobal,m478_MINLP_example_case1_2,unsupported,8.773649223999996,,,,"unbounded variables: no finite bounds found for variables [8, 9, 10, 11, 12, 13]",5.06
+jaxglobal,m479_MINLP_example_case2_1,unsupported,7.05582343399999,,,,"unbounded variables: no finite bounds found for variables [8, 9, 10, 11, 12, 13]",4.81
+scip,m7_Model_P1,optimal,0.730115,2260.2565619319043,2260.256558515862,231.0,gaplimit (10.0 pyscipopt 6.3.0),4.93
+scip,m8_Model_P2,optimal,0.20818099999999998,2260.2565281278457,2260.2565281278457,95.0,optimal (10.0 pyscipopt 6.3.0),4.93
+scip,m245_Model_E2,optimal,0.067174,2068.2004600454648,2068.2004600454648,2.0,optimal (10.0 pyscipopt 6.3.0),4.93
+scip,m266_Formulation_MINLP,time_limit,60.000448,3909.733556815,1956.491795095,11992.0,timelimit (10.0 pyscipopt 6.3.0),4.93
+scip,m267_Formulation_MIQP,time_limit,60.000192,3909.733556815,1957.3474973825,12137.0,timelimit (10.0 pyscipopt 6.3.0),4.93
+scip,m383_single_obj,optimal,0.28369099999999997,335.1369602528018,335.1369602528018,65.0,optimal (10.0 pyscipopt 6.3.0),3.07
+scip,m389_CLay0203BM,optimal,0.49649499999999996,41573.26250579345,41573.26250579345,49.0,optimal (10.0 pyscipopt 6.3.0),3.07
+scip,m417_kClus_3_10_2_BM_1,optimal,1.716593,0.32891927981967845,0.32891927981967845,704.0,optimal (10.0 pyscipopt 6.3.0),3.07
+scip,m418_kClus_3_10_3_BM_1,optimal,4.160528,0.9836758874555565,0.9836758874555565,1465.0,optimal (10.0 pyscipopt 6.3.0),3.07
+scip,m478_MINLP_example_case1_2,time_limit,60.000978,0.12788720693059744,-228.05149379439752,71255.0,timelimit (10.0 pyscipopt 6.3.0),2.99
+scip,m479_MINLP_example_case2_1,time_limit,60.002871,0.0675033886576454,-228.05149379439803,67669.0,timelimit (10.0 pyscipopt 6.3.0),2.99
+scip,m419_kClus_3_10_5_BM_1,optimal,12.229267,1.8475311974599506,1.8475311974599506,6478.0,optimal (10.0 pyscipopt 6.3.0),1.69
+jaxglobal,m419_kClus_3_10_5_BM_1,time_limit,60.196736095999995,1.8475367073619586,1.6714233608462445,3829,time_limit,1.69
+jaxglobal,m465_Haverly_2Player_PriceTaker_FixedCharge0,optimal,13.221259703999976,1749.9999999998195,1750.0038603150062,73,optimal,0.67
+jaxglobal,m467_Haverly_2Player_NashCournot_FixedCharge0,optimal,11.976212740999927,1062.4999999998504,1062.5072420594956,207,optimal,1.05
+jaxglobal,m466_Haverly_2Player_PriceTaker_FixedCharge1,optimal,30.126998742999945,1524.9999999999761,1525.0057484854103,93,optimal,0.67
+scip,m465_Haverly_2Player_PriceTaker_FixedCharge0,optimal,0.073184,1750.0000265661488,1750.0000265661488,5.0,optimal (10.0 pyscipopt 6.3.0),2.42
+scip,m466_Haverly_2Player_PriceTaker_FixedCharge1,optimal,0.180706,1525.0000265888407,1525.0000265888407,7.0,optimal (10.0 pyscipopt 6.3.0),2.42
+scip,m467_Haverly_2Player_NashCournot_FixedCharge0,optimal,0.071598,1062.5000291924089,1062.5000291924089,13.0,optimal (10.0 pyscipopt 6.3.0),2.42
+scip,m468_Haverly_2Player_NashCournot_FixedCharge1,optimal,0.228902,837.5000294993724,837.5000294993724,11.0,optimal (10.0 pyscipopt 6.3.0),2.42
+jaxglobal,m468_Haverly_2Player_NashCournot_FixedCharge1,optimal,27.923615070000096,837.4999999999304,837.5059642949138,487,optimal,2.28

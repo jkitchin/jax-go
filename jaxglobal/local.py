@@ -129,6 +129,135 @@ def make_local_solver(f, ineq=None, eq=None, inner=60, outer=12, rho0=10.0):
     return solve
 
 
+def _color_columns(rows, cols, n):
+    """Greedy coloring of the columns of a sparsity pattern: two columns with a nonzero in the
+    same row get different colors. Returns ``(color per column, number of colors)``."""
+    by_row = {}
+    for r, c in zip(rows.tolist(), cols.tolist()):
+        by_row.setdefault(r, []).append(c)
+    nbrs = [set() for _ in range(n)]
+    for cs in by_row.values():
+        for c in cs:
+            nbrs[c].update(cs)
+    color = np.full(n, -1, np.int64)
+    for j in range(n):
+        used = {color[k] for k in nbrs[j] if k != j and color[k] >= 0}
+        k = 0
+        while k in used:
+            k += 1
+        color[j] = k
+    return color, int(color.max()) + 1 if n else 0
+
+
+_MAX_COLOR_SHARE = 0.5  # compressed derivatives when they need at most this share of n directions
+
+
+class _Callbacks:
+    """Cyipopt-shaped callbacks for pounce: the same derivatives as ``pounce.jax.from_jax``'s dense
+    path, with cheaper calls.
+
+    * pounce converts every ``x`` it is called with by ``jnp.asarray``, an eager JAX op; the
+      compiled functions here take the NumPy ``x`` directly. On small models the callbacks are
+      most of a local solve (minlp.org m466: about 31,000 of them per branch-and-bound run).
+    * The Jacobian and the Hessian of the Lagrangian are evaluated compressed (one forward
+      direction per color of a column coloring of their sparsity pattern, Curtis-Powell-Reid)
+      when that takes at most ``_MAX_COLOR_SHARE * n`` directions, instead of ``n``: on m466
+      8 directions instead of 43 for the Jacobian (12 against 121 us per call). Each stored
+      nonzero is read back from the compressed product: in its row, no other column of its color
+      is nonzero.
+
+    The sparsity structure is pounce's (``struct``, the problem object ``from_jax`` built from the
+    jaxpr or the caller's patterns), so only the values are computed here.
+    """
+
+    def __init__(self, f, c, n, m, struct):
+        self.m = m
+        self._jrows, self._jcols = (np.asarray(v, np.int64) for v in struct.jacobianstructure())
+        self._hrows, self._hcols = (np.asarray(v, np.int64) for v in struct.hessianstructure())
+        self._f, self._grad = jax.jit(f), jax.jit(jax.grad(f))
+        lag = (lambda x, lam, s: s * f(x) + jnp.dot(lam, c(x))) if m else (lambda x, s: s * f(x))
+        self._jac_seed = self._hess_seed = None
+        if m:
+            self._c = jax.jit(c)
+            color, k = _color_columns(self._jrows, self._jcols, n)
+            if 0 < k <= _MAX_COLOR_SHARE * n:
+                SJ = jnp.asarray(np.eye(k)[color].T)  # (k, n): column j in direction color[j]
+                self._jac = jax.jit(lambda x: jax.vmap(lambda s: jax.jvp(c, (x,), (s,))[1])(SJ))
+                self._jac_seed = color[self._jcols]
+            else:
+                self._jac = jax.jit(jax.jacfwd(c) if n < m else jax.jacrev(c))
+        # the Hessian's full pattern (it is stored as the lower triangle) colored the same way
+        full_r, full_c = np.r_[self._hrows, self._hcols], np.r_[self._hcols, self._hrows]
+        color, k = _color_columns(full_r, full_c, n)
+        if 0 < k <= _MAX_COLOR_SHARE * n:
+            SH = jnp.asarray(np.eye(k)[color].T)
+            grad_lag = jax.grad(lag)
+
+            def hv(x, *a):
+                return jax.vmap(lambda s: jax.jvp(lambda xx: grad_lag(xx, *a), (x,), (s,))[1])(SH)
+
+            self._hess = jax.jit(hv)
+            self._hess_seed = color[self._hcols]
+        else:
+            self._hess = jax.jit(jax.hessian(lag))
+
+    def precompile(self, x0):
+        """Compile every callback at ``x0`` in a background thread (returns its future).
+
+        A callback's first call compiles it (XLA, several seconds on a cold cache under load), and
+        that happens inside a local solve, which neither ``minimize``'s deadline nor pounce's
+        ``max_wall_time`` can interrupt: on minlp.org m31 (cold, two solves at a time) the first
+        local solve started 2 s before the limit and returned 10 s after it. Compiling while the
+        root bound is computed takes that off the main thread; a callback called before its
+        compile is done compiles as before."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        from . import kcache
+
+        x = np.asarray(x0, np.float64)
+        lam = np.zeros(self.m)
+
+        def run():
+            self.objective(x)
+            self.gradient(x)
+            if self.m:
+                self.constraints(x)
+                self.jacobian(x)
+            self.hessian(x, lam, 1.0)
+
+        ex = ThreadPoolExecutor(1, thread_name_prefix="jaxglobal-local")
+        fut = kcache.track(ex.submit(run))
+        ex.shutdown(wait=False)
+        return fut
+
+    def objective(self, x):
+        return float(self._f(x))
+
+    def gradient(self, x):
+        return np.asarray(self._grad(x), np.float64)
+
+    def constraints(self, x):
+        return np.asarray(self._c(x), np.float64)
+
+    def jacobianstructure(self):
+        return (self._jrows, self._jcols)
+
+    def jacobian(self, x):
+        J = np.asarray(self._jac(x), np.float64)
+        if self._jac_seed is not None:  # compressed (k, m): J[r, c] at [color(c), r]
+            return J[self._jac_seed, self._jrows]
+        return J[self._jrows, self._jcols]
+
+    def hessianstructure(self):
+        return (self._hrows, self._hcols)
+
+    def hessian(self, x, lam, obj_factor):
+        H = np.asarray(self._hess(x, lam, obj_factor) if self.m else self._hess(x, obj_factor), np.float64)
+        if self._hess_seed is not None:  # compressed (k, n): H[r, c] at [color(c), r]
+            return H[self._hess_seed, self._hrows]
+        return H[self._hrows, self._hcols]
+
+
 def _pounce_local(f, ineq, eq, lo, hi, options=None, patterns=None):
     import pounce
     from pounce.jax import from_jax
@@ -141,11 +270,16 @@ def _pounce_local(f, ineq, eq, lo, hi, options=None, patterns=None):
         # structural patterns (structure.py): no probing at build time (dense evaluation: colored
         # AD, sparse=True, made each solve 1.5 to 2.6 times slower on spectra2, syn05m02m, nous1)
         kw.update(hess_pattern=patterns.hess, **({"jac_pattern": patterns.jac} if mi + me else {}))
+    c = (lambda x: jnp.concatenate([g(x), h(x)])) if mi + me else None
     if mi + me:
         kw.update(m=mi + me, cl=np.r_[np.full(mi, -1e20), np.zeros(me)], cu=np.zeros(mi + me))
-        prob = from_jax(f, lambda x: jnp.concatenate([g(x), h(x)]), **kw)
+        prob = from_jax(f, c, **kw)
     else:
         prob = from_jax(f, **kw)
+    # the same problem with jaxglobal's callbacks (_Callbacks): pounce's sparsity, cheaper calls
+    cb = _Callbacks(f, c, lo.size, mi + me, prob.problem_obj)
+    cb.precompile(np.clip(0.5 * (lo + hi), lo, hi))
+    prob = pounce.Problem(n=lo.size, m=mi + me, problem_obj=cb, lb=lo, ub=hi, cl=kw.get("cl"), cu=kw.get("cu"))
     # bound_relax_factor 0: Ipopt's default (1e-8) lets a solution sit up to 1e-8 * max(1, |bound|)
     # past a bound; the caller clips it back into the box, which moves the constraint values by
     # slope x 1e-8 * |bound| and can push a feasible optimum past feas_tol (ex5_4_3: 1.6e-6, its
