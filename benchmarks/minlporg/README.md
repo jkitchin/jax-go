@@ -327,6 +327,26 @@ solved (54 s), and m31, m48, m49, m128 and m425 have better or first incumbents.
 
 classes (cold): solved 9, unsolved 20, unsupported 3
 
+## Stage 2: gap 1 (mixed-integer models without an incumbent or bound), diagnosis
+
+Per instance, from profiles of cold solves (`benchmarks/profile_root.py`) at 60 to 120 s:
+
+| instance | what stops it | status |
+|---|---|---|
+| m60, m61 (GMA kinetics) | five `x**0` made the tape interpreters refuse the whole model; `bound_domain`'s straight-line FBBT kernel (6.6 MB of HLO) did not compile in 10 minutes. Then the straight-line relaxation kernel (25 s trace, 81 s compile) | `x**0` fixed (scalarized as the constant 1: FBBT kernel compiles in 1.3 s). With `relax_interp.RULE = "ops"` both find SCIP's optimum -157.5865 within 60 s alone (bound -682); under two-solve load a bound but no incumbent |
+| m19 (also m20, m21) | unbounded `PROFIT` (the objective variable) and inventories `STGM`, bounded only through the objective cutoff, and `bound_domain`'s SLSQP search finds no feasible point in 28 s (48 binaries) | open: needs a stronger feasible-point search in `bound_domain` (e.g. pounce with integer rounding, as `minimize` does) |
+| m32 | the root bound kernel: 17 s trace, 37 s compile, then 22 s for its first call (601 rows interpreted, 7.3 M scalar rules per box) | open: kernel cost (gap 2 of stage 1) |
+| m31 | the root bound kernel's compile under the straight-line rule; with `RULE = "ops"` one node, incumbent 374,648 | as m60 |
+| m423-m425 (k-means, 50 binaries) | weak bounds: 1,300-3,700 nodes in 60 s, incumbents 0.1076 / 0.515 / 1.113 against 0.1011 / 0.3736 / 0.9913 | open: bounds (big-M disaggregation) |
+| m470 | weak bounds and a poor incumbent (363 against 545) | open |
+
+`relax_interp.RULE = "ops"` (interpret tapes whose straight-line node bound evaluates at least
+600,000 scalar rules per box; opt-in, see docs/ROADMAP.md, A3) on the 11 instances, cold, two at
+a time, 60 s: it helps m31, m60, m61 (a bound, and for m31 an incumbent) and m424 (bound 0.033 ->
+0.054), but m470 drops from 127 to 15 nodes with a looser bound (-1207 against -1130). Making it
+the default needs the A3 ablation on MINLPLib (node rate of the instances it flips), as the
+roadmap says; not done here.
+
 ## Notes on the instances
 
 * **mps2gms changed the quadratic MPS models.** Converted with GAMS `mps2gms`, the four Haverly
