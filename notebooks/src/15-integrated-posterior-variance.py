@@ -163,7 +163,7 @@ print(f"jnp formula: {r2j}\n  {t2j:.1f} s")
 # proven bound $4\times10^{-5}$ away. The primitives need 3,055 nodes, the
 # `jnp` formula 11,663. On the first run on a 4-core VM both took 17 to 18 s,
 # most of it compiling the bounding kernels; the stored outputs, with
-# jaxglobal's on-disk kernel cache filled by that run, show 3.6 s and 5.1 s.
+# jaxglobal's on-disk kernel cache filled by that run, show 5.8 s and 5.9 s.
 # So on this problem the formula is good enough. The primitives matter when the noise is small
 # (with $\tau^2 = 10^{-4}$ and 10 clustered points, a test case in
 # `tests/test_gp.py` went from 458,000 nodes and 178 s to 1,900 nodes and
@@ -224,12 +224,12 @@ def compare(ipv, vg, batch, r, t, lo, hi, reps=50, samples=(100, 1_000, 10_000, 
         jax.jit(jax.vmap(ipv))(jnp.zeros((n, d)))
     compile_s = time.perf_counter() - t0
     rng = np.random.default_rng(0)
-    rows = [dict(method="branch and bound (certified)", found_optimum=1.0, median_IPV=r.fun, worst_IPV=r.fun,
+    rows = [dict(method="branch and bound (certified)", found_optimum=1.0, best_IPV=r.fun, median_IPV=r.fun, worst_IPV=r.fun,
                  gap_to_bound_worst=r.fun - r.lower_bound, time_s=t)]
 
     def add(name, runs):
         f = np.array([v for v, _ in runs])
-        rows.append(dict(method=name, found_optimum=np.mean(f <= r.fun + tol), median_IPV=np.median(f),
+        rows.append(dict(method=name, found_optimum=np.mean(f <= r.fun + tol), best_IPV=f.min(), median_IPV=np.median(f),
                          worst_IPV=f.max(), gap_to_bound_worst=f.max() - r.lower_bound,
                          time_s=np.mean([s for _, s in runs])))
 
@@ -260,13 +260,32 @@ def compare(ipv, vg, batch, r, t, lo, hi, reps=50, samples=(100, 1_000, 10_000, 
 res2 = compare(ipv2, vg2, batch2, r2, t2, LO, HI)
 res2
 
+
+# %% [markdown]
+# The same runs as time against the gap to the certified optimum, for the best,
+# median and worst of the 50 runs. A gap below $10^{-8}$ (L-BFGS-B's own
+# tolerance) is shown as 0; the branch-and-bound row is 0 by definition, and
+# its proven gap to the lower bound is in `gap_to_bound_worst` above.
+
+# %%
+def gap_table(res, r):
+    out = pd.DataFrame({"method": res.method, "time_ms": 1e3 * res.time_s})
+    for k in ("best", "median", "worst"):
+        g = res[f"{k}_IPV"] - r.fun
+        out[f"{k}_gap"] = g.where(g > 1e-8, 0.0)
+    return out.style.format({"time_ms": "{:,.1f}", "best_gap": "{:.1e}", "median_gap": "{:.1e}",
+                             "worst_gap": "{:.1e}"}).hide(axis="index")
+
+
+gap_table(res2, r2)
+
 # %% [markdown]
 # NIPV has six local maxima here, and only 28% of L-BFGS-B starts end at the
 # global one: the others stop at bumps between other pairs of data points
 # (the yellow crosses). The certified value matches the maximum over a
 # $301\times301$ grid.
 #
-# In the table, `gap_to_bound_worst` is the worst IPV of 50 runs minus the
+# In the first table, `gap_to_bound_worst` is the worst IPV of 50 runs minus the
 # certified *lower* bound, so $4.1\times10^{-5}$ (the solver's tolerance) means
 # "found the optimum" and anything larger is the suboptimality proven to be at
 # least that much minus $4\times10^{-5}$.
@@ -284,9 +303,20 @@ res2
 #   0.4193$ against $0.4093$: it gives up a fifth of the variance reduction
 #   available at this step (from $0.4615$ to $0.4093$), and nothing in its
 #   result says so.
-# * **Branch and bound** takes 3.6 s with the kernel cache warm (18 s on the
-#   first run), against milliseconds for all the others,
+# * **Branch and bound** takes about 6 s with the kernel cache warm (18 s on
+#   the first run), against milliseconds for all the others,
 #   and is the only one that says how far from the optimum it can be.
+
+# %% [markdown]
+# The gap table separates the two ways of missing. Every method with a
+# local polish has a best gap of 0: when it starts in the right basin,
+# L-BFGS-B lands on the optimum to its own tolerance, so its misses are whole
+# basins (the second-best maximum is $10^{-2}$ worse). Sampling alone never
+# reaches 0; its error shrinks smoothly with $n$, about tenfold per tenfold
+# more points, from $1.3\times10^{-3}$ (median, $n = 100$) to
+# $1.1\times10^{-6}$ ($n = 100{,}000$). The cheapest methods whose worst run
+# was 0 are 100 samples + L-BFGS-B (5.5 ms) and 20-start multistart (59 ms),
+# about 1,000 and 100 times faster than branch and bound.
 
 # %%
 def plot_compare(res, title):
@@ -332,11 +362,22 @@ res4 = compare(ipv4, vg4, jax.jit(jax.vmap(ipv4)), r4, t4, LO4, HI4)
 res4
 
 # %%
+gap_table(res4, r4)
+
+# %%
 plot_compare(res4, "4-D: worst case of each method against its time")
 
 # %% [markdown]
+# The gap table in 4-D: the best run of every polished method is still 0,
+# but the median of 1- to 10-start multistart and of 100 samples + L-BFGS-B
+# is a whole basin off ($1.8\times10^{-3}$ to $3.6\times10^{-3}$). Sampling alone
+# gets no closer than $8.8\times10^{-5}$ in its best run with 100,000 points,
+# about the certified solve's own gap. The only heuristic with a worst gap
+# of 0 is 100,000 samples + L-BFGS-B, at 174 ms, about 600 times faster than
+# branch and bound (111 s).
+#
 # In 4-D the certified solve takes 105,000 nodes and 111 s with the
-# primitives (140 s on the first run), and 272,000 nodes and 237 s with the
+# primitives (140 s on the first run), and 272,000 nodes and 222 s with the
 # `jnp` formula. The
 # heuristics now miss much more often:
 #
@@ -394,7 +435,7 @@ loop
 # of `IPV_certified`), in 3,000 to 5,500 nodes. On the first run a step took
 # about 20 s, almost all of it compiling, because each new data set is a new
 # function for jaxglobal; the stored outputs, from a second run with the
-# kernel cache filled, show 3.4 to 4.9 s. The
+# kernel cache filled, show 3.5 to 4.6 s. The
 # mean posterior variance over the reference points drops from 0.46 to 0.20
 # in 8 steps.
 #
@@ -408,7 +449,7 @@ loop
 # * NIPV is the mean posterior variance over reference points after one more
 #   measurement. With `integrated_posterior_variance` (built from `gp_cov`
 #   and `gp_std`) it is a plain JAX function, and `minimize` returns its
-#   maximum with a proven bound: 4 s in 2-D and 110 s in 4-D on a 4-core VM
+#   maximum with a proven bound: 4 to 6 s in 2-D and 110 s in 4-D on a 4-core VM
 #   with the kernel cache warm (18 s and 140 s on the first run, compiling
 #   included).
 # * It is multimodal (six local maxima in the 2-D example), and multistart
@@ -421,7 +462,7 @@ loop
 #   2-D, 100,000 in 4-D here); the certified solve is how to find out.
 # * The primitives cut the node count against the `jnp` formula by 4× in 2-D
 #   and 2.6× in 4-D here, and by 245× when the noise is small; on the 2-D
-#   problem the solve times were close (3.6 s and 5.1 s).
+#   problem the solve times were the same (5.8 s and 5.9 s).
 #
 # Not covered: batch NIPV ($q > 1$ points at once), and fitting the
 # hyperparameters, which does not change the optimization (NIPV depends on
