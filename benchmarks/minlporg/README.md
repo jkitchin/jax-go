@@ -57,7 +57,7 @@ solves m266/m267 or m478/m479 in 60 s.
    `unbounded_domain` when it could not derive finite bounds ("no finite bounds found for
    variables [9, ..., 19]" on m245), while SCIP solves m245 in 0.07 s. Three more instances (m7,
    m383, m389) have unbounded variables in the model but their bounds were already inferred.
-2. **Fixed cost per solve.** Where both solve, jaxglobal needs 5 to 48 s against SCIP's 0.07 to
+2. **Fixed cost per solve. Partly fixed; see below.** Where both solve, jaxglobal needs 5 to 48 s against SCIP's 0.07 to
    4 s. The four Haverly pooling instances (37 to 43 variables) take 5 to 17 s warm and 12 to 30 s
    cold against under 0.25 s, so most of it is setup and compilation, not search.
 3. **Dense 0-1 quadratic programs (m266, m267: 50 binaries, one cardinality constraint).**
@@ -102,6 +102,64 @@ with 300 s, m478 has the best known value 0.12788818 from the first iteration, b
 nodes its bound is only -2065 (the angle windows of width 2 pi are wide for differences of about 1e-3, and the
 trigonometric relaxations on them are weak). Solve times in this rerun vary with the state of the
 kernel cache (m465 and m467 now pass at 7 s), so compare times within one run.
+
+## Gap 2: fixed cost per solve
+
+**Where the time went.** Profiles of single warm solves (the kernel caches filled) on m466, m8,
+m389, m418 and m245, with `benchmarks/profile_root.py` and the JAX compilation-cache events:
+
+* The local NLP solves (pounce, for incumbents, dives and integer-fixed solves) were the largest
+  part everywhere, 5 to 8 s per solve: on m466 65 local solves, 3,900 interior-point iterations,
+  31,000 Python callbacks. Per iteration, half the time was the callbacks and half pounce itself.
+  The callbacks were slow because pounce's `from_jax` converts every `x` with `jnp.asarray`
+  (an eager JAX op, about 0.1 to 0.3 ms per call inside a solve) and evaluates the Jacobian
+  and the Hessian densely (one direction per variable: 120 us on m466).
+* `bound_domain` took 2 to 5 s when a model has a free variable (m466 has one: the objective
+  variable SCIP's GAMS writer adds), mostly compiling its FBBT kernels.
+* Tracing, lowering and reading the XLA cache for the ~170 functions a solve compiles cost 4 to
+  5 s (m245: 173 compiles, all cache hits), spread thinly: no function above 1 s.
+* Not a cost: re-tracing the model function. Replaying its jaxpr instead of re-running the .nl
+  reader made no measurable difference, and was not kept.
+
+**What changed** (`jaxglobal/local.py`, `_Callbacks`): the local solves use jaxglobal's own
+callbacks with pounce's sparsity structure. They pass NumPy `x` straight to the compiled
+functions, and evaluate the Jacobian and the Lagrangian Hessian compressed, one forward
+direction per color of a greedy column coloring of their patterns (Curtis-Powell-Reid), when
+that needs at most half as many directions as there are variables (m466: 5 for the Jacobian
+instead of 43; 12 against 121 us per call). Values agree with pounce's dense path to rounding
+(`tests/test_local_callbacks.py`). Running the batch of local solves sequentially instead of on
+pounce's thread pool made no difference (the callbacks hold the GIL) and was not changed.
+
+**Result.** Warm runs of the whole set, before (the gap 1 commit) and after, each after a
+priming run, same settings (`benchmarks/results/minlporg_gap2_base_warm.csv`,
+`minlporg_gap2_warm.csv`):
+
+| instance | before | after | SCIP | pass before / after |
+|---|---:|---:|---:|---|
+| m8_Model_P2 | 13.6 s | 9.1 s | 0.21 s | - / PASS |
+| m245_Model_E2 | 6.0 s | 6.0 s | 0.07 s | PASS / PASS |
+| m383_single_obj | 13.0 s | 7.5 s | 0.28 s | - / PASS |
+| m389_CLay0203BM | 13.7 s | 9.5 s | 0.50 s | - / PASS |
+| m417_kClus_3_10_2_BM_1 | 30.4 s | 24.7 s | 1.72 s | - / - |
+| m418_kClus_3_10_3_BM_1 | 24.3 s | 22.8 s | 4.16 s | - / - |
+| m465 (Haverly PT, continuous) | 5.7 s | 5.2 s | 0.07 s | PASS / PASS |
+| m466 (Haverly PT, mixed) | 16.7 s | 13.2 s | 0.18 s | - / - |
+| m467 (Haverly NC, continuous) | 6.0 s | 6.0 s | 0.07 s | PASS / PASS |
+| m468 (Haverly NC, mixed) | 17.4 s | 15.7 s | 0.23 s | - / - |
+
+On the 10 instances solved in both runs the geometric mean time falls from 12.7 s to 10.4 s
+(-18%), and 6 pass instead of 3. The six unsolved instances are unsolved in both, with the same
+or better incumbents (m478 and m479 now have incumbents at 60 s: 0.127888 and 0.0567866; the
+latter is below SCIP's 0.0675 and a tenth of minlp.org's 0.5679). m383's reported optimum is
+now 335.1370, SCIP's value, instead of the 335.1435 that used the feasibility tolerance (a
+different local-solve path).
+
+**What remains.** jaxglobal is still 20 to 200 times slower than SCIP on these instances. In
+order of size: the local solves (still 3 to 6 s; pounce's own per-iteration time is now half
+of it), `bound_domain`'s kernels on models with free variables, and the per-function JAX
+trace/lower/cache-read overhead. The last two are compile costs that a solve pays for every new
+model; reducing them means compiling fewer distinct functions (or caching more of them with
+`kcache`), which is a larger change.
 
 ## Notes on the instances
 
