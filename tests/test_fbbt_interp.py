@@ -135,3 +135,25 @@ def test_second_trace_does_not_reuse_first_trace_constants(sweep):
         out = exe(L, H, 0.5)
         np.testing.assert_allclose(np.asarray(out[0]), np.tile(ref, (b, 1)))
         np.testing.assert_allclose(np.asarray(fb(L, H, 0.5)[0]), np.tile(ref, (b, 1)))
+
+
+def test_zero_power_is_a_constant_slot(sweep):
+    """``x ** 0`` (power-law models write it: minlp.org m60) scalarizes as the constant 1 instead of
+    sending the whole model to the straight-line kernel; bounds match ``fbbt.propagate``."""
+
+    def f(x):
+        return x[0] ** 0 * x[1] + x[2] ** 0.7 * x[1] ** 1.3 - x[0]
+
+    def g(x):
+        return jnp.stack([x[0] ** 0 + x[1] * x[2] - 2.0, x[2] ** 0 * x[0] - 1.5 * x[1]])
+
+    n = 3
+    with jax.ensure_compile_time_eval():
+        prog = scalarize(joint_tape(f, g, None, np.zeros(n)), n)
+    assert prog is not None
+    lo, hi = jnp.array([0.0, 0.1, 0.2]), jnp.array([3.0, 2.0, 4.0])
+    a = make_fbbt(f, g, None, rounds=6, interpret=True)(lo, hi, jnp.asarray(1.0))
+    b = make_fbbt(f, g, None, rounds=6, interpret=False)(lo, hi, jnp.asarray(1.0))
+    assert bool(a[2]) == bool(b[2])
+    np.testing.assert_allclose(a[0], b[0], rtol=1e-9, atol=1e-12)
+    np.testing.assert_allclose(a[1], b[1], rtol=1e-9, atol=1e-12)
