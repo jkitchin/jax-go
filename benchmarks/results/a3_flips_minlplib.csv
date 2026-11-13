@@ -5380,3 +5380,1741 @@ pooling_adhya1stp,cold+opsrule,"0.27, 0.71, 0.88",bucket,probing: run,0.000,
 pooling_adhya1stp,cold+opsrule,"0.27, 0.71, 0.88",bucket,search,2.804,
 pooling_adhya1stp,cold+opsrule,"0.27, 0.71, 0.88",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.011,
 pooling_adhya1stp,cold+opsrule,"0.27, 0.71, 0.88",bucket,root bound: other,0.044,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",total,minimize_wall,60.269,time_limit
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",total,import_jax_jaxglobal,0.511,not in minimize
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",total,read_nl,0.001,not in minimize
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",stage,pre_domain,0.000,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",stage,bound_domain,0.000,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",stage,setup,0.000,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",stage,cut_pool,0.465,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",stage,kernels,0.052,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",stage,pseudo_boolean,0.000,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",stage,start_compile,0.007,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",stage,start_dive_compile,0.000,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",stage,nonlinear,0.133,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",stage,quadratic,0.000,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",stage,make_local,1.249,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",stage,root_bound,3.028,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",stage,root_incumbent,0.144,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",stage,root_dives,0.000,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",stage,root_obbt,0.388,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",stage,root_obbt_incumbent,0.045,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",stage,probe,0.000,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",stage,search,54.758,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_cut_pool,jax_compile,0.290,calls=0
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_cut_pool,jax_trace,0.074,calls=0
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_cut_pool,jax_lower,0.030,calls=0
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_kernels,K.quadratic,0.050,calls=1
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_kernels,jax_trace,0.017,calls=0
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_kernels,jax_compile,0.008,calls=0
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_nonlinear,K.nonlinear,0.133,calls=1
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_nonlinear,K.structure,0.133,calls=1
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_nonlinear,jax_trace,0.037,calls=0
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_make_local,make_local,1.238,calls=1
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_make_local,jax_compile,0.336,calls=0
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_make_local,jax_lower,0.019,calls=0
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_make_local,jax_trace,0.006,calls=0
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_root_bound,wait:bound,2.927,calls=1
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_root_bound,run:bound,0.061,calls=1 boxes=16
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_root_bound,jax_compile,0.022,calls=0
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_root_incumbent,local_solve,0.143,calls=1 #1 starts=1
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_root_obbt,run:obbt,0.193,calls=1 boxes=1
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_root_obbt,wait:obbt,0.140,calls=1
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_root_obbt,run:bound,0.044,calls=1 boxes=16
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_root_obbt,jax_compile,0.007,calls=0
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_root_obbt_incumbent,local_solve,0.044,calls=1 #2 starts=1
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_search,run:bound,52.704,calls=1126 boxes=16;boxes=16;boxes=16
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_search,local_solve,1.240,calls=6 #3 starts=2;#4 starts=2;#5 starts=2
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_search,jax_compile,0.198,calls=0
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_search,wait:bound,0.056,calls=1127
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_in_search,jax_lower,0.012,calls=0
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_jax,jax_trace,0.153,union
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_jax,jax_lower,0.063,union
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",main_jax,jax_compile,0.863,union
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",background,K.quadratic,0.000,ends at 1.9s; overlaps 
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",background,jax_trace@jaxglobal-trace,1.663,"ends at 2.7s; overlaps root_bound 0.8, make_local 0.7, nonlinear 0.1"
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",background,jax_lower@jaxglobal-trace,0.324,"ends at 2.8s; overlaps make_local 0.2, root_bound 0.1"
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",background,jax_compile@jaxglobal-trace,0.055,ends at 0.7s; overlaps make_local 0.1
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",background,trace_lower:bound[b=16],1.092,"ends at 1.6s; overlaps make_local 1.0, nonlinear 0.1"
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",background,jax_trace@jaxglobal-local,0.440,ends at 4.9s; overlaps root_bound 0.4
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",background,jax_lower@jaxglobal-local,0.150,ends at 4.9s; overlaps root_bound 0.1
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",background,jax_trace@jaxglobal-screen,0.116,ends at 2.1s; overlaps root_bound 0.1
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",background,jax_lower@jaxglobal-screen,0.112,ends at 2.2s; overlaps root_bound 0.1
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",background,jax_compile@jaxglobal-local,2.491,"ends at 5.0s; overlaps root_bound 2.4, root_incumbent 0.1"
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",background,jax_compile@jaxglobal-screen,1.421,ends at 3.6s; overlaps root_bound 1.4
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",background,trace_lower:obbt[b=1],0.912,ends at 2.8s; overlaps root_bound 0.9
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",background,jax_compile@jaxglobal-compile,3.617,"ends at 5.2s; overlaps root_bound 5.1, make_local 0.3, root_obbt 0.1, root_incumbent 0.1"
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",background,compile:bound[b=16],3.263,"ends at 4.9s; overlaps root_bound 3.0, make_local 0.3"
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",background,compile:obbt[b=1],2.400,"ends at 5.2s; overlaps root_bound 2.1, root_obbt 0.1, root_incumbent 0.1"
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",path,use_interpreter,,who=fbbt.interpreted args=[] rows=283 result=True
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=283 result=True"
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",info,n,,43
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",info,n_int,,0
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",info,free,,0
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",info,status,,time_limit
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",info,nodes,,17919
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",info,fun,,0.3396018366725154
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",info,lower_bound,,0.33893643092442416
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",info,message,,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",info,rows,,283
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",info,quadratic,,True
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",info,structure,,True
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",info,load_gate,,gate=ok load1=0.50
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",bucket,kernel wait: trace+lower,0.000,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",bucket,kernel wait: XLA compile,3.067,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",bucket,kernel wait: other,0.000,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",bucket,bound_domain,0.000,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",bucket,structure/nonlinear/quadratic,0.133,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",bucket,make_local,1.249,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",bucket,root bound: kernel run (first LP),0.061,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",bucket,root local solves + incumbent,0.189,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",bucket,root dives + enum,0.000,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",bucket,root OBBT: kernel run,0.248,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",bucket,probing: run,0.000,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",bucket,search,54.702,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.059,
+kall_circlespolygons_c1p12,cold,"0.50, 0.75, 0.88",bucket,root bound: other,0.040,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",total,minimize_wall,60.280,time_limit
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",total,import_jax_jaxglobal,0.534,not in minimize
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",total,read_nl,0.001,not in minimize
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",stage,pre_domain,0.000,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",stage,bound_domain,0.000,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",stage,setup,0.000,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",stage,cut_pool,0.437,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",stage,kernels,0.053,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",stage,pseudo_boolean,0.000,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",stage,start_compile,0.007,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",stage,start_dive_compile,0.000,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",stage,nonlinear,0.123,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",stage,quadratic,0.000,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",stage,make_local,1.308,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",stage,root_bound,2.797,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",stage,root_incumbent,0.108,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",stage,root_dives,0.000,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",stage,root_obbt,0.461,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",stage,root_obbt_incumbent,0.069,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",stage,probe,0.000,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",stage,search,54.916,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_cut_pool,jax_compile,0.274,calls=0
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_cut_pool,jax_trace,0.070,calls=0
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_cut_pool,jax_lower,0.032,calls=0
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_kernels,K.quadratic,0.052,calls=1
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_kernels,jax_trace,0.018,calls=0
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_kernels,jax_compile,0.007,calls=0
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_nonlinear,K.nonlinear,0.123,calls=1
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_nonlinear,K.structure,0.123,calls=1
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_nonlinear,jax_trace,0.035,calls=0
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_make_local,make_local,1.305,calls=1
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_make_local,jax_compile,0.363,calls=0
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_make_local,jax_lower,0.028,calls=0
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_root_bound,wait:bound,2.705,calls=1
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_root_bound,run:bound,0.063,calls=1 boxes=16
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_root_bound,jax_compile,0.019,calls=0
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_root_incumbent,local_solve,0.106,calls=1 #1 starts=1
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_root_obbt,wait:obbt,0.223,calls=1
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_root_obbt,run:obbt,0.188,calls=1 boxes=1
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_root_obbt,run:bound,0.040,calls=1 boxes=16
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_root_obbt,jax_compile,0.007,calls=0
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_root_obbt_incumbent,local_solve,0.067,calls=1 #2 starts=1
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_search,run:bound,52.861,calls=1156 boxes=16;boxes=16;boxes=16
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_search,local_solve,1.225,calls=6 #3 starts=2;#4 starts=2;#5 starts=2
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_search,jax_compile,0.211,calls=0
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_search,wait:bound,0.056,calls=1157
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_in_search,jax_lower,0.014,calls=0
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_jax,jax_trace,0.154,union
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_jax,jax_lower,0.076,union
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",main_jax,jax_compile,0.881,union
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",background,K.quadratic,0.000,ends at 1.9s; overlaps 
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",background,jax_trace@jaxglobal-trace,1.525,"ends at 2.7s; overlaps root_bound 0.7, make_local 0.7, nonlinear 0.1"
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",background,jax_lower@jaxglobal-trace,0.362,"ends at 2.8s; overlaps make_local 0.3, root_bound 0.1"
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",background,jax_compile@jaxglobal-trace,0.048,ends at 0.7s; overlaps 
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",background,trace_lower:bound[b=16],1.077,"ends at 1.6s; overlaps make_local 0.9, nonlinear 0.1"
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",background,jax_trace@jaxglobal-local,0.347,ends at 4.5s; overlaps root_bound 0.3
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",background,jax_lower@jaxglobal-local,0.115,ends at 4.5s; overlaps root_bound 0.1
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",background,jax_trace@jaxglobal-screen,0.155,ends at 2.2s; overlaps root_bound 0.2
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",background,jax_lower@jaxglobal-screen,0.060,ends at 2.2s; overlaps root_bound 0.1
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",background,jax_compile@jaxglobal-local,2.370,"ends at 4.8s; overlaps root_bound 2.3, root_incumbent 0.1"
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",background,jax_compile@jaxglobal-screen,1.301,ends at 3.5s; overlaps root_bound 1.3
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",background,trace_lower:obbt[b=1],0.825,ends at 2.8s; overlaps root_bound 0.8
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",background,jax_compile@jaxglobal-compile,3.496,"ends at 5.1s; overlaps root_bound 4.7, make_local 0.4, root_obbt 0.2, root_incumbent 0.1"
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",background,compile:bound[b=16],3.094,"ends at 4.7s; overlaps root_bound 2.7, make_local 0.4"
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",background,compile:obbt[b=1],2.305,"ends at 5.1s; overlaps root_bound 2.0, root_obbt 0.2, root_incumbent 0.1"
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",path,use_interpreter,,who=fbbt.interpreted args=[] rows=283 result=True
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=283 result=True"
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",info,n,,43
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",info,n_int,,0
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",info,free,,0
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",info,status,,time_limit
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",info,nodes,,18431
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",info,fun,,0.3396018366725154
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",info,lower_bound,,0.3390776277356952
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",info,message,,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",info,rows,,283
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",info,quadratic,,True
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",info,structure,,True
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",info,load_gate,,gate=ok load1=0.49
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",bucket,kernel wait: trace+lower,0.000,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",bucket,kernel wait: XLA compile,2.920,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",bucket,kernel wait: other,0.000,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",bucket,bound_domain,0.000,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",bucket,structure/nonlinear/quadratic,0.123,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",bucket,make_local,1.308,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",bucket,root bound: kernel run (first LP),0.063,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",bucket,root local solves + incumbent,0.176,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",bucket,root dives + enum,0.000,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",bucket,root OBBT: kernel run,0.238,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",bucket,probing: run,0.000,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",bucket,search,54.861,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.060,
+kall_circlespolygons_c1p12,cold,"0.49, 0.74, 0.87",bucket,root bound: other,0.029,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",total,minimize_wall,60.265,time_limit
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",total,import_jax_jaxglobal,0.520,not in minimize
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",total,read_nl,0.001,not in minimize
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",stage,pre_domain,0.000,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",stage,bound_domain,0.000,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",stage,setup,0.000,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",stage,cut_pool,0.499,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",stage,kernels,0.051,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",stage,pseudo_boolean,0.000,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",stage,start_compile,0.007,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",stage,start_dive_compile,0.000,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",stage,nonlinear,0.130,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",stage,quadratic,0.000,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",stage,make_local,1.346,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",stage,root_bound,2.982,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",stage,root_incumbent,0.061,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",stage,root_dives,0.000,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",stage,root_obbt,0.372,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",stage,root_obbt_incumbent,0.071,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",stage,probe,0.000,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",stage,search,54.746,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_cut_pool,jax_compile,0.307,calls=0
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_cut_pool,jax_trace,0.083,calls=0
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_cut_pool,jax_lower,0.034,calls=0
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_kernels,K.quadratic,0.049,calls=1
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_kernels,jax_trace,0.016,calls=0
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_kernels,jax_compile,0.007,calls=0
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_nonlinear,K.nonlinear,0.129,calls=1
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_nonlinear,K.structure,0.129,calls=1
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_nonlinear,jax_trace,0.037,calls=0
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_make_local,make_local,1.343,calls=1
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_make_local,jax_compile,0.483,calls=0
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_make_local,jax_lower,0.026,calls=0
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_make_local,jax_trace,0.010,calls=0
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_root_bound,wait:bound,2.863,calls=1
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_root_bound,run:bound,0.066,calls=1 boxes=16
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_root_bound,jax_compile,0.018,calls=0
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_root_incumbent,local_solve,0.060,calls=1 #1 starts=1
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_root_obbt,run:obbt,0.183,calls=1 boxes=1
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_root_obbt,wait:obbt,0.129,calls=1
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_root_obbt,run:bound,0.047,calls=1 boxes=16
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_root_obbt,jax_compile,0.009,calls=0
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_root_obbt_incumbent,local_solve,0.069,calls=1 #2 starts=1
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_search,run:bound,52.608,calls=1164 boxes=16;boxes=16;boxes=16
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_search,local_solve,1.311,calls=6 #3 starts=2;#4 starts=2;#5 starts=2
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_search,jax_compile,0.203,calls=0
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_search,wait:bound,0.057,calls=1165
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_in_search,jax_lower,0.012,calls=0
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_jax,jax_trace,0.165,union
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_jax,jax_lower,0.074,union
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",main_jax,jax_compile,1.027,union
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",background,K.quadratic,0.000,ends at 2.0s; overlaps 
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",background,jax_trace@jaxglobal-trace,1.822,"ends at 2.9s; overlaps root_bound 0.9, make_local 0.8, nonlinear 0.1"
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",background,jax_lower@jaxglobal-trace,0.306,"ends at 3.0s; overlaps make_local 0.2, root_bound 0.1"
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",background,jax_compile@jaxglobal-trace,0.071,ends at 0.8s; overlaps make_local 0.1
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",background,trace_lower:bound[b=16],1.185,"ends at 1.7s; overlaps make_local 1.0, nonlinear 0.1"
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",background,jax_trace@jaxglobal-local,0.462,ends at 4.8s; overlaps root_bound 0.5
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",background,jax_lower@jaxglobal-local,0.060,ends at 4.8s; overlaps root_bound 0.1
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",background,jax_compile@jaxglobal-local,2.369,ends at 5.0s; overlaps root_bound 2.4
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",background,jax_trace@jaxglobal-screen,0.113,ends at 2.3s; overlaps root_bound 0.1
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",background,jax_lower@jaxglobal-screen,0.065,ends at 2.3s; overlaps root_bound 0.1
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",background,jax_compile@jaxglobal-screen,1.326,ends at 3.6s; overlaps root_bound 1.3
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",background,trace_lower:obbt[b=1],0.955,ends at 3.0s; overlaps root_bound 1.0
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",background,jax_compile@jaxglobal-compile,3.480,"ends at 5.2s; overlaps root_bound 4.9, make_local 0.3, root_obbt 0.1, root_incumbent 0.1"
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",background,compile:bound[b=16],3.211,"ends at 4.9s; overlaps root_bound 2.9, make_local 0.3"
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",background,compile:obbt[b=1],2.228,"ends at 5.2s; overlaps root_bound 2.0, root_obbt 0.1, root_incumbent 0.1"
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",path,use_interpreter,,who=fbbt.interpreted args=[] rows=283 result=True
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=283 result=True"
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",info,n,,43
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",info,n_int,,0
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",info,free,,0
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",info,status,,time_limit
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",info,nodes,,18431
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",info,fun,,0.3396018366725154
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",info,lower_bound,,0.3390776277356952
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",info,message,,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",info,rows,,283
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",info,quadratic,,True
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",info,structure,,True
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",info,load_gate,,gate=ok load1=0.60
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",bucket,kernel wait: trace+lower,0.000,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",bucket,kernel wait: XLA compile,2.989,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",bucket,kernel wait: other,0.000,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",bucket,bound_domain,0.000,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",bucket,structure/nonlinear/quadratic,0.130,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",bucket,make_local,1.346,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",bucket,root bound: kernel run (first LP),0.066,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",bucket,root local solves + incumbent,0.133,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",bucket,root dives + enum,0.000,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",bucket,root OBBT: kernel run,0.243,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",bucket,probing: run,0.000,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",bucket,search,54.689,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.058,
+kall_circlespolygons_c1p12,cold,"0.60, 0.81, 0.89",bucket,root bound: other,0.053,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",total,minimize_wall,60.266,time_limit
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",total,import_jax_jaxglobal,0.555,not in minimize
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",total,read_nl,0.001,not in minimize
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",stage,pre_domain,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",stage,bound_domain,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",stage,setup,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",stage,cut_pool,0.456,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",stage,kernels,0.050,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",stage,pseudo_boolean,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",stage,start_compile,0.007,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",stage,start_dive_compile,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",stage,nonlinear,0.124,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",stage,quadratic,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",stage,make_local,1.348,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",stage,root_bound,3.064,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",stage,root_incumbent,0.057,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",stage,root_dives,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",stage,root_obbt,0.220,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",stage,root_obbt_incumbent,0.043,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",stage,probe,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",stage,search,54.898,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_cut_pool,jax_compile,0.284,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_cut_pool,jax_trace,0.074,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_cut_pool,jax_lower,0.033,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_kernels,K.quadratic,0.049,calls=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_kernels,jax_trace,0.018,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_kernels,jax_compile,0.007,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_nonlinear,K.nonlinear,0.124,calls=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_nonlinear,K.structure,0.124,calls=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_nonlinear,jax_trace,0.034,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_make_local,make_local,1.338,calls=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_make_local,jax_compile,0.376,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_make_local,jax_lower,0.021,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_root_bound,wait:bound,2.964,calls=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_root_bound,run:bound,0.044,calls=1 boxes=16
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_root_bound,jax_compile,0.018,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_root_incumbent,local_solve,0.056,calls=1 #1 starts=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_root_obbt,run:obbt,0.174,calls=1 boxes=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_root_obbt,run:bound,0.036,calls=1 boxes=16
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_root_obbt,jax_compile,0.007,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_root_obbt_incumbent,local_solve,0.041,calls=1 #2 starts=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_search,run:bound,52.862,calls=1162 boxes=16;boxes=16;boxes=16
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_search,local_solve,1.209,calls=6 #3 starts=2;#4 starts=2;#5 starts=2
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_search,jax_compile,0.207,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_search,wait:bound,0.055,calls=1163
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_in_search,jax_lower,0.013,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_jax,jax_trace,0.148,union
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_jax,jax_lower,0.069,union
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",main_jax,jax_compile,0.899,union
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",background,K.quadratic,0.000,ends at 2.0s; overlaps 
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",background,jax_trace@jaxglobal-trace,1.457,"ends at 2.6s; overlaps make_local 0.7, root_bound 0.6, nonlinear 0.1"
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",background,jax_lower@jaxglobal-trace,0.391,"ends at 2.7s; overlaps make_local 0.3, root_bound 0.1"
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",background,jax_compile@jaxglobal-trace,0.057,ends at 0.7s; overlaps make_local 0.1
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",background,trace_lower:bound[b=16],1.142,"ends at 1.6s; overlaps make_local 1.0, nonlinear 0.1"
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",background,jax_trace@jaxglobal-local,0.372,ends at 4.6s; overlaps root_bound 0.4
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",background,jax_lower@jaxglobal-local,0.146,ends at 4.6s; overlaps root_bound 0.1
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",background,jax_trace@jaxglobal-screen,0.134,ends at 2.2s; overlaps root_bound 0.1
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",background,jax_lower@jaxglobal-screen,0.042,ends at 2.2s; overlaps 
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",background,jax_compile@jaxglobal-screen,1.519,ends at 3.7s; overlaps root_bound 1.5
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",background,jax_compile@jaxglobal-local,2.206,ends at 4.8s; overlaps root_bound 2.2
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",background,trace_lower:obbt[b=1],0.724,ends at 2.7s; overlaps root_bound 0.7
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",background,jax_compile@jaxglobal-compile,3.409,"ends at 5.1s; overlaps root_bound 5.4, make_local 0.3"
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",background,compile:bound[b=16],3.355,"ends at 5.0s; overlaps root_bound 3.0, make_local 0.3"
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",background,compile:obbt[b=1],2.350,ends at 5.1s; overlaps root_bound 2.3
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",path,use_interpreter,,who=fbbt.interpreted args=[] rows=283 result=True
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=283 result=True"
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",info,n,,43
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",info,n_int,,0
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",info,free,,0
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",info,status,,time_limit
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",info,nodes,,18431
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",info,fun,,0.3396018366725154
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",info,lower_bound,,0.3390776277356952
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",info,message,,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",info,rows,,283
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",info,quadratic,,True
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",info,structure,,True
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",info,load_gate,,gate=ok load1=0.66
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",bucket,kernel wait: trace+lower,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",bucket,kernel wait: XLA compile,2.960,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",bucket,kernel wait: other,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",bucket,bound_domain,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",bucket,structure/nonlinear/quadratic,0.124,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",bucket,make_local,1.348,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",bucket,root bound: kernel run (first LP),0.044,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",bucket,root local solves + incumbent,0.100,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",bucket,root dives + enum,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",bucket,root OBBT: kernel run,0.220,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",bucket,probing: run,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",bucket,search,54.843,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.057,
+kall_circlespolygons_c1p12,cold+opsrule,"0.66, 0.89, 0.92",bucket,root bound: other,0.056,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",total,minimize_wall,60.271,time_limit
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",total,import_jax_jaxglobal,0.489,not in minimize
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",total,read_nl,0.001,not in minimize
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",stage,pre_domain,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",stage,bound_domain,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",stage,setup,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",stage,cut_pool,0.444,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",stage,kernels,0.050,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",stage,pseudo_boolean,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",stage,start_compile,0.007,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",stage,start_dive_compile,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",stage,nonlinear,0.135,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",stage,quadratic,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",stage,make_local,1.291,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",stage,root_bound,3.004,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",stage,root_incumbent,0.063,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",stage,root_dives,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",stage,root_obbt,0.270,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",stage,root_obbt_incumbent,0.045,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",stage,probe,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",stage,search,54.960,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_cut_pool,jax_compile,0.283,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_cut_pool,jax_trace,0.070,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_cut_pool,jax_lower,0.030,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_kernels,K.quadratic,0.049,calls=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_kernels,jax_trace,0.017,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_kernels,jax_compile,0.007,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_nonlinear,K.nonlinear,0.135,calls=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_nonlinear,K.structure,0.135,calls=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_nonlinear,jax_trace,0.035,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_make_local,make_local,1.283,calls=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_make_local,jax_compile,0.317,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_make_local,jax_lower,0.019,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_root_bound,wait:bound,2.911,calls=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_root_bound,run:bound,0.046,calls=1 boxes=16
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_root_bound,jax_compile,0.016,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_root_bound,jax_lower,0.013,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_root_incumbent,local_solve,0.062,calls=1 #1 starts=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_root_obbt,run:obbt,0.158,calls=1 boxes=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_root_obbt,wait:obbt,0.060,calls=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_root_obbt,run:bound,0.043,calls=1 boxes=16
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_root_obbt,jax_compile,0.006,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_root_obbt_incumbent,local_solve,0.044,calls=1 #2 starts=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_search,run:bound,52.902,calls=1172 boxes=16;boxes=16;boxes=16
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_search,local_solve,1.256,calls=6 #3 starts=2;#4 starts=2;#5 starts=2
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_search,jax_compile,0.188,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_search,wait:bound,0.055,calls=1173
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_in_search,jax_lower,0.012,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_jax,jax_trace,0.142,union
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_jax,jax_lower,0.075,union
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",main_jax,jax_compile,0.817,union
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",background,K.quadratic,0.000,ends at 1.9s; overlaps 
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",background,jax_trace@jaxglobal-trace,1.493,"ends at 2.6s; overlaps root_bound 0.7, make_local 0.7, nonlinear 0.1"
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",background,jax_lower@jaxglobal-trace,0.380,"ends at 2.7s; overlaps make_local 0.3, root_bound 0.1"
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",background,jax_compile@jaxglobal-trace,0.046,ends at 0.7s; overlaps 
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",background,trace_lower:bound[b=16],1.116,"ends at 1.6s; overlaps make_local 1.0, nonlinear 0.1"
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",background,jax_trace@jaxglobal-local,0.352,ends at 4.7s; overlaps root_bound 0.4
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",background,jax_lower@jaxglobal-local,0.103,ends at 4.7s; overlaps root_bound 0.1
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",background,jax_trace@jaxglobal-screen,0.156,ends at 2.1s; overlaps root_bound 0.2
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",background,jax_lower@jaxglobal-screen,0.035,ends at 2.2s; overlaps 
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",background,jax_compile@jaxglobal-local,2.401,ends at 4.9s; overlaps root_bound 2.4
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",background,jax_compile@jaxglobal-screen,1.378,ends at 3.5s; overlaps root_bound 1.4
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",background,trace_lower:obbt[b=1],0.774,ends at 2.7s; overlaps root_bound 0.8
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",background,jax_compile@jaxglobal-compile,3.448,"ends at 5.1s; overlaps root_bound 5.2, make_local 0.3, root_obbt 0.1, root_incumbent 0.1"
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",background,compile:bound[b=16],3.271,"ends at 4.9s; overlaps root_bound 3.0, make_local 0.3"
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",background,compile:obbt[b=1],2.348,"ends at 5.1s; overlaps root_bound 2.2, root_obbt 0.1, root_incumbent 0.1"
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",path,use_interpreter,,who=fbbt.interpreted args=[] rows=283 result=True
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=283 result=True"
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",info,n,,43
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",info,n_int,,0
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",info,free,,0
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",info,status,,time_limit
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",info,nodes,,18687
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",info,fun,,0.3396018366725154
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",info,lower_bound,,0.3391560378027612
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",info,message,,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",info,rows,,283
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",info,quadratic,,True
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",info,structure,,True
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",info,load_gate,,gate=ok load1=0.53
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",bucket,kernel wait: trace+lower,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",bucket,kernel wait: XLA compile,2.970,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",bucket,kernel wait: other,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",bucket,bound_domain,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",bucket,structure/nonlinear/quadratic,0.135,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",bucket,make_local,1.291,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",bucket,root bound: kernel run (first LP),0.046,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",bucket,root local solves + incumbent,0.109,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",bucket,root dives + enum,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",bucket,root OBBT: kernel run,0.211,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",bucket,probing: run,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",bucket,search,54.906,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.057,
+kall_circlespolygons_c1p12,cold+opsrule,"0.53, 0.86, 0.91",bucket,root bound: other,0.047,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",total,minimize_wall,60.330,time_limit
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",total,import_jax_jaxglobal,0.492,not in minimize
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",total,read_nl,0.001,not in minimize
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",stage,pre_domain,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",stage,bound_domain,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",stage,setup,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",stage,cut_pool,0.442,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",stage,kernels,0.049,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",stage,pseudo_boolean,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",stage,start_compile,0.007,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",stage,start_dive_compile,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",stage,nonlinear,0.125,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",stage,quadratic,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",stage,make_local,1.270,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",stage,root_bound,2.780,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",stage,root_incumbent,0.104,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",stage,root_dives,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",stage,root_obbt,0.369,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",stage,root_obbt_incumbent,0.050,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",stage,probe,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",stage,search,55.134,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_cut_pool,jax_compile,0.281,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_cut_pool,jax_trace,0.071,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_cut_pool,jax_lower,0.030,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_kernels,K.quadratic,0.047,calls=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_kernels,jax_trace,0.016,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_kernels,jax_compile,0.007,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_nonlinear,K.nonlinear,0.125,calls=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_nonlinear,K.structure,0.125,calls=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_nonlinear,jax_trace,0.034,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_make_local,make_local,1.260,calls=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_make_local,jax_compile,0.322,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_make_local,jax_lower,0.021,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_root_bound,wait:bound,2.648,calls=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_root_bound,run:bound,0.049,calls=1 boxes=16
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_root_bound,jax_compile,0.020,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_root_incumbent,local_solve,0.102,calls=1 #1 starts=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_root_obbt,run:obbt,0.183,calls=1 boxes=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_root_obbt,wait:obbt,0.131,calls=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_root_obbt,run:bound,0.043,calls=1 boxes=16
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_root_obbt,jax_compile,0.009,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_root_obbt_incumbent,local_solve,0.049,calls=1 #2 starts=1
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_search,run:bound,52.961,calls=1139 boxes=16;boxes=16;boxes=16
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_search,local_solve,1.328,calls=6 #3 starts=2;#4 starts=2;#5 starts=2
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_search,jax_compile,0.231,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_search,wait:bound,0.055,calls=1140
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_in_search,jax_lower,0.018,calls=0
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_jax,jax_trace,0.147,union
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_jax,jax_lower,0.071,union
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",main_jax,jax_compile,0.870,union
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",background,K.quadratic,0.000,ends at 1.9s; overlaps 
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",background,jax_trace@jaxglobal-trace,1.489,"ends at 2.6s; overlaps root_bound 0.7, make_local 0.7, nonlinear 0.1"
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",background,jax_lower@jaxglobal-trace,0.343,"ends at 2.7s; overlaps make_local 0.2, root_bound 0.1"
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",background,jax_compile@jaxglobal-trace,0.051,ends at 0.7s; overlaps make_local 0.1
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",background,trace_lower:bound[b=16],1.050,"ends at 1.5s; overlaps make_local 0.9, nonlinear 0.1"
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",background,jax_trace@jaxglobal-local,0.388,ends at 4.6s; overlaps root_bound 0.4
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",background,jax_lower@jaxglobal-local,0.072,ends at 4.6s; overlaps root_bound 0.1
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",background,jax_trace@jaxglobal-screen,0.136,ends at 2.1s; overlaps root_bound 0.1
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",background,jax_lower@jaxglobal-screen,0.065,ends at 2.2s; overlaps root_bound 0.1
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",background,jax_compile@jaxglobal-local,2.330,ends at 4.7s; overlaps root_bound 2.3
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",background,jax_compile@jaxglobal-screen,1.198,ends at 3.3s; overlaps root_bound 1.2
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",background,trace_lower:obbt[b=1],0.810,ends at 2.7s; overlaps root_bound 0.8
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",background,jax_compile@jaxglobal-compile,3.374,"ends at 4.9s; overlaps root_bound 4.7, make_local 0.3, root_obbt 0.1, root_incumbent 0.1"
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",background,compile:bound[b=16],3.080,"ends at 4.6s; overlaps root_bound 2.7, make_local 0.3"
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",background,compile:obbt[b=1],2.206,"ends at 4.9s; overlaps root_bound 2.0, root_obbt 0.1, root_incumbent 0.1"
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",path,use_interpreter,,who=fbbt.interpreted args=[] rows=283 result=True
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=283 result=True"
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",info,n,,43
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",info,n_int,,0
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",info,free,,0
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",info,status,,time_limit
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",info,nodes,,18175
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",info,fun,,0.3396018366725154
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",info,lower_bound,,0.33905879426238544
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",info,message,,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",info,rows,,283
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",info,quadratic,,True
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",info,structure,,True
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",info,load_gate,,gate=ok load1=0.52
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",bucket,kernel wait: trace+lower,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",bucket,kernel wait: XLA compile,2.778,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",bucket,kernel wait: other,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",bucket,bound_domain,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",bucket,structure/nonlinear/quadratic,0.125,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",bucket,make_local,1.270,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",bucket,root bound: kernel run (first LP),0.049,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",bucket,root local solves + incumbent,0.154,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",bucket,root dives + enum,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",bucket,root OBBT: kernel run,0.238,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",bucket,probing: run,0.000,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",bucket,search,55.079,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.056,
+kall_circlespolygons_c1p12,cold+opsrule,"0.52, 0.85, 0.90",bucket,root bound: other,0.083,
+wastewater15m1,cold,"0.40, 0.77, 0.87",total,minimize_wall,60.328,time_limit
+wastewater15m1,cold,"0.40, 0.77, 0.87",total,import_jax_jaxglobal,0.432,not in minimize
+wastewater15m1,cold,"0.40, 0.77, 0.87",total,read_nl,0.002,not in minimize
+wastewater15m1,cold,"0.40, 0.77, 0.87",stage,pre_domain,0.000,
+wastewater15m1,cold,"0.40, 0.77, 0.87",stage,bound_domain,0.000,
+wastewater15m1,cold,"0.40, 0.77, 0.87",stage,setup,0.000,
+wastewater15m1,cold,"0.40, 0.77, 0.87",stage,cut_pool,0.275,
+wastewater15m1,cold,"0.40, 0.77, 0.87",stage,kernels,0.001,
+wastewater15m1,cold,"0.40, 0.77, 0.87",stage,pseudo_boolean,0.000,
+wastewater15m1,cold,"0.40, 0.77, 0.87",stage,start_compile,0.007,
+wastewater15m1,cold,"0.40, 0.77, 0.87",stage,start_dive_compile,0.000,
+wastewater15m1,cold,"0.40, 0.77, 0.87",stage,nonlinear,0.181,
+wastewater15m1,cold,"0.40, 0.77, 0.87",stage,quadratic,0.000,
+wastewater15m1,cold,"0.40, 0.77, 0.87",stage,make_local,1.598,
+wastewater15m1,cold,"0.40, 0.77, 0.87",stage,root_bound,2.886,
+wastewater15m1,cold,"0.40, 0.77, 0.87",stage,root_incumbent,0.019,
+wastewater15m1,cold,"0.40, 0.77, 0.87",stage,root_dives,0.000,
+wastewater15m1,cold,"0.40, 0.77, 0.87",stage,root_obbt,0.503,
+wastewater15m1,cold,"0.40, 0.77, 0.87",stage,root_obbt_incumbent,0.026,
+wastewater15m1,cold,"0.40, 0.77, 0.87",stage,probe,0.000,
+wastewater15m1,cold,"0.40, 0.77, 0.87",stage,search,54.833,
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_in_cut_pool,jax_compile,0.104,calls=0
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_in_cut_pool,jax_trace,0.068,calls=0
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_in_cut_pool,jax_lower,0.020,calls=0
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_in_nonlinear,K.nonlinear,0.181,calls=1
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_in_nonlinear,K.structure,0.181,calls=1
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_in_nonlinear,jax_trace,0.041,calls=0
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_in_make_local,make_local,1.596,calls=1
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_in_make_local,jax_compile,0.386,calls=0
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_in_make_local,jax_lower,0.019,calls=0
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_in_root_bound,wait:bound,2.821,calls=1
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_in_root_bound,run:bound,0.036,calls=1 boxes=16
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_in_root_bound,jax_compile,0.005,calls=0
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_in_root_incumbent,local_solve,0.017,calls=1 #1 starts=1
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_in_root_obbt,run:obbt,0.276,calls=1 boxes=1
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_in_root_obbt,wait:obbt,0.187,calls=1
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_in_root_obbt,run:bound,0.029,calls=1 boxes=16
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_in_root_obbt,jax_compile,0.007,calls=0
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_in_root_obbt_incumbent,local_solve,0.024,calls=1 #2 starts=1
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_in_search,run:bound,53.090,calls=1089 boxes=16;boxes=16;boxes=16
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_in_search,local_solve,0.856,calls=6 #3 starts=2;#4 starts=2;#5 starts=2
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_in_search,jax_compile,0.216,calls=0
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_in_search,wait:bound,0.052,calls=1090
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_in_search,jax_lower,0.012,calls=0
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_jax,jax_trace,0.142,union
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_jax,jax_lower,0.056,union
+wastewater15m1,cold,"0.40, 0.77, 0.87",main_jax,jax_compile,0.718,union
+wastewater15m1,cold,"0.40, 0.77, 0.87",background,jax_trace@jaxglobal-trace,2.290,"ends at 3.0s; overlaps make_local 1.2, root_bound 0.9, nonlinear 0.2"
+wastewater15m1,cold,"0.40, 0.77, 0.87",background,jax_lower@jaxglobal-trace,0.434,"ends at 3.1s; overlaps make_local 0.3, root_bound 0.1"
+wastewater15m1,cold,"0.40, 0.77, 0.87",background,jax_compile@jaxglobal-trace,0.126,ends at 0.7s; overlaps make_local 0.1
+wastewater15m1,cold,"0.40, 0.77, 0.87",background,K.quadratic,0.144,ends at 2.1s; overlaps nonlinear 0.1
+wastewater15m1,cold,"0.40, 0.77, 0.87",background,trace_lower:bound[b=16],1.705,"ends at 2.0s; overlaps make_local 1.5, nonlinear 0.2"
+wastewater15m1,cold,"0.40, 0.77, 0.87",background,jax_trace@jaxglobal-local,0.410,ends at 3.4s; overlaps root_bound 0.4
+wastewater15m1,cold,"0.40, 0.77, 0.87",background,jax_lower@jaxglobal-local,0.131,ends at 3.5s; overlaps root_bound 0.1
+wastewater15m1,cold,"0.40, 0.77, 0.87",background,jax_trace@jaxglobal-screen,0.157,ends at 2.3s; overlaps root_bound 0.2
+wastewater15m1,cold,"0.40, 0.77, 0.87",background,jax_lower@jaxglobal-screen,0.121,ends at 2.4s; overlaps root_bound 0.1
+wastewater15m1,cold,"0.40, 0.77, 0.87",background,jax_compile@jaxglobal-local,1.707,ends at 4.3s; overlaps root_bound 1.7
+wastewater15m1,cold,"0.40, 0.77, 0.87",background,jax_compile@jaxglobal-screen,0.463,ends at 2.8s; overlaps root_bound 0.5
+wastewater15m1,cold,"0.40, 0.77, 0.87",background,trace_lower:obbt[b=1],1.033,ends at 3.1s; overlaps root_bound 1.0
+wastewater15m1,cold,"0.40, 0.77, 0.87",background,jax_compile@jaxglobal-compile,3.181,"ends at 5.2s; overlaps root_bound 4.7, root_obbt 0.2, make_local 0.1"
+wastewater15m1,cold,"0.40, 0.77, 0.87",background,compile:bound[b=16],2.930,"ends at 4.9s; overlaps root_bound 2.9, make_local 0.1"
+wastewater15m1,cold,"0.40, 0.77, 0.87",background,compile:obbt[b=1],2.046,"ends at 5.2s; overlaps root_bound 1.8, root_obbt 0.2"
+wastewater15m1,cold,"0.40, 0.77, 0.87",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=359 result=True"
+wastewater15m1,cold,"0.40, 0.77, 0.87",path,use_interpreter,,who=fbbt.interpreted args=[] rows=359 result=True
+wastewater15m1,cold,"0.40, 0.77, 0.87",info,n,,46
+wastewater15m1,cold,"0.40, 0.77, 0.87",info,n_int,,0
+wastewater15m1,cold,"0.40, 0.77, 0.87",info,free,,0
+wastewater15m1,cold,"0.40, 0.77, 0.87",info,status,,time_limit
+wastewater15m1,cold,"0.40, 0.77, 0.87",info,nodes,,17367
+wastewater15m1,cold,"0.40, 0.77, 0.87",info,fun,,2446.428571428771
+wastewater15m1,cold,"0.40, 0.77, 0.87",info,lower_bound,,2123.8089025633917
+wastewater15m1,cold,"0.40, 0.77, 0.87",info,message,,
+wastewater15m1,cold,"0.40, 0.77, 0.87",info,rows,,359
+wastewater15m1,cold,"0.40, 0.77, 0.87",info,quadratic,,True
+wastewater15m1,cold,"0.40, 0.77, 0.87",info,structure,,True
+wastewater15m1,cold,"0.40, 0.77, 0.87",info,load_gate,,gate=ok load1=0.40
+wastewater15m1,cold,"0.40, 0.77, 0.87",bucket,kernel wait: trace+lower,0.000,
+wastewater15m1,cold,"0.40, 0.77, 0.87",bucket,kernel wait: XLA compile,3.007,
+wastewater15m1,cold,"0.40, 0.77, 0.87",bucket,kernel wait: other,0.000,
+wastewater15m1,cold,"0.40, 0.77, 0.87",bucket,bound_domain,0.000,
+wastewater15m1,cold,"0.40, 0.77, 0.87",bucket,structure/nonlinear/quadratic,0.181,
+wastewater15m1,cold,"0.40, 0.77, 0.87",bucket,make_local,1.598,
+wastewater15m1,cold,"0.40, 0.77, 0.87",bucket,root bound: kernel run (first LP),0.036,
+wastewater15m1,cold,"0.40, 0.77, 0.87",bucket,root local solves + incumbent,0.044,
+wastewater15m1,cold,"0.40, 0.77, 0.87",bucket,root dives + enum,0.000,
+wastewater15m1,cold,"0.40, 0.77, 0.87",bucket,root OBBT: kernel run,0.315,
+wastewater15m1,cold,"0.40, 0.77, 0.87",bucket,probing: run,0.000,
+wastewater15m1,cold,"0.40, 0.77, 0.87",bucket,search,54.781,
+wastewater15m1,cold,"0.40, 0.77, 0.87",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.008,
+wastewater15m1,cold,"0.40, 0.77, 0.87",bucket,root bound: other,0.030,
+wastewater15m1,cold,"0.63, 0.84, 0.89",total,minimize_wall,60.280,time_limit
+wastewater15m1,cold,"0.63, 0.84, 0.89",total,import_jax_jaxglobal,0.510,not in minimize
+wastewater15m1,cold,"0.63, 0.84, 0.89",total,read_nl,0.001,not in minimize
+wastewater15m1,cold,"0.63, 0.84, 0.89",stage,pre_domain,0.000,
+wastewater15m1,cold,"0.63, 0.84, 0.89",stage,bound_domain,0.000,
+wastewater15m1,cold,"0.63, 0.84, 0.89",stage,setup,0.000,
+wastewater15m1,cold,"0.63, 0.84, 0.89",stage,cut_pool,0.298,
+wastewater15m1,cold,"0.63, 0.84, 0.89",stage,kernels,0.001,
+wastewater15m1,cold,"0.63, 0.84, 0.89",stage,pseudo_boolean,0.000,
+wastewater15m1,cold,"0.63, 0.84, 0.89",stage,start_compile,0.007,
+wastewater15m1,cold,"0.63, 0.84, 0.89",stage,start_dive_compile,0.000,
+wastewater15m1,cold,"0.63, 0.84, 0.89",stage,nonlinear,0.135,
+wastewater15m1,cold,"0.63, 0.84, 0.89",stage,quadratic,0.011,
+wastewater15m1,cold,"0.63, 0.84, 0.89",stage,make_local,1.824,
+wastewater15m1,cold,"0.63, 0.84, 0.89",stage,root_bound,3.031,
+wastewater15m1,cold,"0.63, 0.84, 0.89",stage,root_incumbent,0.025,
+wastewater15m1,cold,"0.63, 0.84, 0.89",stage,root_dives,0.000,
+wastewater15m1,cold,"0.63, 0.84, 0.89",stage,root_obbt,0.402,
+wastewater15m1,cold,"0.63, 0.84, 0.89",stage,root_obbt_incumbent,0.030,
+wastewater15m1,cold,"0.63, 0.84, 0.89",stage,probe,0.000,
+wastewater15m1,cold,"0.63, 0.84, 0.89",stage,search,54.515,
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_cut_pool,jax_compile,0.108,calls=0
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_cut_pool,jax_trace,0.072,calls=0
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_cut_pool,jax_lower,0.022,calls=0
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_nonlinear,K.nonlinear,0.135,calls=1
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_nonlinear,K.structure,0.135,calls=1
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_nonlinear,jax_trace,0.045,calls=0
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_nonlinear,jax_compile,0.007,calls=0
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_quadratic,K.quadratic,0.011,calls=2
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_make_local,make_local,1.815,calls=1
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_make_local,jax_compile,0.389,calls=0
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_make_local,jax_lower,0.020,calls=0
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_root_bound,wait:bound,2.943,calls=1
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_root_bound,run:bound,0.035,calls=1 boxes=16
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_root_bound,jax_compile,0.019,calls=0
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_root_incumbent,local_solve,0.023,calls=1 #1 starts=1
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_root_obbt,run:obbt,0.313,calls=1 boxes=1
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_root_obbt,wait:obbt,0.048,calls=1
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_root_obbt,run:bound,0.031,calls=1 boxes=16
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_root_obbt,jax_compile,0.006,calls=0
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_root_obbt_incumbent,local_solve,0.029,calls=1 #2 starts=1
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_search,run:bound,52.767,calls=1022 boxes=16;boxes=16;boxes=16
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_search,local_solve,0.909,calls=6 #3 starts=2;#4 starts=2;#5 starts=2
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_search,jax_compile,0.202,calls=0
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_search,wait:bound,0.050,calls=1023
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_in_search,jax_lower,0.015,calls=0
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_jax,jax_trace,0.146,union
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_jax,jax_lower,0.058,union
+wastewater15m1,cold,"0.63, 0.84, 0.89",main_jax,jax_compile,0.732,union
+wastewater15m1,cold,"0.63, 0.84, 0.89",background,K.quadratic,0.146,ends at 2.3s; overlaps nonlinear 0.1
+wastewater15m1,cold,"0.63, 0.84, 0.89",background,jax_trace@jaxglobal-trace,2.262,"ends at 3.1s; overlaps make_local 1.3, root_bound 0.8, nonlinear 0.1"
+wastewater15m1,cold,"0.63, 0.84, 0.89",background,jax_lower@jaxglobal-trace,0.436,"ends at 3.1s; overlaps make_local 0.4, root_bound 0.1"
+wastewater15m1,cold,"0.63, 0.84, 0.89",background,jax_compile@jaxglobal-trace,0.129,ends at 0.8s; overlaps make_local 0.1
+wastewater15m1,cold,"0.63, 0.84, 0.89",background,trace_lower:bound[b=16],1.864,"ends at 2.2s; overlaps make_local 1.7, nonlinear 0.1"
+wastewater15m1,cold,"0.63, 0.84, 0.89",background,jax_trace@jaxglobal-local,0.409,ends at 4.0s; overlaps root_bound 0.4
+wastewater15m1,cold,"0.63, 0.84, 0.89",background,jax_lower@jaxglobal-local,0.087,ends at 4.0s; overlaps root_bound 0.1
+wastewater15m1,cold,"0.63, 0.84, 0.89",background,jax_trace@jaxglobal-screen,0.157,ends at 2.5s; overlaps root_bound 0.2
+wastewater15m1,cold,"0.63, 0.84, 0.89",background,jax_lower@jaxglobal-screen,0.058,ends at 2.5s; overlaps root_bound 0.1
+wastewater15m1,cold,"0.63, 0.84, 0.89",background,jax_compile@jaxglobal-local,2.130,ends at 5.0s; overlaps root_bound 2.1
+wastewater15m1,cold,"0.63, 0.84, 0.89",background,jax_compile@jaxglobal-screen,0.491,ends at 3.0s; overlaps root_bound 0.5
+wastewater15m1,cold,"0.63, 0.84, 0.89",background,trace_lower:obbt[b=1],0.845,ends at 3.1s; overlaps root_bound 0.8
+wastewater15m1,cold,"0.63, 0.84, 0.89",background,jax_compile@jaxglobal-compile,3.224,"ends at 5.4s; overlaps root_bound 5.2, make_local 0.1, root_obbt 0.1"
+wastewater15m1,cold,"0.63, 0.84, 0.89",background,compile:bound[b=16],3.107,"ends at 5.3s; overlaps root_bound 3.0, make_local 0.1"
+wastewater15m1,cold,"0.63, 0.84, 0.89",background,compile:obbt[b=1],2.261,"ends at 5.4s; overlaps root_bound 2.2, root_obbt 0.1"
+wastewater15m1,cold,"0.63, 0.84, 0.89",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=359 result=True"
+wastewater15m1,cold,"0.63, 0.84, 0.89",path,use_interpreter,,who=fbbt.interpreted args=[] rows=359 result=True
+wastewater15m1,cold,"0.63, 0.84, 0.89",info,n,,46
+wastewater15m1,cold,"0.63, 0.84, 0.89",info,n_int,,0
+wastewater15m1,cold,"0.63, 0.84, 0.89",info,free,,0
+wastewater15m1,cold,"0.63, 0.84, 0.89",info,status,,time_limit
+wastewater15m1,cold,"0.63, 0.84, 0.89",info,nodes,,16087
+wastewater15m1,cold,"0.63, 0.84, 0.89",info,fun,,2446.428571428771
+wastewater15m1,cold,"0.63, 0.84, 0.89",info,lower_bound,,2114.817129735528
+wastewater15m1,cold,"0.63, 0.84, 0.89",info,message,,
+wastewater15m1,cold,"0.63, 0.84, 0.89",info,rows,,359
+wastewater15m1,cold,"0.63, 0.84, 0.89",info,quadratic,,True
+wastewater15m1,cold,"0.63, 0.84, 0.89",info,structure,,True
+wastewater15m1,cold,"0.63, 0.84, 0.89",info,load_gate,,gate=ok load1=0.63
+wastewater15m1,cold,"0.63, 0.84, 0.89",bucket,kernel wait: trace+lower,0.000,
+wastewater15m1,cold,"0.63, 0.84, 0.89",bucket,kernel wait: XLA compile,2.988,
+wastewater15m1,cold,"0.63, 0.84, 0.89",bucket,kernel wait: other,0.000,
+wastewater15m1,cold,"0.63, 0.84, 0.89",bucket,bound_domain,0.000,
+wastewater15m1,cold,"0.63, 0.84, 0.89",bucket,structure/nonlinear/quadratic,0.147,
+wastewater15m1,cold,"0.63, 0.84, 0.89",bucket,make_local,1.824,
+wastewater15m1,cold,"0.63, 0.84, 0.89",bucket,root bound: kernel run (first LP),0.035,
+wastewater15m1,cold,"0.63, 0.84, 0.89",bucket,root local solves + incumbent,0.055,
+wastewater15m1,cold,"0.63, 0.84, 0.89",bucket,root dives + enum,0.000,
+wastewater15m1,cold,"0.63, 0.84, 0.89",bucket,root OBBT: kernel run,0.354,
+wastewater15m1,cold,"0.63, 0.84, 0.89",bucket,probing: run,0.000,
+wastewater15m1,cold,"0.63, 0.84, 0.89",bucket,search,54.465,
+wastewater15m1,cold,"0.63, 0.84, 0.89",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.008,
+wastewater15m1,cold,"0.63, 0.84, 0.89",bucket,root bound: other,0.053,
+wastewater15m1,cold,"0.73, 0.91, 0.92",total,minimize_wall,60.281,time_limit
+wastewater15m1,cold,"0.73, 0.91, 0.92",total,import_jax_jaxglobal,0.465,not in minimize
+wastewater15m1,cold,"0.73, 0.91, 0.92",total,read_nl,0.001,not in minimize
+wastewater15m1,cold,"0.73, 0.91, 0.92",stage,pre_domain,0.000,
+wastewater15m1,cold,"0.73, 0.91, 0.92",stage,bound_domain,0.000,
+wastewater15m1,cold,"0.73, 0.91, 0.92",stage,setup,0.000,
+wastewater15m1,cold,"0.73, 0.91, 0.92",stage,cut_pool,0.308,
+wastewater15m1,cold,"0.73, 0.91, 0.92",stage,kernels,0.001,
+wastewater15m1,cold,"0.73, 0.91, 0.92",stage,pseudo_boolean,0.000,
+wastewater15m1,cold,"0.73, 0.91, 0.92",stage,start_compile,0.007,
+wastewater15m1,cold,"0.73, 0.91, 0.92",stage,start_dive_compile,0.000,
+wastewater15m1,cold,"0.73, 0.91, 0.92",stage,nonlinear,0.177,
+wastewater15m1,cold,"0.73, 0.91, 0.92",stage,quadratic,0.000,
+wastewater15m1,cold,"0.73, 0.91, 0.92",stage,make_local,1.555,
+wastewater15m1,cold,"0.73, 0.91, 0.92",stage,root_bound,3.034,
+wastewater15m1,cold,"0.73, 0.91, 0.92",stage,root_incumbent,0.029,
+wastewater15m1,cold,"0.73, 0.91, 0.92",stage,root_dives,0.000,
+wastewater15m1,cold,"0.73, 0.91, 0.92",stage,root_obbt,0.343,
+wastewater15m1,cold,"0.73, 0.91, 0.92",stage,root_obbt_incumbent,0.026,
+wastewater15m1,cold,"0.73, 0.91, 0.92",stage,probe,0.000,
+wastewater15m1,cold,"0.73, 0.91, 0.92",stage,search,54.801,
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_in_cut_pool,jax_compile,0.114,calls=0
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_in_cut_pool,jax_trace,0.072,calls=0
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_in_cut_pool,jax_lower,0.027,calls=0
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_in_nonlinear,K.nonlinear,0.177,calls=1
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_in_nonlinear,K.structure,0.177,calls=1
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_in_nonlinear,jax_trace,0.046,calls=0
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_in_nonlinear,jax_compile,0.008,calls=0
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_in_make_local,make_local,1.551,calls=1
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_in_make_local,jax_compile,0.466,calls=0
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_in_make_local,jax_lower,0.021,calls=0
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_in_root_bound,wait:bound,2.915,calls=1
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_in_root_bound,run:bound,0.039,calls=1 boxes=16
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_in_root_bound,jax_compile,0.019,calls=0
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_in_root_incumbent,local_solve,0.028,calls=1 #1 starts=1
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_in_root_obbt,run:obbt,0.292,calls=1 boxes=1
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_in_root_obbt,run:bound,0.039,calls=1 boxes=16
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_in_root_obbt,jax_compile,0.009,calls=0
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_in_root_obbt_incumbent,local_solve,0.024,calls=1 #2 starts=1
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_in_search,run:bound,53.156,calls=1104 boxes=16;boxes=16;boxes=16
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_in_search,local_solve,0.766,calls=6 #3 starts=2;#4 starts=2;#5 starts=2
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_in_search,jax_compile,0.197,calls=0
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_in_search,wait:bound,0.054,calls=1104
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_in_search,jax_lower,0.015,calls=0
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_jax,jax_trace,0.151,union
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_jax,jax_lower,0.064,union
+wastewater15m1,cold,"0.73, 0.91, 0.92",main_jax,jax_compile,0.813,union
+wastewater15m1,cold,"0.73, 0.91, 0.92",background,K.quadratic,0.152,ends at 2.1s; overlaps nonlinear 0.1
+wastewater15m1,cold,"0.73, 0.91, 0.92",background,jax_trace@jaxglobal-trace,2.267,"ends at 3.0s; overlaps make_local 1.1, root_bound 1.0, nonlinear 0.2"
+wastewater15m1,cold,"0.73, 0.91, 0.92",background,jax_lower@jaxglobal-trace,0.403,"ends at 3.1s; overlaps make_local 0.3, root_bound 0.1"
+wastewater15m1,cold,"0.73, 0.91, 0.92",background,jax_compile@jaxglobal-trace,0.121,ends at 0.8s; overlaps make_local 0.1
+wastewater15m1,cold,"0.73, 0.91, 0.92",background,trace_lower:bound[b=16],1.646,"ends at 2.0s; overlaps make_local 1.5, nonlinear 0.2"
+wastewater15m1,cold,"0.73, 0.91, 0.92",background,jax_trace@jaxglobal-local,0.505,ends at 3.8s; overlaps root_bound 0.5
+wastewater15m1,cold,"0.73, 0.91, 0.92",background,jax_lower@jaxglobal-local,0.145,ends at 3.9s; overlaps root_bound 0.1
+wastewater15m1,cold,"0.73, 0.91, 0.92",background,jax_trace@jaxglobal-screen,0.111,ends at 2.2s; overlaps root_bound 0.1
+wastewater15m1,cold,"0.73, 0.91, 0.92",background,jax_lower@jaxglobal-screen,0.074,ends at 2.3s; overlaps root_bound 0.1
+wastewater15m1,cold,"0.73, 0.91, 0.92",background,jax_compile@jaxglobal-screen,0.541,ends at 2.8s; overlaps root_bound 0.5
+wastewater15m1,cold,"0.73, 0.91, 0.92",background,jax_compile@jaxglobal-local,1.803,ends at 4.5s; overlaps root_bound 1.8
+wastewater15m1,cold,"0.73, 0.91, 0.92",background,trace_lower:obbt[b=1],1.036,ends at 3.1s; overlaps root_bound 1.0
+wastewater15m1,cold,"0.73, 0.91, 0.92",background,jax_compile@jaxglobal-compile,3.145,"ends at 5.1s; overlaps root_bound 5.0, make_local 0.1"
+wastewater15m1,cold,"0.73, 0.91, 0.92",background,compile:bound[b=16],3.086,"ends at 5.0s; overlaps root_bound 3.0, make_local 0.1"
+wastewater15m1,cold,"0.73, 0.91, 0.92",background,compile:obbt[b=1],2.012,ends at 5.1s; overlaps root_bound 2.0
+wastewater15m1,cold,"0.73, 0.91, 0.92",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=359 result=True"
+wastewater15m1,cold,"0.73, 0.91, 0.92",path,use_interpreter,,who=fbbt.interpreted args=[] rows=359 result=True
+wastewater15m1,cold,"0.73, 0.91, 0.92",info,n,,46
+wastewater15m1,cold,"0.73, 0.91, 0.92",info,n_int,,0
+wastewater15m1,cold,"0.73, 0.91, 0.92",info,free,,0
+wastewater15m1,cold,"0.73, 0.91, 0.92",info,status,,time_limit
+wastewater15m1,cold,"0.73, 0.91, 0.92",info,nodes,,17623
+wastewater15m1,cold,"0.73, 0.91, 0.92",info,fun,,2446.428571428771
+wastewater15m1,cold,"0.73, 0.91, 0.92",info,lower_bound,,2123.8089025633917
+wastewater15m1,cold,"0.73, 0.91, 0.92",info,message,,
+wastewater15m1,cold,"0.73, 0.91, 0.92",info,rows,,359
+wastewater15m1,cold,"0.73, 0.91, 0.92",info,quadratic,,True
+wastewater15m1,cold,"0.73, 0.91, 0.92",info,structure,,True
+wastewater15m1,cold,"0.73, 0.91, 0.92",info,load_gate,,gate=ok load1=0.73
+wastewater15m1,cold,"0.73, 0.91, 0.92",bucket,kernel wait: trace+lower,0.000,
+wastewater15m1,cold,"0.73, 0.91, 0.92",bucket,kernel wait: XLA compile,2.910,
+wastewater15m1,cold,"0.73, 0.91, 0.92",bucket,kernel wait: other,0.000,
+wastewater15m1,cold,"0.73, 0.91, 0.92",bucket,bound_domain,0.000,
+wastewater15m1,cold,"0.73, 0.91, 0.92",bucket,structure/nonlinear/quadratic,0.177,
+wastewater15m1,cold,"0.73, 0.91, 0.92",bucket,make_local,1.555,
+wastewater15m1,cold,"0.73, 0.91, 0.92",bucket,root bound: kernel run (first LP),0.039,
+wastewater15m1,cold,"0.73, 0.91, 0.92",bucket,root local solves + incumbent,0.055,
+wastewater15m1,cold,"0.73, 0.91, 0.92",bucket,root dives + enum,0.000,
+wastewater15m1,cold,"0.73, 0.91, 0.92",bucket,root OBBT: kernel run,0.343,
+wastewater15m1,cold,"0.73, 0.91, 0.92",bucket,probing: run,0.000,
+wastewater15m1,cold,"0.73, 0.91, 0.92",bucket,search,54.747,
+wastewater15m1,cold,"0.73, 0.91, 0.92",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.008,
+wastewater15m1,cold,"0.73, 0.91, 0.92",bucket,root bound: other,0.080,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",total,minimize_wall,60.280,time_limit
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",total,import_jax_jaxglobal,0.461,not in minimize
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",total,read_nl,0.001,not in minimize
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",stage,pre_domain,0.000,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",stage,bound_domain,0.000,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",stage,setup,0.000,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",stage,cut_pool,0.298,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",stage,kernels,0.001,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",stage,pseudo_boolean,0.000,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",stage,start_compile,0.007,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",stage,start_dive_compile,0.000,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",stage,nonlinear,0.146,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",stage,quadratic,0.006,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",stage,make_local,1.644,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",stage,root_bound,3.032,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",stage,root_incumbent,0.023,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",stage,root_dives,0.000,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",stage,root_obbt,0.311,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",stage,root_obbt_incumbent,0.023,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",stage,probe,0.000,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",stage,search,54.789,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_in_cut_pool,jax_compile,0.110,calls=0
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_in_cut_pool,jax_trace,0.068,calls=0
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_in_cut_pool,jax_lower,0.022,calls=0
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_in_nonlinear,K.nonlinear,0.146,calls=1
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_in_nonlinear,K.structure,0.146,calls=1
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_in_nonlinear,jax_trace,0.025,calls=0
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_in_quadratic,K.quadratic,0.006,calls=2
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_in_make_local,make_local,1.631,calls=1
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_in_make_local,jax_compile,0.445,calls=0
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_in_make_local,jax_lower,0.020,calls=0
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_in_root_bound,wait:bound,2.979,calls=1
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_in_root_bound,run:bound,0.031,calls=1 boxes=16
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_in_root_bound,jax_compile,0.009,calls=0
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_in_root_incumbent,local_solve,0.022,calls=1 #1 starts=1
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_in_root_obbt,run:obbt,0.273,calls=1 boxes=1
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_in_root_obbt,run:bound,0.027,calls=1 boxes=16
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_in_root_obbt,jax_compile,0.007,calls=0
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_in_root_obbt_incumbent,local_solve,0.022,calls=1 #2 starts=1
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_in_search,run:bound,53.064,calls=1094 boxes=16;boxes=16;boxes=16
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_in_search,local_solve,0.828,calls=6 #3 starts=2;#4 starts=2;#5 starts=2
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_in_search,jax_compile,0.204,calls=0
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_in_search,wait:bound,0.053,calls=1095
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_in_search,jax_lower,0.012,calls=0
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_jax,jax_trace,0.125,union
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_jax,jax_lower,0.055,union
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",main_jax,jax_compile,0.776,union
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",background,jax_trace@jaxglobal-trace,2.262,"ends at 3.0s; overlaps make_local 1.2, root_bound 0.9, nonlinear 0.1"
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",background,jax_lower@jaxglobal-trace,0.398,"ends at 3.1s; overlaps make_local 0.3, root_bound 0.1"
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",background,jax_compile@jaxglobal-trace,0.114,ends at 0.8s; overlaps make_local 0.1
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",background,K.quadratic,0.152,ends at 2.1s; overlaps nonlinear 0.1
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",background,trace_lower:bound[b=16],1.673,"ends at 2.0s; overlaps make_local 1.5, nonlinear 0.1"
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",background,jax_trace@jaxglobal-local,0.482,ends at 3.8s; overlaps root_bound 0.5
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",background,jax_trace@jaxglobal-screen,0.166,ends at 2.3s; overlaps root_bound 0.2
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",background,jax_lower@jaxglobal-local,0.132,ends at 3.8s; overlaps root_bound 0.1
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",background,jax_lower@jaxglobal-screen,0.097,ends at 2.4s; overlaps root_bound 0.1
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",background,jax_compile@jaxglobal-local,2.185,ends at 4.9s; overlaps root_bound 2.2
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",background,jax_compile@jaxglobal-screen,0.487,ends at 2.9s; overlaps root_bound 0.5
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",background,trace_lower:obbt[b=1],0.997,ends at 3.1s; overlaps root_bound 1.0
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",background,jax_compile@jaxglobal-compile,3.143,"ends at 5.1s; overlaps root_bound 5.0, make_local 0.1"
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",background,compile:bound[b=16],3.129,"ends at 5.1s; overlaps root_bound 3.0, make_local 0.1"
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",background,compile:obbt[b=1],2.018,ends at 5.1s; overlaps root_bound 2.0
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=359 result=True"
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",path,use_interpreter,,who=fbbt.interpreted args=[] rows=359 result=True
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",info,n,,46
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",info,n_int,,0
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",info,free,,0
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",info,status,,time_limit
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",info,nodes,,17367
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",info,fun,,2446.428571428771
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",info,lower_bound,,2123.8089025633917
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",info,message,,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",info,rows,,359
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",info,quadratic,,True
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",info,structure,,True
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",info,load_gate,,gate=ok load1=0.66
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",bucket,kernel wait: trace+lower,0.000,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",bucket,kernel wait: XLA compile,2.979,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",bucket,kernel wait: other,0.000,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",bucket,bound_domain,0.000,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",bucket,structure/nonlinear/quadratic,0.152,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",bucket,make_local,1.644,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",bucket,root bound: kernel run (first LP),0.031,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",bucket,root local solves + incumbent,0.046,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",bucket,root dives + enum,0.000,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",bucket,root OBBT: kernel run,0.311,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",bucket,probing: run,0.000,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",bucket,search,54.736,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.008,
+wastewater15m1,cold+opsrule,"0.66, 0.94, 0.93",bucket,root bound: other,0.021,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",total,minimize_wall,60.331,time_limit
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",total,import_jax_jaxglobal,0.424,not in minimize
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",total,read_nl,0.001,not in minimize
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",stage,pre_domain,0.000,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",stage,bound_domain,0.000,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",stage,setup,0.000,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",stage,cut_pool,0.305,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",stage,kernels,0.001,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",stage,pseudo_boolean,0.000,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",stage,start_compile,0.007,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",stage,start_dive_compile,0.000,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",stage,nonlinear,0.145,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",stage,quadratic,0.006,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",stage,make_local,1.753,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",stage,root_bound,3.099,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",stage,root_incumbent,0.028,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",stage,root_dives,0.000,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",stage,root_obbt,0.342,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",stage,root_obbt_incumbent,0.023,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",stage,probe,0.000,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",stage,search,54.622,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_cut_pool,jax_compile,0.109,calls=0
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_cut_pool,jax_trace,0.076,calls=0
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_cut_pool,jax_lower,0.022,calls=0
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_nonlinear,K.nonlinear,0.145,calls=1
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_nonlinear,K.structure,0.145,calls=1
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_nonlinear,jax_trace,0.037,calls=0
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_quadratic,K.quadratic,0.006,calls=2
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_make_local,make_local,1.746,calls=1
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_make_local,jax_compile,0.469,calls=0
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_make_local,jax_lower,0.020,calls=0
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_root_bound,wait:bound,3.021,calls=1
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_root_bound,run:bound,0.033,calls=1 boxes=16
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_root_bound,jax_compile,0.023,calls=0
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_root_incumbent,local_solve,0.026,calls=1 #1 starts=1
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_root_obbt,run:obbt,0.274,calls=1 boxes=1
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_root_obbt,wait:obbt,0.029,calls=1
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_root_obbt,run:bound,0.028,calls=1 boxes=16
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_root_obbt,jax_compile,0.007,calls=0
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_root_obbt_incumbent,local_solve,0.022,calls=1 #2 starts=1
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_search,run:bound,52.868,calls=1056 boxes=16;boxes=16;boxes=16
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_search,local_solve,0.835,calls=6 #3 starts=2;#4 starts=2;#5 starts=2
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_search,jax_compile,0.244,calls=0
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_search,wait:bound,0.053,calls=1056
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_in_search,jax_lower,0.016,calls=0
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_jax,jax_trace,0.146,union
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_jax,jax_lower,0.059,union
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",main_jax,jax_compile,0.851,union
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",background,jax_trace@jaxglobal-trace,2.137,"ends at 2.9s; overlaps make_local 1.3, root_bound 0.7, nonlinear 0.1"
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",background,jax_lower@jaxglobal-trace,0.466,"ends at 3.0s; overlaps make_local 0.3, root_bound 0.1"
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",background,jax_compile@jaxglobal-trace,0.119,ends at 0.8s; overlaps make_local 0.1
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",background,K.quadratic,0.150,ends at 2.2s; overlaps nonlinear 0.1
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",background,trace_lower:bound[b=16],1.808,"ends at 2.1s; overlaps make_local 1.7, nonlinear 0.1"
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",background,jax_trace@jaxglobal-local,0.587,ends at 4.4s; overlaps root_bound 0.6
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",background,jax_lower@jaxglobal-local,0.123,ends at 4.4s; overlaps root_bound 0.1
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",background,jax_trace@jaxglobal-screen,0.122,ends at 2.4s; overlaps root_bound 0.1
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",background,jax_lower@jaxglobal-screen,0.045,ends at 2.4s; overlaps 
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",background,jax_compile@jaxglobal-local,2.159,ends at 5.1s; overlaps root_bound 2.2
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",background,jax_compile@jaxglobal-screen,0.601,ends at 3.0s; overlaps root_bound 0.6
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",background,trace_lower:obbt[b=1],0.809,ends at 3.0s; overlaps root_bound 0.8
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",background,jax_compile@jaxglobal-compile,3.266,"ends at 5.4s; overlaps root_bound 5.3, make_local 0.1"
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",background,compile:bound[b=16],3.167,"ends at 5.3s; overlaps root_bound 3.1, make_local 0.1"
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",background,compile:obbt[b=1],2.349,ends at 5.4s; overlaps root_bound 2.3
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=359 result=True"
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",path,use_interpreter,,who=fbbt.interpreted args=[] rows=359 result=True
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",info,n,,46
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",info,n_int,,0
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",info,free,,0
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",info,status,,time_limit
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",info,nodes,,16855
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",info,fun,,2446.428571428771
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",info,lower_bound,,2123.8053287331622
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",info,message,,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",info,rows,,359
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",info,quadratic,,True
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",info,structure,,True
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",info,load_gate,,gate=ok load1=0.68
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",bucket,kernel wait: trace+lower,0.000,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",bucket,kernel wait: XLA compile,3.049,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",bucket,kernel wait: other,0.000,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",bucket,bound_domain,0.000,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",bucket,structure/nonlinear/quadratic,0.151,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",bucket,make_local,1.753,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",bucket,root bound: kernel run (first LP),0.033,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",bucket,root local solves + incumbent,0.051,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",bucket,root dives + enum,0.000,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",bucket,root OBBT: kernel run,0.313,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",bucket,probing: run,0.000,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",bucket,search,54.569,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.008,
+wastewater15m1,cold+opsrule,"0.68, 0.94, 0.94",bucket,root bound: other,0.045,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",total,minimize_wall,60.335,time_limit
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",total,import_jax_jaxglobal,0.500,not in minimize
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",total,read_nl,0.001,not in minimize
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",stage,pre_domain,0.000,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",stage,bound_domain,0.000,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",stage,setup,0.000,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",stage,cut_pool,0.281,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",stage,kernels,0.001,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",stage,pseudo_boolean,0.000,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",stage,start_compile,0.007,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",stage,start_dive_compile,0.000,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",stage,nonlinear,0.183,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",stage,quadratic,0.000,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",stage,make_local,1.601,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",stage,root_bound,3.001,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",stage,root_incumbent,0.025,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",stage,root_dives,0.000,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",stage,root_obbt,0.339,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",stage,root_obbt_incumbent,0.025,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",stage,probe,0.000,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",stage,search,54.871,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_in_cut_pool,jax_compile,0.102,calls=0
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_in_cut_pool,jax_trace,0.069,calls=0
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_in_cut_pool,jax_lower,0.023,calls=0
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_in_nonlinear,K.nonlinear,0.183,calls=1
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_in_nonlinear,K.structure,0.183,calls=1
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_in_nonlinear,jax_trace,0.038,calls=0
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_in_make_local,make_local,1.582,calls=1
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_in_make_local,jax_compile,0.438,calls=0
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_in_make_local,jax_lower,0.019,calls=0
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_in_root_bound,wait:bound,2.848,calls=1
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_in_root_bound,run:bound,0.033,calls=1 boxes=16
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_in_root_bound,jax_compile,0.009,calls=0
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_in_root_incumbent,local_solve,0.024,calls=1 #1 starts=1
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_in_root_obbt,run:obbt,0.271,calls=1 boxes=1
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_in_root_obbt,run:bound,0.029,calls=1 boxes=16
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_in_root_obbt,wait:obbt,0.029,calls=1
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_in_root_obbt,jax_compile,0.006,calls=0
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_in_root_obbt_incumbent,local_solve,0.024,calls=1 #2 starts=1
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_in_search,run:bound,53.084,calls=1117 boxes=16;boxes=16;boxes=16
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_in_search,local_solve,0.870,calls=6 #3 starts=2;#4 starts=2;#5 starts=2
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_in_search,jax_compile,0.229,calls=0
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_in_search,wait:bound,0.053,calls=1118
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_in_search,jax_lower,0.015,calls=0
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_jax,jax_trace,0.140,union
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_jax,jax_lower,0.059,union
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",main_jax,jax_compile,0.784,union
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",background,jax_trace@jaxglobal-trace,2.313,"ends at 3.0s; overlaps make_local 1.2, root_bound 1.0, nonlinear 0.2"
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",background,jax_lower@jaxglobal-trace,0.394,"ends at 3.1s; overlaps make_local 0.3, root_bound 0.1"
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",background,jax_compile@jaxglobal-trace,0.122,ends at 0.8s; overlaps make_local 0.1
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",background,K.quadratic,0.160,ends at 2.1s; overlaps nonlinear 0.2
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",background,trace_lower:bound[b=16],1.685,"ends at 2.0s; overlaps make_local 1.5, nonlinear 0.2"
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",background,jax_trace@jaxglobal-local,0.521,ends at 3.8s; overlaps root_bound 0.5
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",background,jax_trace@jaxglobal-screen,0.157,ends at 2.3s; overlaps root_bound 0.2
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",background,jax_lower@jaxglobal-local,0.115,ends at 3.8s; overlaps root_bound 0.1
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",background,jax_lower@jaxglobal-screen,0.049,ends at 2.3s; overlaps 
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",background,jax_compile@jaxglobal-local,1.777,ends at 4.5s; overlaps root_bound 1.8
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",background,jax_compile@jaxglobal-screen,0.545,ends at 2.8s; overlaps root_bound 0.5
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",background,trace_lower:obbt[b=1],1.030,ends at 3.1s; overlaps root_bound 1.0
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",background,jax_compile@jaxglobal-compile,3.165,"ends at 5.1s; overlaps root_bound 4.9, make_local 0.1"
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",background,compile:bound[b=16],3.070,"ends at 5.0s; overlaps root_bound 3.0, make_local 0.1"
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",background,compile:obbt[b=1],2.030,ends at 5.1s; overlaps root_bound 2.0
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=359 result=True"
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",path,use_interpreter,,who=fbbt.interpreted args=[] rows=359 result=True
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",info,n,,46
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",info,n_int,,0
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",info,free,,0
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",info,status,,time_limit
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",info,nodes,,17623
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",info,fun,,2446.428571428771
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",info,lower_bound,,2123.8089025633917
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",info,message,,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",info,rows,,359
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",info,quadratic,,True
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",info,structure,,True
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",info,load_gate,,gate=ok load1=0.61
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",bucket,kernel wait: trace+lower,0.000,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",bucket,kernel wait: XLA compile,2.877,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",bucket,kernel wait: other,0.000,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",bucket,bound_domain,0.000,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",bucket,structure/nonlinear/quadratic,0.183,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",bucket,make_local,1.601,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",bucket,root bound: kernel run (first LP),0.033,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",bucket,root local solves + incumbent,0.050,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",bucket,root dives + enum,0.000,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",bucket,root OBBT: kernel run,0.310,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",bucket,probing: run,0.000,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",bucket,search,54.818,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.008,
+wastewater15m1,cold+opsrule,"0.61, 0.91, 0.94",bucket,root bound: other,0.120,
+nous1,cold,"0.67, 0.91, 0.94",total,minimize_wall,30.252,optimal
+nous1,cold,"0.67, 0.91, 0.94",total,import_jax_jaxglobal,0.459,not in minimize
+nous1,cold,"0.67, 0.91, 0.94",total,read_nl,0.002,not in minimize
+nous1,cold,"0.67, 0.91, 0.94",stage,pre_domain,0.000,
+nous1,cold,"0.67, 0.91, 0.94",stage,bound_domain,0.834,
+nous1,cold,"0.67, 0.91, 0.94",stage,setup,0.000,
+nous1,cold,"0.67, 0.91, 0.94",stage,cut_pool,0.190,
+nous1,cold,"0.67, 0.91, 0.94",stage,kernels,0.001,
+nous1,cold,"0.67, 0.91, 0.94",stage,pseudo_boolean,0.000,
+nous1,cold,"0.67, 0.91, 0.94",stage,start_compile,0.021,
+nous1,cold,"0.67, 0.91, 0.94",stage,start_dive_compile,0.000,
+nous1,cold,"0.67, 0.91, 0.94",stage,nonlinear,0.126,
+nous1,cold,"0.67, 0.91, 0.94",stage,quadratic,0.006,
+nous1,cold,"0.67, 0.91, 0.94",stage,make_local,3.170,
+nous1,cold,"0.67, 0.91, 0.94",stage,root_bound,0.369,
+nous1,cold,"0.67, 0.91, 0.94",stage,root_incumbent,1.249,
+nous1,cold,"0.67, 0.91, 0.94",stage,root_dives,4.001,
+nous1,cold,"0.67, 0.91, 0.94",stage,root_enum,3.286,
+nous1,cold,"0.67, 0.91, 0.94",stage,root_obbt,0.555,
+nous1,cold,"0.67, 0.91, 0.94",stage,root_obbt_incumbent,0.564,
+nous1,cold,"0.67, 0.91, 0.94",stage,probe,0.057,
+nous1,cold,"0.67, 0.91, 0.94",stage,search,15.824,
+nous1,cold,"0.67, 0.91, 0.94",main_in_bound_domain,bound_domain,0.834,calls=1
+nous1,cold,"0.67, 0.91, 0.94",main_in_bound_domain,jax_compile,0.013,calls=0
+nous1,cold,"0.67, 0.91, 0.94",main_in_cut_pool,jax_trace,0.069,calls=0
+nous1,cold,"0.67, 0.91, 0.94",main_in_cut_pool,jax_compile,0.047,calls=0
+nous1,cold,"0.67, 0.91, 0.94",main_in_nonlinear,K.nonlinear,0.126,calls=1
+nous1,cold,"0.67, 0.91, 0.94",main_in_nonlinear,K.structure,0.126,calls=1
+nous1,cold,"0.67, 0.91, 0.94",main_in_nonlinear,jax_trace,0.034,calls=0
+nous1,cold,"0.67, 0.91, 0.94",main_in_quadratic,K.quadratic,0.006,calls=2
+nous1,cold,"0.67, 0.91, 0.94",main_in_make_local,make_local,3.165,calls=1
+nous1,cold,"0.67, 0.91, 0.94",main_in_make_local,jax_compile,1.961,calls=0
+nous1,cold,"0.67, 0.91, 0.94",main_in_make_local,jax_lower,0.029,calls=0
+nous1,cold,"0.67, 0.91, 0.94",main_in_root_bound,wait:bound,0.237,calls=1
+nous1,cold,"0.67, 0.91, 0.94",main_in_root_bound,run:bound,0.095,calls=1 boxes=16
+nous1,cold,"0.67, 0.91, 0.94",main_in_root_bound,jax_compile,0.017,calls=0
+nous1,cold,"0.67, 0.91, 0.94",main_in_root_incumbent,local_solve,1.243,calls=2 #1 starts=1;#2 starts=2
+nous1,cold,"0.67, 0.91, 0.94",main_in_root_incumbent,jax_compile,0.312,calls=0
+nous1,cold,"0.67, 0.91, 0.94",main_in_root_incumbent,jax_trace,0.104,calls=0
+nous1,cold,"0.67, 0.91, 0.94",main_in_root_incumbent,jax_lower,0.029,calls=0
+nous1,cold,"0.67, 0.91, 0.94",main_in_root_dives,local_solve,3.230,calls=1 #3 starts=16
+nous1,cold,"0.67, 0.91, 0.94",main_in_root_dives,jax_compile,0.627,calls=0
+nous1,cold,"0.67, 0.91, 0.94",main_in_root_dives,run:dive,0.079,calls=2 boxes=16;boxes=16
+nous1,cold,"0.67, 0.91, 0.94",main_in_root_dives,jax_trace,0.033,calls=0
+nous1,cold,"0.67, 0.91, 0.94",main_in_root_dives,jax_lower,0.019,calls=0
+nous1,cold,"0.67, 0.91, 0.94",main_in_root_enum,local_solve,3.283,calls=2 #4 starts=16;#5 starts=2
+nous1,cold,"0.67, 0.91, 0.94",main_in_root_obbt,run:obbt,0.477,calls=1 boxes=1
+nous1,cold,"0.67, 0.91, 0.94",main_in_root_obbt,run:bound,0.065,calls=1 boxes=16
+nous1,cold,"0.67, 0.91, 0.94",main_in_root_obbt,jax_compile,0.006,calls=0
+nous1,cold,"0.67, 0.91, 0.94",main_in_root_obbt_incumbent,local_solve,0.562,calls=2 #6 starts=1;#7 starts=3
+nous1,cold,"0.67, 0.91, 0.94",main_in_probe,run:bound,0.056,calls=1 boxes=16
+nous1,cold,"0.67, 0.91, 0.94",main_in_search,run:bound,13.439,calls=186 boxes=16;boxes=16;boxes=16
+nous1,cold,"0.67, 0.91, 0.94",main_in_search,local_solve,1.982,calls=8 #8 starts=1;#9 starts=2;#10 starts=1
+nous1,cold,"0.67, 0.91, 0.94",main_in_search,jax_compile,0.214,calls=0
+nous1,cold,"0.67, 0.91, 0.94",main_in_search,jax_lower,0.012,calls=0
+nous1,cold,"0.67, 0.91, 0.94",main_in_search,wait:bound,0.008,calls=186
+nous1,cold,"0.67, 0.91, 0.94",main_jax,jax_trace,0.265,union
+nous1,cold,"0.67, 0.91, 0.94",main_jax,jax_lower,0.100,union
+nous1,cold,"0.67, 0.91, 0.94",main_jax,jax_compile,3.198,union
+nous1,cold,"0.67, 0.91, 0.94",background,jax_trace@jaxglobal-domain,0.316,ends at 0.3s; overlaps bound_domain 0.3
+nous1,cold,"0.67, 0.91, 0.94",background,jax_lower@jaxglobal-domain,0.082,ends at 0.4s; overlaps bound_domain 0.1
+nous1,cold,"0.67, 0.91, 0.94",background,jax_compile@jaxglobal-domain,0.476,ends at 0.7s; overlaps bound_domain 0.5
+nous1,cold,"0.67, 0.91, 0.94",background,K.quadratic,0.146,ends at 4.4s; overlaps nonlinear 0.1
+nous1,cold,"0.67, 0.91, 0.94",background,jax_trace@jaxglobal-trace,2.128,"ends at 5.2s; overlaps make_local 1.1, root_incumbent 0.5, root_bound 0.4, nonlinear 0.1"
+nous1,cold,"0.67, 0.91, 0.94",background,jax_lower@jaxglobal-trace,0.490,"ends at 5.4s; overlaps make_local 0.3, root_incumbent 0.2"
+nous1,cold,"0.67, 0.91, 0.94",background,trace_lower:bound[b=16],1.124,"ends at 2.1s; overlaps make_local 1.0, nonlinear 0.1"
+nous1,cold,"0.67, 0.91, 0.94",background,trace_lower:dive[b=16],0.479,ends at 2.6s; overlaps make_local 0.5
+nous1,cold,"0.67, 0.91, 0.94",background,jax_trace@jaxglobal-local,0.396,"ends at 5.5s; overlaps root_incumbent 0.3, root_bound 0.1"
+nous1,cold,"0.67, 0.91, 0.94",background,jax_lower@jaxglobal-local,0.077,ends at 5.6s; overlaps 
+nous1,cold,"0.67, 0.91, 0.94",background,jax_trace@jaxglobal-screen,0.112,ends at 4.6s; overlaps root_bound 0.1
+nous1,cold,"0.67, 0.91, 0.94",background,jax_lower@jaxglobal-screen,0.047,ends at 4.6s; overlaps 
+nous1,cold,"0.67, 0.91, 0.94",background,jax_compile@jaxglobal-local,0.761,"ends at 5.7s; overlaps root_incumbent 0.6, root_bound 0.2"
+nous1,cold,"0.67, 0.91, 0.94",background,jax_compile@jaxglobal-screen,0.507,"ends at 5.1s; overlaps root_incumbent 0.3, root_bound 0.2"
+nous1,cold,"0.67, 0.91, 0.94",background,jax_compile@jaxglobal-compile,3.580,"ends at 6.6s; overlaps make_local 3.9, root_dives 0.6, root_incumbent 0.6, root_bound 0.4"
+nous1,cold,"0.67, 0.91, 0.94",background,compile:bound[b=16],2.420,"ends at 4.6s; overlaps make_local 2.2, root_bound 0.2"
+nous1,cold,"0.67, 0.91, 0.94",background,compile:dive[b=16],1.955,"ends at 4.6s; overlaps make_local 1.7, root_bound 0.3"
+nous1,cold,"0.67, 0.91, 0.94",background,trace_lower:obbt[b=1],1.046,"ends at 5.4s; overlaps root_incumbent 0.7, root_bound 0.4"
+nous1,cold,"0.67, 0.91, 0.94",background,compile:obbt[b=1],1.167,"ends at 6.6s; overlaps root_dives 0.6, root_incumbent 0.6"
+nous1,cold,"0.67, 0.91, 0.94",path,use_interpreter,,who=fbbt.interpreted args=[] rows=294 result=True
+nous1,cold,"0.67, 0.91, 0.94",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=294 result=True"
+nous1,cold,"0.67, 0.91, 0.94",info,n,,50
+nous1,cold,"0.67, 0.91, 0.94",info,n_int,,2
+nous1,cold,"0.67, 0.91, 0.94",info,free,,2
+nous1,cold,"0.67, 0.91, 0.94",info,status,,optimal
+nous1,cold,"0.67, 0.91, 0.94",info,nodes,,2585
+nous1,cold,"0.67, 0.91, 0.94",info,fun,,1.5670720001299874
+nous1,cold,"0.67, 0.91, 0.94",info,lower_bound,,1.5669271462684207
+nous1,cold,"0.67, 0.91, 0.94",info,message,,
+nous1,cold,"0.67, 0.91, 0.94",info,rows,,294
+nous1,cold,"0.67, 0.91, 0.94",info,quadratic,,True
+nous1,cold,"0.67, 0.91, 0.94",info,structure,,True
+nous1,cold,"0.67, 0.91, 0.94",info,load_gate,,gate=ok load1=0.67
+nous1,cold,"0.67, 0.91, 0.94",bucket,kernel wait: trace+lower,0.017,
+nous1,cold,"0.67, 0.91, 0.94",bucket,kernel wait: XLA compile,0.220,
+nous1,cold,"0.67, 0.91, 0.94",bucket,kernel wait: other,0.000,
+nous1,cold,"0.67, 0.91, 0.94",bucket,bound_domain,0.834,
+nous1,cold,"0.67, 0.91, 0.94",bucket,structure/nonlinear/quadratic,0.132,
+nous1,cold,"0.67, 0.91, 0.94",bucket,make_local,3.170,
+nous1,cold,"0.67, 0.91, 0.94",bucket,root bound: kernel run (first LP),0.095,
+nous1,cold,"0.67, 0.91, 0.94",bucket,root local solves + incumbent,1.813,
+nous1,cold,"0.67, 0.91, 0.94",bucket,root dives + enum,7.286,
+nous1,cold,"0.67, 0.91, 0.94",bucket,root OBBT: kernel run,0.555,
+nous1,cold,"0.67, 0.91, 0.94",bucket,probing: run,0.057,
+nous1,cold,"0.67, 0.91, 0.94",bucket,search,15.816,
+nous1,cold,"0.67, 0.91, 0.94",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.022,
+nous1,cold,"0.67, 0.91, 0.94",bucket,root bound: other,0.037,
+nous1,cold,"0.63, 0.91, 0.94",total,minimize_wall,30.737,optimal
+nous1,cold,"0.63, 0.91, 0.94",total,import_jax_jaxglobal,0.433,not in minimize
+nous1,cold,"0.63, 0.91, 0.94",total,read_nl,0.001,not in minimize
+nous1,cold,"0.63, 0.91, 0.94",stage,pre_domain,0.000,
+nous1,cold,"0.63, 0.91, 0.94",stage,bound_domain,0.905,
+nous1,cold,"0.63, 0.91, 0.94",stage,setup,0.000,
+nous1,cold,"0.63, 0.91, 0.94",stage,cut_pool,0.169,
+nous1,cold,"0.63, 0.91, 0.94",stage,kernels,0.001,
+nous1,cold,"0.63, 0.91, 0.94",stage,pseudo_boolean,0.000,
+nous1,cold,"0.63, 0.91, 0.94",stage,start_compile,0.025,
+nous1,cold,"0.63, 0.91, 0.94",stage,start_dive_compile,0.000,
+nous1,cold,"0.63, 0.91, 0.94",stage,nonlinear,0.177,
+nous1,cold,"0.63, 0.91, 0.94",stage,quadratic,0.000,
+nous1,cold,"0.63, 0.91, 0.94",stage,make_local,3.347,
+nous1,cold,"0.63, 0.91, 0.94",stage,root_bound,0.361,
+nous1,cold,"0.63, 0.91, 0.94",stage,root_incumbent,1.392,
+nous1,cold,"0.63, 0.91, 0.94",stage,root_dives,3.797,
+nous1,cold,"0.63, 0.91, 0.94",stage,root_enum,3.409,
+nous1,cold,"0.63, 0.91, 0.94",stage,root_obbt,0.631,
+nous1,cold,"0.63, 0.91, 0.94",stage,root_obbt_incumbent,0.544,
+nous1,cold,"0.63, 0.91, 0.94",stage,probe,0.069,
+nous1,cold,"0.63, 0.91, 0.94",stage,search,15.910,
+nous1,cold,"0.63, 0.91, 0.94",main_in_bound_domain,bound_domain,0.905,calls=1
+nous1,cold,"0.63, 0.91, 0.94",main_in_bound_domain,jax_compile,0.013,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_cut_pool,jax_trace,0.060,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_cut_pool,jax_compile,0.044,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_nonlinear,K.nonlinear,0.177,calls=1
+nous1,cold,"0.63, 0.91, 0.94",main_in_nonlinear,K.structure,0.177,calls=1
+nous1,cold,"0.63, 0.91, 0.94",main_in_nonlinear,jax_trace,0.049,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_make_local,make_local,3.342,calls=1
+nous1,cold,"0.63, 0.91, 0.94",main_in_make_local,jax_compile,1.954,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_make_local,jax_lower,0.037,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_make_local,jax_trace,0.007,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_bound,wait:bound,0.228,calls=1
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_bound,run:bound,0.096,calls=1 boxes=16
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_bound,jax_compile,0.015,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_incumbent,local_solve,1.386,calls=2 #1 starts=1;#2 starts=2
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_incumbent,jax_compile,0.394,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_incumbent,jax_trace,0.088,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_incumbent,jax_lower,0.036,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_dives,local_solve,3.138,calls=1 #3 starts=16
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_dives,jax_compile,0.505,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_dives,run:dive,0.087,calls=2 boxes=16;boxes=16
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_dives,jax_trace,0.032,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_dives,jax_lower,0.019,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_enum,local_solve,3.406,calls=2 #4 starts=16;#5 starts=2
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_obbt,run:obbt,0.551,calls=1 boxes=1
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_obbt,run:bound,0.062,calls=1 boxes=16
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_obbt,jax_compile,0.009,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_obbt,jax_lower,0.005,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_obbt_incumbent,local_solve,0.541,calls=2 #6 starts=1;#7 starts=3
+nous1,cold,"0.63, 0.91, 0.94",main_in_probe,run:bound,0.068,calls=1 boxes=16
+nous1,cold,"0.63, 0.91, 0.94",main_in_search,run:bound,13.598,calls=186 boxes=16;boxes=16;boxes=16
+nous1,cold,"0.63, 0.91, 0.94",main_in_search,local_solve,1.885,calls=8 #8 starts=1;#9 starts=2;#10 starts=1
+nous1,cold,"0.63, 0.91, 0.94",main_in_search,jax_compile,0.233,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_search,jax_lower,0.013,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_search,wait:bound,0.008,calls=186
+nous1,cold,"0.63, 0.91, 0.94",main_jax,jax_trace,0.260,union
+nous1,cold,"0.63, 0.91, 0.94",main_jax,jax_lower,0.117,union
+nous1,cold,"0.63, 0.91, 0.94",main_jax,jax_compile,3.167,union
+nous1,cold,"0.63, 0.91, 0.94",background,jax_trace@jaxglobal-domain,0.336,ends at 0.3s; overlaps bound_domain 0.3
+nous1,cold,"0.63, 0.91, 0.94",background,jax_lower@jaxglobal-domain,0.088,ends at 0.4s; overlaps bound_domain 0.1
+nous1,cold,"0.63, 0.91, 0.94",background,jax_compile@jaxglobal-domain,0.525,ends at 0.8s; overlaps bound_domain 0.5
+nous1,cold,"0.63, 0.91, 0.94",background,K.quadratic,0.178,ends at 4.6s; overlaps nonlinear 0.2
+nous1,cold,"0.63, 0.91, 0.94",background,jax_trace@jaxglobal-trace,2.271,"ends at 5.5s; overlaps make_local 1.2, root_incumbent 0.5, root_bound 0.4, nonlinear 0.2"
+nous1,cold,"0.63, 0.91, 0.94",background,jax_lower@jaxglobal-trace,0.386,"ends at 5.6s; overlaps make_local 0.3, root_incumbent 0.1"
+nous1,cold,"0.63, 0.91, 0.94",background,trace_lower:bound[b=16],1.201,"ends at 2.3s; overlaps make_local 1.0, nonlinear 0.2"
+nous1,cold,"0.63, 0.91, 0.94",background,trace_lower:dive[b=16],0.552,ends at 2.8s; overlaps make_local 0.6
+nous1,cold,"0.63, 0.91, 0.94",background,jax_compile@jaxglobal-compile,3.814,"ends at 6.8s; overlaps make_local 3.7, root_incumbent 0.8, root_dives 0.4, root_bound 0.2"
+nous1,cold,"0.63, 0.91, 0.94",background,compile:dive[b=16],1.383,ends at 4.2s; overlaps make_local 1.4
+nous1,cold,"0.63, 0.91, 0.94",background,jax_trace@jaxglobal-local,0.299,"ends at 5.8s; overlaps root_incumbent 0.2, root_bound 0.1"
+nous1,cold,"0.63, 0.91, 0.94",background,jax_lower@jaxglobal-local,0.094,ends at 5.8s; overlaps root_bound 0.1
+nous1,cold,"0.63, 0.91, 0.94",background,jax_trace@jaxglobal-screen,0.089,ends at 4.8s; overlaps root_bound 0.1
+nous1,cold,"0.63, 0.91, 0.94",background,jax_lower@jaxglobal-screen,0.042,ends at 4.9s; overlaps 
+nous1,cold,"0.63, 0.91, 0.94",background,jax_compile@jaxglobal-local,0.833,"ends at 6.0s; overlaps root_incumbent 0.7, root_bound 0.1"
+nous1,cold,"0.63, 0.91, 0.94",background,jax_compile@jaxglobal-screen,0.442,"ends at 5.3s; overlaps root_incumbent 0.3, root_bound 0.2"
+nous1,cold,"0.63, 0.91, 0.94",background,compile:bound[b=16],2.605,"ends at 4.9s; overlaps make_local 2.3, root_bound 0.3"
+nous1,cold,"0.63, 0.91, 0.94",background,trace_lower:obbt[b=1],0.940,"ends at 5.6s; overlaps root_incumbent 0.6, root_bound 0.4"
+nous1,cold,"0.63, 0.91, 0.94",background,compile:obbt[b=1],1.248,"ends at 6.8s; overlaps root_incumbent 0.8, root_dives 0.4"
+nous1,cold,"0.63, 0.91, 0.94",path,use_interpreter,,who=fbbt.interpreted args=[] rows=294 result=True
+nous1,cold,"0.63, 0.91, 0.94",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=294 result=True"
+nous1,cold,"0.63, 0.91, 0.94",info,n,,50
+nous1,cold,"0.63, 0.91, 0.94",info,n_int,,2
+nous1,cold,"0.63, 0.91, 0.94",info,free,,2
+nous1,cold,"0.63, 0.91, 0.94",info,status,,optimal
+nous1,cold,"0.63, 0.91, 0.94",info,nodes,,2585
+nous1,cold,"0.63, 0.91, 0.94",info,fun,,1.5670720001299874
+nous1,cold,"0.63, 0.91, 0.94",info,lower_bound,,1.5669271462684207
+nous1,cold,"0.63, 0.91, 0.94",info,message,,
+nous1,cold,"0.63, 0.91, 0.94",info,rows,,294
+nous1,cold,"0.63, 0.91, 0.94",info,quadratic,,True
+nous1,cold,"0.63, 0.91, 0.94",info,structure,,True
+nous1,cold,"0.63, 0.91, 0.94",info,load_gate,,gate=ok load1=0.63
+nous1,cold,"0.63, 0.91, 0.94",bucket,kernel wait: trace+lower,0.000,
+nous1,cold,"0.63, 0.91, 0.94",bucket,kernel wait: XLA compile,0.228,
+nous1,cold,"0.63, 0.91, 0.94",bucket,kernel wait: other,0.000,
+nous1,cold,"0.63, 0.91, 0.94",bucket,bound_domain,0.905,
+nous1,cold,"0.63, 0.91, 0.94",bucket,structure/nonlinear/quadratic,0.177,
+nous1,cold,"0.63, 0.91, 0.94",bucket,make_local,3.347,
+nous1,cold,"0.63, 0.91, 0.94",bucket,root bound: kernel run (first LP),0.096,
+nous1,cold,"0.63, 0.91, 0.94",bucket,root local solves + incumbent,1.935,
+nous1,cold,"0.63, 0.91, 0.94",bucket,root dives + enum,7.207,
+nous1,cold,"0.63, 0.91, 0.94",bucket,root OBBT: kernel run,0.631,
+nous1,cold,"0.63, 0.91, 0.94",bucket,probing: run,0.069,
+nous1,cold,"0.63, 0.91, 0.94",bucket,search,15.902,
+nous1,cold,"0.63, 0.91, 0.94",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.027,
+nous1,cold,"0.63, 0.91, 0.94",bucket,root bound: other,0.037,
+nous1,cold,"0.63, 0.91, 0.94",total,minimize_wall,30.008,optimal
+nous1,cold,"0.63, 0.91, 0.94",total,import_jax_jaxglobal,0.534,not in minimize
+nous1,cold,"0.63, 0.91, 0.94",total,read_nl,0.001,not in minimize
+nous1,cold,"0.63, 0.91, 0.94",stage,pre_domain,0.000,
+nous1,cold,"0.63, 0.91, 0.94",stage,bound_domain,0.848,
+nous1,cold,"0.63, 0.91, 0.94",stage,setup,0.000,
+nous1,cold,"0.63, 0.91, 0.94",stage,cut_pool,0.168,
+nous1,cold,"0.63, 0.91, 0.94",stage,kernels,0.001,
+nous1,cold,"0.63, 0.91, 0.94",stage,pseudo_boolean,0.000,
+nous1,cold,"0.63, 0.91, 0.94",stage,start_compile,0.027,
+nous1,cold,"0.63, 0.91, 0.94",stage,start_dive_compile,0.000,
+nous1,cold,"0.63, 0.91, 0.94",stage,nonlinear,0.156,
+nous1,cold,"0.63, 0.91, 0.94",stage,quadratic,0.000,
+nous1,cold,"0.63, 0.91, 0.94",stage,make_local,3.169,
+nous1,cold,"0.63, 0.91, 0.94",stage,root_bound,0.431,
+nous1,cold,"0.63, 0.91, 0.94",stage,root_incumbent,1.318,
+nous1,cold,"0.63, 0.91, 0.94",stage,root_dives,3.836,
+nous1,cold,"0.63, 0.91, 0.94",stage,root_enum,3.329,
+nous1,cold,"0.63, 0.91, 0.94",stage,root_obbt,0.539,
+nous1,cold,"0.63, 0.91, 0.94",stage,root_obbt_incumbent,0.522,
+nous1,cold,"0.63, 0.91, 0.94",stage,probe,0.067,
+nous1,cold,"0.63, 0.91, 0.94",stage,search,15.596,
+nous1,cold,"0.63, 0.91, 0.94",main_in_bound_domain,bound_domain,0.848,calls=1
+nous1,cold,"0.63, 0.91, 0.94",main_in_bound_domain,jax_compile,0.017,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_bound_domain,jax_lower,0.006,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_cut_pool,jax_trace,0.061,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_cut_pool,jax_compile,0.046,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_nonlinear,K.nonlinear,0.156,calls=1
+nous1,cold,"0.63, 0.91, 0.94",main_in_nonlinear,K.structure,0.156,calls=1
+nous1,cold,"0.63, 0.91, 0.94",main_in_nonlinear,jax_trace,0.027,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_make_local,make_local,3.167,calls=1
+nous1,cold,"0.63, 0.91, 0.94",main_in_make_local,jax_compile,1.859,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_make_local,jax_lower,0.040,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_make_local,jax_trace,0.006,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_bound,wait:bound,0.230,calls=1
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_bound,run:bound,0.134,calls=1 boxes=16
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_bound,jax_compile,0.013,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_incumbent,local_solve,1.316,calls=2 #1 starts=1;#2 starts=2
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_incumbent,jax_compile,0.292,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_incumbent,jax_trace,0.101,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_incumbent,jax_lower,0.032,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_dives,local_solve,3.223,calls=1 #3 starts=16
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_dives,jax_compile,0.459,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_dives,run:dive,0.066,calls=2 boxes=16;boxes=16
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_dives,jax_trace,0.049,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_dives,jax_lower,0.026,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_enum,local_solve,3.326,calls=2 #4 starts=16;#5 starts=2
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_obbt,run:obbt,0.468,calls=1 boxes=1
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_obbt,run:bound,0.058,calls=1 boxes=16
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_obbt,jax_compile,0.006,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_root_obbt_incumbent,local_solve,0.520,calls=2 #6 starts=1;#7 starts=3
+nous1,cold,"0.63, 0.91, 0.94",main_in_probe,run:bound,0.066,calls=1 boxes=16
+nous1,cold,"0.63, 0.91, 0.94",main_in_search,run:bound,13.346,calls=186 boxes=16;boxes=16;boxes=16
+nous1,cold,"0.63, 0.91, 0.94",main_in_search,local_solve,1.819,calls=8 #8 starts=1;#9 starts=2;#10 starts=1
+nous1,cold,"0.63, 0.91, 0.94",main_in_search,jax_compile,0.237,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_search,jax_lower,0.014,calls=0
+nous1,cold,"0.63, 0.91, 0.94",main_in_search,wait:bound,0.008,calls=186
+nous1,cold,"0.63, 0.91, 0.94",main_jax,jax_trace,0.266,union
+nous1,cold,"0.63, 0.91, 0.94",main_jax,jax_lower,0.125,union
+nous1,cold,"0.63, 0.91, 0.94",main_jax,jax_compile,2.929,union
+nous1,cold,"0.63, 0.91, 0.94",background,jax_trace@jaxglobal-domain,0.302,ends at 0.3s; overlaps bound_domain 0.3
+nous1,cold,"0.63, 0.91, 0.94",background,jax_lower@jaxglobal-domain,0.082,ends at 0.4s; overlaps bound_domain 0.1
+nous1,cold,"0.63, 0.91, 0.94",background,jax_compile@jaxglobal-domain,0.488,ends at 0.8s; overlaps bound_domain 0.5
+nous1,cold,"0.63, 0.91, 0.94",background,K.quadratic,0.143,ends at 4.4s; overlaps nonlinear 0.1
+nous1,cold,"0.63, 0.91, 0.94",background,jax_trace@jaxglobal-trace,2.096,"ends at 5.2s; overlaps make_local 1.1, root_bound 0.4, root_incumbent 0.4, nonlinear 0.2"
+nous1,cold,"0.63, 0.91, 0.94",background,jax_lower@jaxglobal-trace,0.388,"ends at 5.3s; overlaps make_local 0.3, root_incumbent 0.1"
+nous1,cold,"0.63, 0.91, 0.94",background,trace_lower:bound[b=16],1.156,"ends at 2.2s; overlaps make_local 1.0, nonlinear 0.2"
+nous1,cold,"0.63, 0.91, 0.94",background,trace_lower:dive[b=16],0.462,ends at 2.6s; overlaps make_local 0.5
+nous1,cold,"0.63, 0.91, 0.94",background,jax_compile@jaxglobal-compile,3.614,"ends at 6.5s; overlaps make_local 3.6, root_incumbent 0.8, root_dives 0.4, root_bound 0.2"
+nous1,cold,"0.63, 0.91, 0.94",background,compile:dive[b=16],1.363,ends at 4.0s; overlaps make_local 1.4
+nous1,cold,"0.63, 0.91, 0.94",background,jax_trace@jaxglobal-local,0.312,"ends at 5.5s; overlaps root_incumbent 0.2, root_bound 0.1"
+nous1,cold,"0.63, 0.91, 0.94",background,jax_lower@jaxglobal-local,0.096,ends at 5.5s; overlaps root_bound 0.1
+nous1,cold,"0.63, 0.91, 0.94",background,jax_trace@jaxglobal-screen,0.095,ends at 4.6s; overlaps root_bound 0.1
+nous1,cold,"0.63, 0.91, 0.94",background,jax_lower@jaxglobal-screen,0.031,ends at 4.6s; overlaps 
+nous1,cold,"0.63, 0.91, 0.94",background,jax_compile@jaxglobal-local,0.932,"ends at 5.9s; overlaps root_incumbent 0.7, root_bound 0.2"
+nous1,cold,"0.63, 0.91, 0.94",background,jax_compile@jaxglobal-screen,0.477,"ends at 5.1s; overlaps root_incumbent 0.3, root_bound 0.2"
+nous1,cold,"0.63, 0.91, 0.94",background,compile:bound[b=16],2.437,"ends at 4.6s; overlaps make_local 2.2, root_bound 0.2"
+nous1,cold,"0.63, 0.91, 0.94",background,trace_lower:obbt[b=1],0.897,"ends at 5.3s; overlaps root_incumbent 0.5, root_bound 0.4"
+nous1,cold,"0.63, 0.91, 0.94",background,compile:obbt[b=1],1.179,"ends at 6.5s; overlaps root_incumbent 0.8, root_dives 0.4"
+nous1,cold,"0.63, 0.91, 0.94",path,use_interpreter,,who=fbbt.interpreted args=[] rows=294 result=True
+nous1,cold,"0.63, 0.91, 0.94",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=294 result=True"
+nous1,cold,"0.63, 0.91, 0.94",info,n,,50
+nous1,cold,"0.63, 0.91, 0.94",info,n_int,,2
+nous1,cold,"0.63, 0.91, 0.94",info,free,,2
+nous1,cold,"0.63, 0.91, 0.94",info,status,,optimal
+nous1,cold,"0.63, 0.91, 0.94",info,nodes,,2585
+nous1,cold,"0.63, 0.91, 0.94",info,fun,,1.5670720001299874
+nous1,cold,"0.63, 0.91, 0.94",info,lower_bound,,1.5669271462684207
+nous1,cold,"0.63, 0.91, 0.94",info,message,,
+nous1,cold,"0.63, 0.91, 0.94",info,rows,,294
+nous1,cold,"0.63, 0.91, 0.94",info,quadratic,,True
+nous1,cold,"0.63, 0.91, 0.94",info,structure,,True
+nous1,cold,"0.63, 0.91, 0.94",info,load_gate,,gate=ok load1=0.63
+nous1,cold,"0.63, 0.91, 0.94",bucket,kernel wait: trace+lower,0.060,
+nous1,cold,"0.63, 0.91, 0.94",bucket,kernel wait: XLA compile,0.170,
+nous1,cold,"0.63, 0.91, 0.94",bucket,kernel wait: other,0.000,
+nous1,cold,"0.63, 0.91, 0.94",bucket,bound_domain,0.848,
+nous1,cold,"0.63, 0.91, 0.94",bucket,structure/nonlinear/quadratic,0.156,
+nous1,cold,"0.63, 0.91, 0.94",bucket,make_local,3.169,
+nous1,cold,"0.63, 0.91, 0.94",bucket,root bound: kernel run (first LP),0.134,
+nous1,cold,"0.63, 0.91, 0.94",bucket,root local solves + incumbent,1.841,
+nous1,cold,"0.63, 0.91, 0.94",bucket,root dives + enum,7.165,
+nous1,cold,"0.63, 0.91, 0.94",bucket,root OBBT: kernel run,0.539,
+nous1,cold,"0.63, 0.91, 0.94",bucket,probing: run,0.067,
+nous1,cold,"0.63, 0.91, 0.94",bucket,search,15.589,
+nous1,cold,"0.63, 0.91, 0.94",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.029,
+nous1,cold,"0.63, 0.91, 0.94",bucket,root bound: other,0.067,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",total,minimize_wall,30.941,optimal
+nous1,cold+opsrule,"0.64, 0.91, 0.94",total,import_jax_jaxglobal,0.494,not in minimize
+nous1,cold+opsrule,"0.64, 0.91, 0.94",total,read_nl,0.001,not in minimize
+nous1,cold+opsrule,"0.64, 0.91, 0.94",stage,pre_domain,0.000,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",stage,bound_domain,0.891,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",stage,setup,0.000,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",stage,cut_pool,0.199,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",stage,kernels,0.001,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",stage,pseudo_boolean,0.000,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",stage,start_compile,0.022,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",stage,start_dive_compile,0.000,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",stage,nonlinear,0.175,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",stage,quadratic,0.000,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",stage,make_local,1.525,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",stage,root_bound,3.194,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",stage,root_incumbent,0.655,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",stage,root_dives,3.686,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",stage,root_enum,3.397,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",stage,root_obbt,0.583,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",stage,root_obbt_incumbent,0.609,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",stage,probe,0.061,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",stage,search,15.941,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_bound_domain,bound_domain,0.891,calls=1
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_bound_domain,jax_compile,0.012,calls=0
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_cut_pool,jax_trace,0.073,calls=0
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_cut_pool,jax_compile,0.053,calls=0
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_nonlinear,K.nonlinear,0.175,calls=1
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_nonlinear,K.structure,0.175,calls=1
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_nonlinear,jax_trace,0.045,calls=0
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_make_local,make_local,1.490,calls=1
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_make_local,jax_compile,0.492,calls=0
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_make_local,jax_lower,0.029,calls=0
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_root_bound,wait:bound,2.977,calls=1
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_root_bound,run:bound,0.131,calls=1 boxes=16
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_root_bound,jax_compile,0.013,calls=0
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_root_incumbent,local_solve,0.652,calls=2 #1 starts=1;#2 starts=2
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_root_dives,local_solve,3.215,calls=1 #3 starts=16
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_root_dives,jax_compile,0.326,calls=0
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_root_dives,run:dive,0.067,calls=2 boxes=16;boxes=16
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_root_dives,jax_trace,0.039,calls=0
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_root_dives,jax_lower,0.022,calls=0
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_root_enum,local_solve,3.395,calls=2 #4 starts=16;#5 starts=2
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_root_obbt,run:obbt,0.497,calls=1 boxes=1
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_root_obbt,run:bound,0.073,calls=1 boxes=16
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_root_obbt,jax_compile,0.009,calls=0
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_root_obbt_incumbent,local_solve,0.607,calls=2 #6 starts=1;#7 starts=3
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_probe,run:bound,0.060,calls=1 boxes=16
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_search,run:bound,13.678,calls=186 boxes=16;boxes=16;boxes=16
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_search,local_solve,1.843,calls=8 #8 starts=1;#9 starts=2;#10 starts=1
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_search,jax_compile,0.225,calls=0
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_search,jax_lower,0.016,calls=0
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_in_search,wait:bound,0.008,calls=186
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_jax,jax_trace,0.182,union
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_jax,jax_lower,0.076,union
+nous1,cold+opsrule,"0.64, 0.91, 0.94",main_jax,jax_compile,1.131,union
+nous1,cold+opsrule,"0.64, 0.91, 0.94",background,jax_trace@jaxglobal-domain,0.348,ends at 0.3s; overlaps bound_domain 0.4
+nous1,cold+opsrule,"0.64, 0.91, 0.94",background,jax_lower@jaxglobal-domain,0.093,ends at 0.4s; overlaps bound_domain 0.1
+nous1,cold+opsrule,"0.64, 0.91, 0.94",background,jax_compile@jaxglobal-domain,0.511,ends at 0.8s; overlaps bound_domain 0.5
+nous1,cold+opsrule,"0.64, 0.91, 0.94",background,K.quadratic,0.156,ends at 3.2s; overlaps nonlinear 0.1
+nous1,cold+opsrule,"0.64, 0.91, 0.94",background,jax_trace@jaxglobal-trace,2.396,"ends at 4.1s; overlaps make_local 1.2, root_bound 1.0, nonlinear 0.2"
+nous1,cold+opsrule,"0.64, 0.91, 0.94",background,jax_lower@jaxglobal-trace,0.669,"ends at 4.2s; overlaps root_bound 0.4, make_local 0.3"
+nous1,cold+opsrule,"0.64, 0.91, 0.94",background,trace_lower:bound[b=16],1.333,"ends at 2.4s; overlaps make_local 1.1, nonlinear 0.2"
+nous1,cold+opsrule,"0.64, 0.91, 0.94",background,jax_trace@jaxglobal-local,0.504,"ends at 6.2s; overlaps root_bound 0.3, root_incumbent 0.2"
+nous1,cold+opsrule,"0.64, 0.91, 0.94",background,jax_lower@jaxglobal-local,0.140,ends at 6.2s; overlaps root_bound 0.1
+nous1,cold+opsrule,"0.64, 0.91, 0.94",background,jax_trace@jaxglobal-screen,0.139,ends at 3.1s; overlaps root_bound 0.1
+nous1,cold+opsrule,"0.64, 0.91, 0.94",background,jax_lower@jaxglobal-screen,0.065,ends at 3.1s; overlaps root_bound 0.1
+nous1,cold+opsrule,"0.64, 0.91, 0.94",background,jax_compile@jaxglobal-local,3.032,"ends at 6.5s; overlaps root_bound 2.8, root_incumbent 0.3"
+nous1,cold+opsrule,"0.64, 0.91, 0.94",background,jax_compile@jaxglobal-screen,1.394,ends at 4.5s; overlaps root_bound 1.4
+nous1,cold+opsrule,"0.64, 0.91, 0.94",background,trace_lower:dive[b=16],0.798,"ends at 3.2s; overlaps root_bound 0.4, make_local 0.4"
+nous1,cold+opsrule,"0.64, 0.91, 0.94",background,trace_lower:obbt[b=1],0.963,ends at 4.2s; overlaps root_bound 1.0
+nous1,cold+opsrule,"0.64, 0.91, 0.94",background,jax_compile@jaxglobal-compile,4.111,"ends at 6.5s; overlaps root_bound 7.5, root_incumbent 0.5, make_local 0.4"
+nous1,cold+opsrule,"0.64, 0.91, 0.94",background,compile:bound[b=16],3.448,"ends at 5.9s; overlaps root_bound 3.1, make_local 0.4"
+nous1,cold+opsrule,"0.64, 0.91, 0.94",background,compile:dive[b=16],2.674,ends at 5.9s; overlaps root_bound 2.7
+nous1,cold+opsrule,"0.64, 0.91, 0.94",background,compile:obbt[b=1],2.337,"ends at 6.5s; overlaps root_bound 1.8, root_incumbent 0.5"
+nous1,cold+opsrule,"0.64, 0.91, 0.94",path,use_interpreter,,who=fbbt.interpreted args=[] rows=294 result=True
+nous1,cold+opsrule,"0.64, 0.91, 0.94",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=294 result=True"
+nous1,cold+opsrule,"0.64, 0.91, 0.94",info,n,,50
+nous1,cold+opsrule,"0.64, 0.91, 0.94",info,n_int,,2
+nous1,cold+opsrule,"0.64, 0.91, 0.94",info,free,,2
+nous1,cold+opsrule,"0.64, 0.91, 0.94",info,status,,optimal
+nous1,cold+opsrule,"0.64, 0.91, 0.94",info,nodes,,2585
+nous1,cold+opsrule,"0.64, 0.91, 0.94",info,fun,,1.5670720001299874
+nous1,cold+opsrule,"0.64, 0.91, 0.94",info,lower_bound,,1.5669271462684207
+nous1,cold+opsrule,"0.64, 0.91, 0.94",info,message,,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",info,rows,,294
+nous1,cold+opsrule,"0.64, 0.91, 0.94",info,quadratic,,True
+nous1,cold+opsrule,"0.64, 0.91, 0.94",info,structure,,True
+nous1,cold+opsrule,"0.64, 0.91, 0.94",info,load_gate,,gate=ok load1=0.64
+nous1,cold+opsrule,"0.64, 0.91, 0.94",bucket,kernel wait: trace+lower,0.000,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",bucket,kernel wait: XLA compile,2.977,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",bucket,kernel wait: other,0.000,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",bucket,bound_domain,0.891,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",bucket,structure/nonlinear/quadratic,0.175,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",bucket,make_local,1.525,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",bucket,root bound: kernel run (first LP),0.131,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",bucket,root local solves + incumbent,1.264,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",bucket,root dives + enum,7.084,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",bucket,root OBBT: kernel run,0.583,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",bucket,probing: run,0.061,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",bucket,search,15.933,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.024,
+nous1,cold+opsrule,"0.64, 0.91, 0.94",bucket,root bound: other,0.085,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",total,minimize_wall,30.903,optimal
+nous1,cold+opsrule,"0.43, 0.82, 0.91",total,import_jax_jaxglobal,0.500,not in minimize
+nous1,cold+opsrule,"0.43, 0.82, 0.91",total,read_nl,0.001,not in minimize
+nous1,cold+opsrule,"0.43, 0.82, 0.91",stage,pre_domain,0.000,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",stage,bound_domain,0.948,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",stage,setup,0.000,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",stage,cut_pool,0.168,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",stage,kernels,0.001,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",stage,pseudo_boolean,0.000,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",stage,start_compile,0.018,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",stage,start_dive_compile,0.000,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",stage,nonlinear,0.180,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",stage,quadratic,0.000,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",stage,make_local,3.332,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",stage,root_bound,0.442,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",stage,root_incumbent,1.398,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",stage,root_dives,3.753,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",stage,root_enum,3.572,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",stage,root_obbt,0.583,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",stage,root_obbt_incumbent,0.542,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",stage,probe,0.063,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",stage,search,15.904,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_bound_domain,bound_domain,0.948,calls=1
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_bound_domain,jax_compile,0.012,calls=0
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_cut_pool,jax_trace,0.056,calls=0
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_cut_pool,jax_compile,0.044,calls=0
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_nonlinear,K.nonlinear,0.180,calls=1
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_nonlinear,K.structure,0.180,calls=1
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_nonlinear,jax_trace,0.038,calls=0
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_make_local,make_local,3.331,calls=1
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_make_local,jax_compile,1.963,calls=0
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_make_local,jax_lower,0.041,calls=0
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_root_bound,wait:bound,0.289,calls=1
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_root_bound,run:bound,0.089,calls=1 boxes=16
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_root_bound,jax_compile,0.023,calls=0
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_root_incumbent,local_solve,1.395,calls=2 #1 starts=1;#2 starts=2
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_root_incumbent,jax_compile,0.288,calls=0
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_root_incumbent,jax_trace,0.184,calls=0
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_root_incumbent,jax_lower,0.050,calls=0
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_root_dives,local_solve,3.198,calls=1 #3 starts=16
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_root_dives,jax_compile,0.405,calls=0
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_root_dives,run:dive,0.077,calls=2 boxes=16;boxes=16
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_root_dives,jax_trace,0.040,calls=0
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_root_dives,jax_lower,0.020,calls=0
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_root_enum,local_solve,3.569,calls=2 #4 starts=16;#5 starts=2
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_root_obbt,run:obbt,0.506,calls=1 boxes=1
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_root_obbt,run:bound,0.061,calls=1 boxes=16
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_root_obbt,jax_compile,0.007,calls=0
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_root_obbt_incumbent,local_solve,0.541,calls=2 #6 starts=1;#7 starts=3
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_probe,run:bound,0.062,calls=1 boxes=16
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_search,run:bound,13.484,calls=186 boxes=16;boxes=16;boxes=16
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_search,local_solve,2.009,calls=8 #8 starts=1;#9 starts=2;#10 starts=1
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_search,jax_compile,0.220,calls=0
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_search,jax_lower,0.012,calls=0
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_in_search,wait:bound,0.008,calls=186
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_jax,jax_trace,0.345,union
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_jax,jax_lower,0.134,union
+nous1,cold+opsrule,"0.43, 0.82, 0.91",main_jax,jax_compile,2.961,union
+nous1,cold+opsrule,"0.43, 0.82, 0.91",background,jax_trace@jaxglobal-domain,0.387,ends at 0.4s; overlaps bound_domain 0.4
+nous1,cold+opsrule,"0.43, 0.82, 0.91",background,jax_lower@jaxglobal-domain,0.090,ends at 0.5s; overlaps bound_domain 0.1
+nous1,cold+opsrule,"0.43, 0.82, 0.91",background,jax_compile@jaxglobal-domain,0.534,ends at 0.9s; overlaps bound_domain 0.5
+nous1,cold+opsrule,"0.43, 0.82, 0.91",background,K.quadratic,0.165,ends at 4.7s; overlaps nonlinear 0.1
+nous1,cold+opsrule,"0.43, 0.82, 0.91",background,jax_trace@jaxglobal-trace,2.243,"ends at 5.5s; overlaps make_local 1.2, root_bound 0.4, root_incumbent 0.4, nonlinear 0.2"
+nous1,cold+opsrule,"0.43, 0.82, 0.91",background,jax_lower@jaxglobal-trace,0.448,"ends at 5.6s; overlaps make_local 0.4, root_incumbent 0.1"
+nous1,cold+opsrule,"0.43, 0.82, 0.91",background,trace_lower:bound[b=16],1.252,"ends at 2.4s; overlaps make_local 1.1, nonlinear 0.2"
+nous1,cold+opsrule,"0.43, 0.82, 0.91",background,trace_lower:dive[b=16],0.533,ends at 2.9s; overlaps make_local 0.5
+nous1,cold+opsrule,"0.43, 0.82, 0.91",background,jax_compile@jaxglobal-compile,3.742,"ends at 6.7s; overlaps make_local 3.6, root_incumbent 0.9, root_bound 0.3, root_dives 0.2"
+nous1,cold+opsrule,"0.43, 0.82, 0.91",background,compile:dive[b=16],1.341,ends at 4.2s; overlaps make_local 1.3
+nous1,cold+opsrule,"0.43, 0.82, 0.91",background,jax_trace@jaxglobal-local,0.305,"ends at 5.9s; overlaps root_incumbent 0.2, root_bound 0.1"
+nous1,cold+opsrule,"0.43, 0.82, 0.91",background,jax_lower@jaxglobal-local,0.069,ends at 5.9s; overlaps 
+nous1,cold+opsrule,"0.43, 0.82, 0.91",background,jax_trace@jaxglobal-screen,0.096,ends at 4.9s; overlaps root_bound 0.1
+nous1,cold+opsrule,"0.43, 0.82, 0.91",background,jax_compile@jaxglobal-local,0.971,"ends at 6.3s; overlaps root_incumbent 0.8, root_bound 0.2"
+nous1,cold+opsrule,"0.43, 0.82, 0.91",background,jax_lower@jaxglobal-screen,0.084,ends at 5.0s; overlaps root_bound 0.1
+nous1,cold+opsrule,"0.43, 0.82, 0.91",background,jax_compile@jaxglobal-screen,0.422,"ends at 5.3s; overlaps root_incumbent 0.2, root_bound 0.2"
+nous1,cold+opsrule,"0.43, 0.82, 0.91",background,compile:bound[b=16],2.606,"ends at 5.0s; overlaps make_local 2.3, root_bound 0.3"
+nous1,cold+opsrule,"0.43, 0.82, 0.91",background,trace_lower:obbt[b=1],0.936,"ends at 5.6s; overlaps root_incumbent 0.5, root_bound 0.4"
+nous1,cold+opsrule,"0.43, 0.82, 0.91",background,compile:obbt[b=1],1.143,"ends at 6.7s; overlaps root_incumbent 0.9, root_dives 0.2"
+nous1,cold+opsrule,"0.43, 0.82, 0.91",path,use_interpreter,,who=fbbt.interpreted args=[] rows=294 result=True
+nous1,cold+opsrule,"0.43, 0.82, 0.91",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=294 result=True"
+nous1,cold+opsrule,"0.43, 0.82, 0.91",info,n,,50
+nous1,cold+opsrule,"0.43, 0.82, 0.91",info,n_int,,2
+nous1,cold+opsrule,"0.43, 0.82, 0.91",info,free,,2
+nous1,cold+opsrule,"0.43, 0.82, 0.91",info,status,,optimal
+nous1,cold+opsrule,"0.43, 0.82, 0.91",info,nodes,,2585
+nous1,cold+opsrule,"0.43, 0.82, 0.91",info,fun,,1.5670720001299874
+nous1,cold+opsrule,"0.43, 0.82, 0.91",info,lower_bound,,1.5669271462684207
+nous1,cold+opsrule,"0.43, 0.82, 0.91",info,message,,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",info,rows,,294
+nous1,cold+opsrule,"0.43, 0.82, 0.91",info,quadratic,,True
+nous1,cold+opsrule,"0.43, 0.82, 0.91",info,structure,,True
+nous1,cold+opsrule,"0.43, 0.82, 0.91",info,load_gate,,gate=ok load1=0.43
+nous1,cold+opsrule,"0.43, 0.82, 0.91",bucket,kernel wait: trace+lower,0.000,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",bucket,kernel wait: XLA compile,0.289,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",bucket,kernel wait: other,0.000,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",bucket,bound_domain,0.948,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",bucket,structure/nonlinear/quadratic,0.180,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",bucket,make_local,3.332,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",bucket,root bound: kernel run (first LP),0.089,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",bucket,root local solves + incumbent,1.940,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",bucket,root dives + enum,7.325,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",bucket,root OBBT: kernel run,0.583,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",bucket,probing: run,0.063,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",bucket,search,15.896,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.019,
+nous1,cold+opsrule,"0.43, 0.82, 0.91",bucket,root bound: other,0.064,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",total,minimize_wall,30.237,optimal
+nous1,cold+opsrule,"0.65, 0.88, 0.93",total,import_jax_jaxglobal,0.470,not in minimize
+nous1,cold+opsrule,"0.65, 0.88, 0.93",total,read_nl,0.001,not in minimize
+nous1,cold+opsrule,"0.65, 0.88, 0.93",stage,pre_domain,0.000,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",stage,bound_domain,0.873,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",stage,setup,0.000,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",stage,cut_pool,0.179,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",stage,kernels,0.001,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",stage,pseudo_boolean,0.000,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",stage,start_compile,0.013,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",stage,start_dive_compile,0.000,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",stage,nonlinear,0.166,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",stage,quadratic,0.006,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",stage,make_local,3.320,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",stage,root_bound,0.319,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",stage,root_incumbent,1.408,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",stage,root_dives,3.611,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",stage,root_enum,3.269,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",stage,root_obbt,0.611,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",stage,root_obbt_incumbent,0.515,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",stage,probe,0.066,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",stage,search,15.880,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_bound_domain,bound_domain,0.873,calls=1
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_bound_domain,jax_compile,0.015,calls=0
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_bound_domain,jax_lower,0.006,calls=0
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_cut_pool,jax_trace,0.062,calls=0
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_cut_pool,jax_compile,0.048,calls=0
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_nonlinear,K.nonlinear,0.166,calls=1
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_nonlinear,K.structure,0.166,calls=1
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_nonlinear,jax_trace,0.043,calls=0
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_quadratic,K.quadratic,0.006,calls=2
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_make_local,make_local,3.315,calls=1
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_make_local,jax_compile,1.979,calls=0
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_make_local,jax_lower,0.025,calls=0
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_make_local,jax_trace,0.005,calls=0
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_root_bound,wait:bound,0.157,calls=1
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_root_bound,run:bound,0.084,calls=1 boxes=16
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_root_bound,jax_compile,0.021,calls=0
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_root_incumbent,local_solve,1.406,calls=2 #1 starts=1;#2 starts=2
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_root_incumbent,jax_compile,0.376,calls=0
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_root_incumbent,jax_trace,0.097,calls=0
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_root_incumbent,jax_lower,0.037,calls=0
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_root_dives,local_solve,3.000,calls=1 #3 starts=16
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_root_dives,jax_compile,0.454,calls=0
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_root_dives,run:dive,0.074,calls=2 boxes=16;boxes=16
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_root_dives,jax_trace,0.039,calls=0
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_root_dives,jax_lower,0.023,calls=0
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_root_enum,local_solve,3.266,calls=2 #4 starts=16;#5 starts=2
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_root_obbt,run:obbt,0.533,calls=1 boxes=1
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_root_obbt,run:bound,0.062,calls=1 boxes=16
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_root_obbt,jax_compile,0.008,calls=0
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_root_obbt_incumbent,local_solve,0.513,calls=2 #6 starts=1;#7 starts=3
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_probe,run:bound,0.064,calls=1 boxes=16
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_search,run:bound,13.552,calls=186 boxes=16;boxes=16;boxes=16
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_search,local_solve,1.876,calls=8 #8 starts=1;#9 starts=2;#10 starts=1
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_search,jax_compile,0.254,calls=0
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_search,jax_lower,0.017,calls=0
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_in_search,wait:bound,0.008,calls=186
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_jax,jax_trace,0.276,union
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_jax,jax_lower,0.115,union
+nous1,cold+opsrule,"0.65, 0.88, 0.93",main_jax,jax_compile,3.156,union
+nous1,cold+opsrule,"0.65, 0.88, 0.93",background,jax_trace@jaxglobal-domain,0.326,ends at 0.3s; overlaps bound_domain 0.3
+nous1,cold+opsrule,"0.65, 0.88, 0.93",background,jax_lower@jaxglobal-domain,0.091,ends at 0.4s; overlaps bound_domain 0.1
+nous1,cold+opsrule,"0.65, 0.88, 0.93",background,jax_compile@jaxglobal-domain,0.492,ends at 0.8s; overlaps bound_domain 0.5
+nous1,cold+opsrule,"0.65, 0.88, 0.93",background,K.quadratic,0.178,ends at 4.6s; overlaps nonlinear 0.2
+nous1,cold+opsrule,"0.65, 0.88, 0.93",background,jax_trace@jaxglobal-trace,2.139,"ends at 5.4s; overlaps make_local 1.1, root_incumbent 0.5, root_bound 0.3, nonlinear 0.2"
+nous1,cold+opsrule,"0.65, 0.88, 0.93",background,jax_lower@jaxglobal-trace,0.480,"ends at 5.5s; overlaps make_local 0.4, root_incumbent 0.1"
+nous1,cold+opsrule,"0.65, 0.88, 0.93",background,trace_lower:bound[b=16],1.253,"ends at 2.3s; overlaps make_local 1.1, nonlinear 0.2"
+nous1,cold+opsrule,"0.65, 0.88, 0.93",background,trace_lower:dive[b=16],0.479,ends at 2.8s; overlaps make_local 0.5
+nous1,cold+opsrule,"0.65, 0.88, 0.93",background,jax_trace@jaxglobal-local,0.335,"ends at 5.7s; overlaps root_incumbent 0.2, root_bound 0.1"
+nous1,cold+opsrule,"0.65, 0.88, 0.93",background,jax_lower@jaxglobal-local,0.089,ends at 5.7s; overlaps 
+nous1,cold+opsrule,"0.65, 0.88, 0.93",background,jax_trace@jaxglobal-screen,0.081,ends at 4.8s; overlaps root_bound 0.1
+nous1,cold+opsrule,"0.65, 0.88, 0.93",background,jax_lower@jaxglobal-screen,0.073,ends at 4.8s; overlaps root_bound 0.1
+nous1,cold+opsrule,"0.65, 0.88, 0.93",background,jax_compile@jaxglobal-local,0.972,"ends at 6.0s; overlaps root_incumbent 0.8, root_bound 0.2"
+nous1,cold+opsrule,"0.65, 0.88, 0.93",background,jax_compile@jaxglobal-screen,0.475,"ends at 5.2s; overlaps root_incumbent 0.3, root_bound 0.1"
+nous1,cold+opsrule,"0.65, 0.88, 0.93",background,jax_compile@jaxglobal-compile,3.534,"ends at 6.6s; overlaps make_local 4.0, root_incumbent 0.8, root_bound 0.3, root_dives 0.3"
+nous1,cold+opsrule,"0.65, 0.88, 0.93",background,compile:dive[b=16],1.928,"ends at 4.7s; overlaps make_local 1.8, root_bound 0.2"
+nous1,cold+opsrule,"0.65, 0.88, 0.93",background,compile:bound[b=16],2.444,"ends at 4.8s; overlaps make_local 2.3, root_bound 0.2"
+nous1,cold+opsrule,"0.65, 0.88, 0.93",background,trace_lower:obbt[b=1],0.916,"ends at 5.5s; overlaps root_incumbent 0.6, root_bound 0.3"
+nous1,cold+opsrule,"0.65, 0.88, 0.93",background,compile:obbt[b=1],1.096,"ends at 6.6s; overlaps root_incumbent 0.8, root_dives 0.3"
+nous1,cold+opsrule,"0.65, 0.88, 0.93",path,use_interpreter,,who=fbbt.interpreted args=[] rows=294 result=True
+nous1,cold+opsrule,"0.65, 0.88, 0.93",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=294 result=True"
+nous1,cold+opsrule,"0.65, 0.88, 0.93",info,n,,50
+nous1,cold+opsrule,"0.65, 0.88, 0.93",info,n_int,,2
+nous1,cold+opsrule,"0.65, 0.88, 0.93",info,free,,2
+nous1,cold+opsrule,"0.65, 0.88, 0.93",info,status,,optimal
+nous1,cold+opsrule,"0.65, 0.88, 0.93",info,nodes,,2585
+nous1,cold+opsrule,"0.65, 0.88, 0.93",info,fun,,1.5670720001299874
+nous1,cold+opsrule,"0.65, 0.88, 0.93",info,lower_bound,,1.5669271462684207
+nous1,cold+opsrule,"0.65, 0.88, 0.93",info,message,,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",info,rows,,294
+nous1,cold+opsrule,"0.65, 0.88, 0.93",info,quadratic,,True
+nous1,cold+opsrule,"0.65, 0.88, 0.93",info,structure,,True
+nous1,cold+opsrule,"0.65, 0.88, 0.93",info,load_gate,,gate=ok load1=0.65
+nous1,cold+opsrule,"0.65, 0.88, 0.93",bucket,kernel wait: trace+lower,0.000,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",bucket,kernel wait: XLA compile,0.157,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",bucket,kernel wait: other,0.000,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",bucket,bound_domain,0.873,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",bucket,structure/nonlinear/quadratic,0.171,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",bucket,make_local,3.320,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",bucket,root bound: kernel run (first LP),0.084,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",bucket,root local solves + incumbent,1.924,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",bucket,root dives + enum,6.880,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",bucket,root OBBT: kernel run,0.611,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",bucket,probing: run,0.066,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",bucket,search,15.872,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.015,
+nous1,cold+opsrule,"0.65, 0.88, 0.93",bucket,root bound: other,0.078,
