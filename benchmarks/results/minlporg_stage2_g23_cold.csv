@@ -1,0 +1,17 @@
+solver,name,status,time,primal,dual,nodes,message,load
+jaxglobal,m4_del_asl_hfix,unsupported,6.659838472000047,,,,"unbounded variables: no finite bounds found for variables [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80]",0.96
+jaxglobal,m3_del_asl_miqp,optimal,16.50652658900026,1.473777777696758,1.4737685684617,1,optimal,0.96
+jaxglobal,m5_del_asl_minlp,time_limit,60.29781385999968,1.536415162226583,1.5251986719841395,2161,time_limit,1.12
+jaxglobal,m19_MTG_EX1,unsupported,54.778913874999944,,,,"unbounded variables: no finite bounds found for variables [25, 74, 75, 76]",1.56
+jaxglobal,m20_MTG_EX1a,time_limit,62.3017225829999,nan,nan,0,time_limit,4.28
+jaxglobal,m21_MTG_EX1b,time_limit,61.95752879800011,nan,nan,0,time_limit,4.10
+jaxglobal,m31_nonconvex1,time_limit,67.98594665199971,374647.8209231299,157761.77662023297,1,time_limit,5.89
+jaxglobal,m33_convex1,optimal,30.132532792999882,285506.508244175,285505.9105149665,3,optimal,6.55
+jaxglobal,m32_nonconvex2,time_limit,60.00155594199987,nan,nan,0,time_limit,5.89
+jaxglobal,m48_bcp7,time_limit,60.68959003400005,0.9573325081877392,0.9999900465180421,1,time_limit,6.95
+jaxglobal,m49_bcp6,time_limit,61.07797314000027,0.9512685940223713,0.9999875137106097,3,time_limit,6.56
+jaxglobal,m50_bcp5,time_limit,60.69743613699984,0.9509799570769613,0.999980328825148,1,time_limit,10.88
+jaxglobal,m60_GMA_ethanol_model_BigM,time_limit,60.00039638599992,nan,nan,0,time_limit,9.94
+jaxglobal,m76_General_Model_Case1,unsupported,19.056756992000373,,,,"unbounded variables: no finite bounds found for variables [68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79]",3.39
+jaxglobal,m61_GMA_ethanol_model_CH,time_limit,60.00044200699995,nan,nan,0,time_limit,7.74
+jaxglobal,m77_Specilized_Model_Case2_NLP_Improvement,time_limit,60.01732399899993,nan,nan,0,time_limit,3.54
