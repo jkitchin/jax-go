@@ -1,0 +1,4 @@
+id,title,reason
+131,MINLP approach for the TSPN (Traveling Salesman Problem with Neighborhoods) : tspn5,inputs ['data.zip']: not one .gms/.mps model
+132,MINLP approach for the TSPN (Traveling Salesman Problem with Neighborhoods) : tspn8,inputs ['tspn8.dat']: not one .gms/.mps model
+246,A Novel Bi-Level Optimization Method for the Identification of Critical Points in Flow Sheet Synthesis under Uncertainty : E3,inputs ['E3_Input_Files.zip']: not one .gms/.mps model

@@ -11,6 +11,9 @@ couenne.opt
 benchmarks/minlplib/nl
 benchmarks/minlplib/gms/
 benchmarks/minlplib/instancedata.csv
+# downloaded and converted by benchmarks/minlporg/fetch.py
+benchmarks/minlporg/src/
+benchmarks/minlporg/nl/
 # benchmark runs in progress; commit finished results deliberately
 benchmarks/results/*.log
 .DS_Store
