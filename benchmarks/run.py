@@ -37,6 +37,7 @@ from concurrent.futures import ThreadPoolExecutor
 _T_START = time.time()  # the worker's start (see _drain)
 HERE = pathlib.Path(__file__).resolve().parent
 LIB = HERE / "minlplib"
+INSTANCES = "instances.csv"  # the instance list of a library other than minlplib (--instances)
 REL_GAP, ABS_GAP, FEAS_TOL = 1e-4, 1e-6, 1e-6
 EXTRA = {"safe": True} if os.environ.get("JAXGLOBAL_SAFE") == "1" else {}  # check_wrong.py --safe
 EXTRA.update(json.loads(os.environ.get("JAXGLOBAL_OPTS", "{}")))  # extra minimize options, e.g. '{"branch_var": "reliability"}'
@@ -263,7 +264,7 @@ def instances(max_vars, names=None):
 
         rows = list(references().values())
     else:  # another library laid out the same way (nl/<name>.nl and instances.csv), e.g. minlporg
-        with open(LIB / "instances.csv") as fh:
+        with open(LIB / INSTANCES) as fh:
             rows = list(csv.DictReader(fh))
     rows = [r for r in rows if int(r["nvars"]) <= max_vars]
     return [r for r in rows if r["name"] in names] if names else rows
@@ -299,10 +300,11 @@ def main():
     ap.add_argument("--jobs", type=int, default=4, help="instances run concurrently")
     ap.add_argument("--tag", default="baseline")
     ap.add_argument("--lib", default="minlplib", help="instance library under benchmarks/: minlplib or minlporg")
+    ap.add_argument("--instances", default="instances.csv", help="instance list in --lib (not minlplib), e.g. instances_stage2.csv")
     ap.add_argument("--worker", help=argparse.SUPPRESS)
     a = ap.parse_args()
-    global LIB
-    LIB = HERE / a.lib
+    global LIB, INSTANCES
+    LIB, INSTANCES = HERE / a.lib, a.instances
     if a.worker:
         print(TAG + json.dumps(worker(a.worker, a.time_limit)), flush=True)
         sys.stdout.flush()

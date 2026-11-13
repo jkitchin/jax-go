@@ -1,0 +1,14 @@
+id,title,reason
+51,Stochastic Portfolio Optimization with Round Lot Trading Constraints : D_SPO_RL1,inputs ['D_SPO_RL1.dat']: not one .gms/.mps model
+85,Integrated Process Water Networks Design Problem : Ex 1_ WaterNetwokProblem,inputs ['Ex_1__WaterNetwokProblem_gams.zip']: not one .gms/.mps model
+133,MINLP approach for the TSPN (Traveling Salesman Problem with Neighborhoods) : tspn10,inputs ['tspn10.dat']: not one .gms/.mps model
+134,MINLP approach for the TSPN (Traveling Salesman Problem with Neighborhoods) : tspn12,inputs ['tspn12.dat']: not one .gms/.mps model
+135,MINLP approach for the TSPN (Traveling Salesman Problem with Neighborhoods) : tspn15,inputs ['tspn15.dat']: not one .gms/.mps model
+194,Optimal Design of Water Distribution Networks : shamir,inputs ['shamir.zip']: not one .gms/.mps model
+195,Optimal Design of Water Distribution Networks : hanoi,inputs ['hanoi.zip']: not one .gms/.mps model
+208,The kissing number problem : KNP-3-12,inputs ['knp--3-12.nl']: not one .gms/.mps model
+212,Optimal Design of Water Distribution Networks : shamir,inputs ['shamir.zip']: not one .gms/.mps model
+247,"The optimal design of a three-echelon supply chain with inventories under uncertainty : 2 Supp, 3 DCs, 6 CDZs",gams: --- model.gms(59) 3 Mb 1 Error | *** Error 253 in /tmp/tmp1zcd07e_/model.gms | --- model.gms(117) 3 Mb 2 Errors | *** Error 257 in /tmp/tmp1zcd07e_/model.gms |     Solve statement not checked because of previous errors | --- model.gms(137) 3 Mb 2 Errors | *** Status: Compilation error(s)
+251,"The optimal design of a three-echelon supply chain with inventories under uncertainty : 2 Supp, 3 DCs, 6 CDZs",gams: del.gms | --- model.gms(108) 3 Mb 2 Errors | *** Error 257 in /tmp/tmpzb2uk6vs/model.gms |     Solve statement not checked because of previous errors | --- model.gms(110) 3 Mb 3 Errors | *** Error 141 in /tmp/tmpzb2uk6vs/model.gms | --- model.gms(120) 3 Mb 3 Errors | *** Status: Compilation error(s)
+252,"The optimal design of a three-echelon supply chain with inventories under uncertainty : 3 Supp, 5 DCs, 10 CDZs",gams: del.gms | --- model.gms(108) 3 Mb 2 Errors | *** Error 257 in /tmp/tmpn7a3gu0o/model.gms |     Solve statement not checked because of previous errors | --- model.gms(110) 3 Mb 3 Errors | *** Error 141 in /tmp/tmpn7a3gu0o/model.gms | --- model.gms(120) 3 Mb 3 Errors | *** Status: Compilation error(s)
+387,AC Network-Constrained Unit Commitment : 1,inputs ['Anjos_Conejo-ACUC-AMPL_files.zip']: not one .gms/.mps model

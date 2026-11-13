@@ -42,9 +42,10 @@ def main():
     ap.add_argument("--cold", default="minlporg_stage1_cold", help="results tag with jaxglobal and scip runs")
     ap.add_argument("--warm", default="minlporg_stage1_warm", help="results tag with a second jaxglobal run")
     ap.add_argument("--scip", default="", help="results tag with the scip runs (default: --cold)")
+    ap.add_argument("--instances", default="instances.csv", help="instance list, e.g. instances_stage2.csv")
     a = ap.parse_args()
     cold, warm, scip = load(a.cold), load(a.warm), load(a.scip or a.cold)
-    insts = list(csv.DictReader(open(HERE / "instances.csv")))
+    insts = list(csv.DictReader(open(HERE / a.instances)))
     print("| instance | type | vars (bin) | cons | reference | SCIP | jaxglobal cold | jaxglobal warm | class | pass (cold / warm) |")
     print("|---|---|---:|---:|---:|---|---|---|---|---|")
     counts = {}

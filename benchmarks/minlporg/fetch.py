@@ -15,7 +15,9 @@ minlp.org's "best known objective value"; there is no dual bound) plus the minlp
 number, title and problem page. Instances that fail to convert are listed in skipped.csv with
 the reason.
 
-Run:  python benchmarks/minlporg/fetch.py [--max-vars N] [--max-cons N]
+Run:  python benchmarks/minlporg/fetch.py [--max-vars N] [--max-cons N]                  (stage 1)
+      python benchmarks/minlporg/fetch.py --max-vars 300 --max-cons 300 --above 60 \
+          --per-problem 3 --out instances_stage2.csv                                    (stage 2)
 """
 
 import argparse
@@ -57,6 +59,7 @@ def listing():
         page = re.findall(r"problem/index\.php\?i=(\d+)", row)
         out.append(dict(id=int(txt[0]), title=txt[2], nature=txt[4], discrete=_int(txt[5]), continuous=_int(txt[6]),
                         constraints=_int(txt[7]), best=txt[8], page=f"{SITE}problem/index.php?i={page[0]}" if page else "",
+                        problem=page[0] if page else txt[0],
                         inputs=[(f, loc) for f, loc in links if "/input/" in loc]))  # fmt: skip
     return out
 
@@ -68,13 +71,24 @@ def _int(x):
         return None
 
 
-def select(rows, max_vars, max_cons):
+def select(rows, max_vars, max_cons, above=0, per_problem=0):
+    """Nonlinear instances with at most ``max_vars`` variables and ``max_cons`` constraints and, with
+    ``above``, more than ``above`` variables or constraints (stage 2: larger than stage 1); with
+    ``per_problem``, only the smallest ``per_problem`` instances of each minlp.org problem."""
     keep = []
     for r in rows:
         d, c, m = r["discrete"], r["continuous"], r["constraints"]
         if r["nature"] in LINEAR or None in (d, c, m) or not 0 < d + c <= max_vars or m > max_cons:
             continue
+        if above and d + c <= above and m <= above:
+            continue
         keep.append(r)
+    if per_problem:
+        groups = {}
+        for r in keep:
+            groups.setdefault(r["problem"], []).append(r)
+        keep = sorted((r for g in groups.values() for r in sorted(g, key=lambda r: r["discrete"] + r["continuous"])[:per_problem]),
+                      key=lambda r: r["id"])  # fmt: skip
     return keep
 
 
@@ -139,11 +153,14 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--max-vars", type=int, default=60)
     ap.add_argument("--max-cons", type=int, default=60)
+    ap.add_argument("--above", type=int, default=0, help="only instances with more variables or constraints than this")
+    ap.add_argument("--per-problem", type=int, default=0, help="at most this many (the smallest) per minlp.org problem")
+    ap.add_argument("--out", default="instances.csv", help="instance list to write (skipped ones to skipped_<out>)")
     a = ap.parse_args()
     (HERE / "src").mkdir(exist_ok=True)
     (HERE / "nl").mkdir(exist_ok=True)
     rows, skipped = [], []
-    for r in select(listing(), a.max_vars, a.max_cons):
+    for r in select(listing(), a.max_vars, a.max_cons, a.above, a.per_problem):
         models = [(f, loc) for f, loc in r["inputs"] if f.lower().endswith((".gms", ".mps"))]
         if len(models) != 1:
             skipped.append(dict(id=r["id"], title=r["title"], reason=f"inputs {[f for f, _ in r['inputs']]}: not one .gms/.mps model"))
@@ -165,15 +182,16 @@ def main():
                          dualbound="", gap="", convex="", nbinvars=nb, nintvars=ni, id=r["id"], title=r["title"],
                          url=r["page"]))  # fmt: skip
         print(f"{name:45s} {r['nature']:6s} vars {nv:3d} (bin {nb}, int {ni}) cons {nc:3d} {sense} best {r['best']}")
-    with open(HERE / "instances.csv", "w", newline="") as fh:
+    with open(HERE / a.out, "w", newline="") as fh:
         w = csv.DictWriter(fh, FIELDS)
         w.writeheader()
         w.writerows(rows)
-    with open(HERE / "skipped.csv", "w", newline="") as fh:
+    skip_name = "skipped.csv" if a.out == "instances.csv" else f"skipped_{a.out}"
+    with open(HERE / skip_name, "w", newline="") as fh:
         w = csv.DictWriter(fh, ["id", "title", "reason"])
         w.writeheader()
         w.writerows(skipped)
-    print(f"{len(rows)} instances, {len(skipped)} skipped (see skipped.csv)")
+    print(f"{len(rows)} instances, {len(skipped)} skipped (see {skip_name})")
 
 
 if __name__ == "__main__":
