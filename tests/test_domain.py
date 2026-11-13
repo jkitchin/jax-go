@@ -342,3 +342,43 @@ def test_periodic_model_solved():
     best = min(smin(lambda z: float(_pf(jnp.asarray(z))), z0, bounds=[(-4, 4), (-4, 4), (0.9, 1.1)]).fun
                for z0 in np.random.default_rng(0).uniform([-4, -4, 0.9], [4, 4, 1.1], (60, 3)))
     assert r.fun <= best + 1e-6 and r.lower_bound <= best + 1e-9
+
+
+# --- variables only the objective uses, where it is monotone in them (minlp.org m77/m78) --------
+
+from jaxglobal.domain import objective_only_bounds  # noqa: E402
+
+
+def test_objective_only_monotone_variable_fixed():
+    """q appears only in the objective, which rises with q >= 0: q = 0 at every optimum."""
+    f = lambda x: (x[0] - 1.0) ** 2 + (x[2] / (1.0 + x[1] ** 2)) ** 0.6  # noqa: E731
+    g = lambda x: x[0] + x[1] - 3.0  # noqa: E731
+    L, H = objective_only_bounds(f, g, None, np.array([0.0, -2.0, 0.0]), np.array([4.0, 2.0, INF]))
+    assert L[2] == 0.0 and H[2] == 0.0
+    L, H = objective_only_bounds(lambda x: jnp.exp(-x[0]) + x[1] ** 2, None, None,
+                                 np.array([-INF, -1.0]), np.array([5.0, 1.0]))  # decreasing in x0: fixed at 5
+    assert L[0] == 5.0 and H[0] == 5.0
+
+
+@pytest.mark.parametrize("f,g", [
+    (lambda x: x[2] ** 2 + x[0], None),                        # not monotone on [-inf, inf]
+    (lambda x: x[2] + x[0], lambda x: x[2] - x[0] - 1.0),      # x2 is in a constraint
+    (lambda x: jnp.abs(x[2] - 3.0) + x[0], None),              # nonsmooth objective
+    (lambda x: jnp.where(x[2] > 1.0, x[2], -x[2]) + x[0], None),  # branching objective
+], ids=["not_monotone", "in_constraint", "abs", "where"])
+def test_objective_only_rejects(f, g):
+    L, H = objective_only_bounds(f, g, None, np.array([0.0, 0.0, -INF]), np.array([1.0, 1.0, INF]))
+    assert L[2] == -INF and H[2] == INF
+    L, H = objective_only_bounds(f, g, None, np.array([0.0, 0.0, 0.0]), np.array([1.0, 1.0, INF]))
+    assert H[2] == INF or (g is None and f(jnp.array([0.5, 0.5, 0.0])) <= f(jnp.array([0.5, 0.5, 2.0])))
+
+
+def test_objective_only_model_solved():
+    f = lambda x: (x[0] - 1.0) ** 2 + (x[2] / (1.0 + x[1] ** 2)) ** 0.6 + x[1] ** 2  # noqa: E731
+    g = lambda x: 1.0 - x[0] - x[1]  # noqa: E731
+    r = minimize(f, [0.0, -2.0, 0.0], [4.0, 2.0, INF], ineq=g)
+    assert r.status == "optimal" and abs(r.x[2]) <= 1e-9
+    t = np.linspace(-2, 2, 400001)  # x2 = 0, x0 = max(1 - x1, 0) on [0, 4]... optimum on x0 + x1 = 1 or x0 = 1
+    a = np.clip(np.maximum(1 - t, 1.0), 0, 4)
+    ref = np.min((a - 1) ** 2 + t**2)
+    assert r.fun <= ref + 1e-6 and r.lower_bound <= ref + 1e-9

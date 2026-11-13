@@ -201,6 +201,35 @@ class _Callbacks:
         else:
             self._hess = jax.jit(jax.hessian(lag))
 
+    def precompile(self, x0):
+        """Compile every callback at ``x0`` in a background thread (returns its future).
+
+        A callback's first call compiles it (XLA, several seconds on a cold cache under load), and
+        that happens inside a local solve, which neither ``minimize``'s deadline nor pounce's
+        ``max_wall_time`` can interrupt: on minlp.org m31 (cold, two solves at a time) the first
+        local solve started 2 s before the limit and returned 10 s after it. Compiling while the
+        root bound is computed takes that off the main thread; a callback called before its
+        compile is done compiles as before."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        from . import kcache
+
+        x = np.asarray(x0, np.float64)
+        lam = np.zeros(self.m)
+
+        def run():
+            self.objective(x)
+            self.gradient(x)
+            if self.m:
+                self.constraints(x)
+                self.jacobian(x)
+            self.hessian(x, lam, 1.0)
+
+        ex = ThreadPoolExecutor(1, thread_name_prefix="jaxglobal-local")
+        fut = kcache.track(ex.submit(run))
+        ex.shutdown(wait=False)
+        return fut
+
     def objective(self, x):
         return float(self._f(x))
 
@@ -249,6 +278,7 @@ def _pounce_local(f, ineq, eq, lo, hi, options=None, patterns=None):
         prob = from_jax(f, **kw)
     # the same problem with jaxglobal's callbacks (_Callbacks): pounce's sparsity, cheaper calls
     cb = _Callbacks(f, c, lo.size, mi + me, prob.problem_obj)
+    cb.precompile(np.clip(0.5 * (lo + hi), lo, hi))
     prob = pounce.Problem(n=lo.size, m=mi + me, problem_obj=cb, lb=lo, ub=hi, cl=kw.get("cl"), cu=kw.get("cu"))
     # bound_relax_factor 0: Ipopt's default (1e-8) lets a solution sit up to 1e-8 * max(1, |bound|)
     # past a bound; the caller clips it back into the box, which moves the constraint values by

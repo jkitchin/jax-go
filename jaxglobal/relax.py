@@ -909,7 +909,16 @@ def mc_pow_const(x: MC, p) -> MC:
     conc = concave_rule(f, xs, xs.hi)
     r = select_mc((p >= 1) | (p < 0), conv, conc)
     r = select_mc(p == 0, const_mc(jnp.ones_like(x.lo)), r)
-    return select_mc(ok, r, unbounded_like(x))
+    # p < 0 on a box touching 0 (lo == 0 < hi): as for 1/x (mc_recip), x = 0 is outside the domain,
+    # so x**p is in [hi**p, +inf], convex and decreasing, underestimated by min(x.cc, hi)**p
+    zero = (p < 0) & (x.lo == 0) & (x.hi > 0)
+    hz = jnp.where(zero, x.hi, 1.0)
+    lo_z = jnp.where(jnp.isfinite(hz), jnp.power(hz, p), 0.0)
+    ccx = jnp.where(zero, jnp.minimum(x.cc, x.hi), 1.0)
+    cv_z = jnp.where(ccx > 0, jnp.power(jnp.where(ccx > 0, ccx, 1.0), p), lo_z)
+    inf = jnp.full_like(x.lo, INF)
+    rz = MC(lo_z, inf, jnp.maximum(cv_z, lo_z), inf)
+    return select_mc(ok, r, select_mc(zero, rz, unbounded_like(x)))
 
 
 # ---------------------------------------------------------------------------

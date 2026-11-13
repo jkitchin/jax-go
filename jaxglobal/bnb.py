@@ -872,6 +872,24 @@ _LOCAL_BACKOFF = 16  # most iterations skipped between local searches that do no
 _POLISH_ROUNDS = 5  # incumbent polish (``polish`` in ``minimize``): rounds while it keeps improving
 _POLISH_CANDS = 512  # integer neighbours (one step, swaps) tried per polish round
 _POLISH_CHUNK = 64  # most neighbours per batch of local solves (the time budget is checked between batches)
+_ROOT_OBBT_COST = 10.0  # root OBBT runs only with this many slowest bound-kernel calls of time left
+_SCREEN_MIN_BATCH = 8  # batch sizes of the candidate screens (fvals, viol): powers of two from this
+
+
+def _batched(fn, X):
+    """``fn`` (a ``jit(vmap(...))``) on the points ``X`` (k, n), padded to a power-of-two batch of at
+    least ``_SCREEN_MIN_BATCH`` rows (copies of the first), rows ``:k`` returned. A jitted function
+    compiles once per input shape, and the candidates screened per call vary from 1 to hundreds:
+    each new count was a new compile of the model's constraint violation (4.6 s on minlp.org m31,
+    cold, inside the deadline's last seconds); with buckets a solve compiles a few of them."""
+    X = np.atleast_2d(np.asarray(X, dtype=np.float64))
+    k = X.shape[0]
+    kb = max(_SCREEN_MIN_BATCH, 1 << max(k - 1, 0).bit_length())
+    if kb > k:
+        X = np.concatenate([X, np.repeat(X[:1], kb - k, axis=0)])
+    return np.asarray(fn(jnp.asarray(X, dtype=jnp.float64)))[:k]
+
+
 _NCPU = os.cpu_count() or 1  # pounce solves batches in parallel on this many threads (polish time caps)
 _POLISH_FIRST = 8  # neighbours in the first batch, before the cost of a solve is known
 _POLISH_MIN, _POLISH_FRAC = 2.0, 0.1  # polish time budget: _POLISH_MIN s plus this fraction of the elapsed time
@@ -964,7 +982,7 @@ def _pseudo_boolean(K, f, ineq, eq, lo, hi, lo_user, hi_user, imask, abs_tol, re
     x, F, tol_scale, mag = out
     nm = len(objective_polynomial(Q, lo.size)[0])
     lb = F - tol_scale * feas_tol - (nm + 2) * EPS * mag - 4 * EPS * abs(F)
-    ub = float(np.asarray(K.fvals(jnp.asarray(x[None])))[0])
+    ub = float(_batched(K.fvals, x[None])[0])
     maxv, verified, _ = _verify(f, ineq, eq, x, ub, lo_user, hi_user, feas_tol, integer=imask)
     if not (verified and np.isfinite(ub) and lb <= ub + 1e-9 * (1 + abs(ub)) and ub - lb <= max(abs_tol, rel_tol * abs(ub))):
         return None
@@ -1303,8 +1321,35 @@ def minimize(
     width0 = np.where(branchable, width0, np.inf)  # never split linear variables
 
     _mark("make_local")
-    solve_local = _cached(("local", f, ineq, eq, local_solver, lo.tobytes(), hi.tobytes()),
-                          lambda: make_local(f, ineq, eq, lo, hi, local_solver, patterns=K.structure(lo.size)))
+    solve_local_ = _cached(("local", f, ineq, eq, local_solver, lo.tobytes(), hi.tobytes()),
+                           lambda: make_local(f, ineq, eq, lo, hi, local_solver, patterns=K.structure(lo.size)))
+
+    def solve_local(X0, LO=None, HI=None, options=None):
+        """``solve_local_`` with pounce's ``max_wall_time`` set from the time left before ``deadline``.
+
+        A batch of local solves cannot be interrupted, and its starts share the CPUs, so each
+        start gets the time left times ``min(1, _NCPU / starts)`` (as ``polish`` did), at least
+        50 ms; a caller's own, smaller ``max_wall_time`` is kept. Without this, a batch started
+        just before the limit ran to completion: minlp.org m49/m50 returned after 147 s and 130 s
+        with a 60 s limit, two solves at a time. Results are screened as before, so a solve cut
+        short only proposes a worse candidate."""
+        if deadline is not None:
+            cap = max(deadline - time.perf_counter(), 0.05) * min(1.0, _NCPU / max(len(X0), 1))
+            options = dict(options or {})
+            options["max_wall_time"] = float(min(options.get("max_wall_time", np.inf), cap))
+        return solve_local_(X0, LO, HI, options=options)
+
+    def _warm_screen():  # the smallest screen batch, compiled off the main thread (see _batched)
+        x = np.clip(0.0, lo, hi)[None]
+        _batched(K.fvals, x)
+        if ineq is not None or eq is not None:
+            _batched(K.viol, x)
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    _ex = ThreadPoolExecutor(1, thread_name_prefix="jaxglobal-screen")
+    kcache.track(_ex.submit(_warm_screen))
+    _ex.shutdown(wait=False)
 
     def local(starts, options=None, boxes=None):
         """Local solves from each start; returns (x, f) of the best feasible result.
@@ -1396,11 +1441,11 @@ def minimize(
         X = np.atleast_2d(np.asarray(X, dtype=np.float64))
         bad = np.any((X < lo) | (X > hi) | ~np.isfinite(X), axis=1)
         X = np.where(bad[:, None], 0.5 * (np.where(np.isfinite(lo), lo, 0.0) + np.where(np.isfinite(hi), hi, 0.0)), X)
-        F = np.asarray(K.fvals(jnp.asarray(X)), dtype=np.float64)
+        F = np.asarray(_batched(K.fvals, X), dtype=np.float64)
         bad |= ~np.isfinite(F)
         if constrained:
             # (violation is NaN or inf at a NaN or +inf g and a non-finite h; g = -inf is satisfied)
-            bad |= ~(np.asarray(K.viol(jnp.asarray(X))) <= feas_tol)
+            bad |= ~(_batched(K.viol, X) <= feas_tol)
         if imask.any():
             bad |= np.any(np.abs(X[:, imask] - np.round(X[:, imask])) > INT_TOL, axis=1)
         return np.where(bad, np.inf, F)
@@ -1419,14 +1464,14 @@ def minimize(
         re-checked against the new gap (``_status_after_repair``).
         Returns (x, f(x), note)."""
         strict = _STRICT_FRAC * feas_tol
-        v = float(np.asarray(K.viol(jnp.asarray(x[None], dtype=jnp.float64)))[0])
+        v = float(_batched(K.viol, x[None])[0])
         if not v > strict:
             return x, fx, ""
         L, H = np.where(imask, x, lo), np.where(imask, x, hi)
         opts = {"constr_viol_tol": 0.1 * strict, **(near_zero_options(fx, abs_tol) or {})}
         try:
             X = np.clip(np.asarray(solve_local(x[None], L[None], H[None], options=opts)), L, H)
-            F, vr = screen(X), np.asarray(K.viol(jnp.asarray(X)))
+            F, vr = screen(X), _batched(K.viol, X)
         except Exception:  # an optional improvement: any failure keeps the incumbent
             return x, fx, ""
         # The lower bound stays that of the feas_tol-relaxed problem, so a repaired point may only
@@ -1884,7 +1929,13 @@ def minimize(
             S = np.where((np.arange(len(A)) % 4 == 0)[:, None], rxr, rng.uniform(L, H))
             fixed_solve(L, H, S)
     _mark("root_obbt")
-    if need_obbt():  # (the search would end at once on a closed gap: OBBT would only cost its compile)
+    # The root OBBT kernel solves two LPs per variable in one call, which cannot be interrupted:
+    # skip it when the time left is under _ROOT_OBBT_COST times the slowest bound-kernel call (on
+    # minlp.org m49, cold under load, it started with 11.6 s left and ran 30.6 s, 4.3 times the root
+    # bound's call; 1 to 10 times elsewhere). It only tightens the root box.
+    left = None if deadline is None else deadline - time.perf_counter()
+    obbt_fits = left is None or not bound_call[0] or left > _ROOT_OBBT_COST * bound_call[0]
+    if need_obbt() and obbt_fits:  # (the search would end at once on a closed gap: OBBT would only cost its compile)
         # the dives may have found the first incumbent (no constraints): start the kernel now if
         # not yet, so that the call below waits for it until the deadline instead of compiling
         # synchronously through ``jax.jit`` (which has no deadline)

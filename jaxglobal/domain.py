@@ -16,7 +16,9 @@ finite bounds without changing the problem:
    until nothing changes (at most ``_SETTLE_ROUNDS`` rounds). A variable the
    model sees only through ``sin``/``cos`` of affine arguments (voltage angles in
    power flow) is limited to one period (``periodic_bounds``): every feasible
-   point has an equally good one in that window.
+   point has an equally good one in that window. A variable only the objective uses, where
+   the objective is monotone in it on the box, is fixed at the bound it decreases toward
+   (``objective_only_bounds``).
 3. If variables are still unbounded, a few local solves look for a feasible
    point. Its value ``UB`` is a valid cutoff, so FBBT with ``f <= UB`` keeps
    every point that could be optimal; for example ``min x^2 + y^2`` bounds
@@ -423,6 +425,63 @@ def periodic_bounds(f, ineq, eq, lo, hi, integer=None):
     return lo, hi
 
 
+def objective_only_bounds(f, ineq, eq, lo, hi):
+    """Fix free variables that only the objective uses, where it is monotone in them.
+
+    If no constraint depends on ``x_j`` (structurally) and ``df/dx_j >= 0`` on the whole box,
+    moving ``x_j`` of any feasible point down to ``lo_j`` keeps it feasible and does not raise
+    ``f`` (the segment stays in the box), so ``x_j = lo_j`` loses no optimum; likewise ``x_j = hi_j``
+    if ``df/dx_j <= 0``. The sign comes from the interval extension of ``jax.grad(f)[j]`` on the
+    box (infinite ends allowed). Only for objectives without nonsmooth or branching primitives
+    (``univariate.NONSMOOTH``), where the derivative's interval bounds the slope everywhere.
+    Typical case: heat-exchanger-network models whose area cost sums ``q(i,j,k)`` over a location
+    with no exchanger, a variable no constraint mentions (minlp.org m77, m78).
+    """
+    from .relax import relax
+    from .univariate import NONSMOOTH
+
+    lo, hi = np.array(lo, np.float64), np.array(hi, np.float64)
+    n = lo.size
+    free = ~(np.isfinite(lo) & np.isfinite(hi))
+    if not free.any():
+        return lo, hi
+    try:
+        with jax.ensure_compile_time_eval():
+            jaxpr = jax.make_jaxpr(f)(jnp.zeros(n))
+    except Exception:
+        return lo, hi
+
+    from jax.extend.core import jaxprs_in_params
+
+    def all_prims(jx):
+        for e in jx.eqns:
+            yield e.primitive.name
+            for sub in jaxprs_in_params(e.params):
+                yield from all_prims(getattr(sub, "jaxpr", sub))
+
+    if any(p in NONSMOOTH or p == "select_n" for p in all_prims(jaxpr.jaxpr)):
+        return lo, hi
+    in_cons = used_variables(lambda x: jnp.zeros(()), ineq, eq, n) if (ineq is not None or eq is not None) \
+        else np.zeros(n, bool)  # fmt: skip
+    cand = free & ~in_cons & used_variables(f, None, None, n)
+    if not cand.any():
+        return lo, hi
+    x0 = jnp.asarray(np.clip(0.0, lo, hi))
+    grad = jax.grad(f)
+    for j in np.where(cand)[0]:
+        try:
+            with jax.ensure_compile_time_eval():
+                g = relax(lambda x, j=j: grad(x)[j])(x0, jnp.asarray(lo), jnp.asarray(hi))
+            glo, ghi = float(g.lo), float(g.hi)
+        except Exception:
+            continue
+        if glo >= 0 and np.isfinite(lo[j]):
+            hi[j] = lo[j]
+        elif ghi <= 0 and np.isfinite(hi[j]):
+            lo[j] = hi[j]
+    return lo, hi
+
+
 def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed=0, deadline=None, integer=None):
     """Derive finite bounds. Returns ``(lo, hi, infeasible, x_feasible, f_feasible)``.
 
@@ -463,6 +522,7 @@ def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed
         if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
             keep = lo.copy(), hi.copy()
             lo, hi = periodic_bounds(f, ineq, eq, lo, hi, integer=integer)
+            lo, hi = objective_only_bounds(f, ineq, eq, lo, hi)
             if np.any(lo != keep[0]) or np.any(hi != keep[1]):
                 if tighten(np.inf):  # a window keeps a feasible point if there is one: be conservative anyway
                     lo, hi = keep
