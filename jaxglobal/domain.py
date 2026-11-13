@@ -13,7 +13,10 @@ finite bounds without changing the problem:
    ``s`` used only in rows like ``s >= |x - y|``, linearly, and not raising
    ``f`` as it falls, can be lowered to the largest value any row needs on the
    box without losing feasibility or optimality. Caps and FBBT alternate
-   until nothing changes (at most ``_SETTLE_ROUNDS`` rounds).
+   until nothing changes (at most ``_SETTLE_ROUNDS`` rounds). A variable the
+   model sees only through ``sin``/``cos`` of affine arguments (voltage angles in
+   power flow) is limited to one period (``periodic_bounds``): every feasible
+   point has an equally good one in that window.
 3. If variables are still unbounded, a few local solves look for a feasible
    point. Its value ``UB`` is a valid cutoff, so FBBT with ``f <= UB`` keeps
    every point that could be optimal; for example ``min x^2 + y^2`` bounds
@@ -253,8 +256,10 @@ def _feasible_points(f, ineq, eq, lo, hi, feas_tol, n_starts, seed, deadline=Non
     fvg = jax.jit(jax.value_and_grad(f))
     cons = []
     if g is not None:
+        # ask for g <= -feas_tol / 2: SLSQP's own tolerance would otherwise leave points just outside feas_tol
         gj = jax.jit(lambda x: (g(x), jax.jacfwd(g)(x)))
-        cons.append({"type": "ineq", "fun": timed(lambda x: -np.asarray(gj(x)[0])), "jac": lambda x: -np.asarray(gj(x)[1])})
+        cons.append({"type": "ineq", "fun": timed(lambda x: -np.asarray(gj(x)[0]) - 0.5 * feas_tol),
+                     "jac": lambda x: -np.asarray(gj(x)[1])})  # fmt: skip
     if h is not None:
         hj = jax.jit(lambda x: (h(x), jax.jacfwd(h)(x)))
         cons.append({"type": "eq", "fun": timed(lambda x: np.asarray(hj(x)[0])), "jac": lambda x: np.asarray(hj(x)[1])})
@@ -277,6 +282,10 @@ def _feasible_points(f, ineq, eq, lo, hi, feas_tol, n_starts, seed, deadline=Non
         fin = np.isfinite(lo) & np.isfinite(hi)
         mid = np.where(fin, 0.5 * (np.where(fin, lo, 0.0) + np.where(fin, hi, 0.0)), np.clip(0.0, lo, hi))
         x0 = np.clip(mid + (rng.normal(size=lo.size) * scale if k else 0.0), lo, hi)
+        # off the bounds, where a model can be undefined (1/x, log x at x = 0) and SLSQP stops at once
+        inset = 1e-3 * np.where(fin, np.minimum(hi - lo, 1.0), 1.0)
+        x0 = np.where(np.isfinite(lo) & (x0 - lo < inset) & (hi - lo > 2 * inset), lo + inset, x0)
+        x0 = np.where(np.isfinite(hi) & (hi - x0 < inset) & (hi - lo > 2 * inset), hi - inset, x0)
         try:
             res = minimize(timed(lambda x: tuple(np.asarray(v, np.float64) for v in fvg(x))), x0, jac=True,
                            method="SLSQP", bounds=bounds, constraints=cons,
@@ -307,6 +316,111 @@ def _feasible_points(f, ineq, eq, lo, hi, feas_tol, n_starts, seed, deadline=Non
             if np.isfinite(fx) and viol(jnp.asarray(x)) <= feas_tol and fx < best_f:
                 best_x, best_f = x, fx
     return best_x, best_f
+
+
+_PERIOD_RTOL = 1e-9  # coefficients of a variable inside sin/cos: integer ratios up to this
+
+
+def _period(prog, j):
+    """The period of the model in ``x_j``, or None: ``T`` such that every output (objective and
+    constraints) is unchanged when ``x_j`` is shifted by ``T``, from the scalar tape ``prog``.
+
+    One forward pass tracks, per slot, how it depends on ``x_j``: not at all, affinely with a
+    constant coefficient ``c`` (``("aff", c)``), or only through ``sin``/``cos`` of such an affine
+    argument (``"per"``). Sums, differences, negations and products with or quotients by
+    constants keep a slot affine; ``sin``/``cos`` of an affine slot makes it periodic with period
+    ``2 pi / |c|``; anything may be done to a periodic slot (with slots that do not depend on
+    ``x_j``, or with periodic ones); anything else done to an affine slot (``x_j ** 2``,
+    ``x_j * y``, ``exp(x_j)``) means no period. No output may be affine in ``x_j``. ``T`` is the
+    common period of all the ``sin``/``cos`` terms: ``2 pi / min |c|`` if every ``|c|`` is an integer
+    multiple of the smallest.
+    """
+    cval = prog.const_val
+    state = {int(j): ("aff", 1.0)}
+    coefs = []
+    for o, a, b, out in zip(prog.op, prog.a, prog.b, prog.out):
+        name, _, same, ca, cb, n_in, eqn = prog.opcodes[o]
+        sa = state.get(int(a))
+        sb = state.get(int(b)) if n_in > 1 else None
+        if sa is None and sb is None:
+            continue
+        aff = [s for s in (sa, sb) if isinstance(s, tuple)]
+        per = "per" in (sa, sb)
+        if name in ("add", "add_any", "sub", "neg"):
+            if per and aff:
+                return None
+            if per:
+                st = "per"
+            else:
+                c = (sa[1] if sa else 0.0) + (sb[1] if sb else 0.0) * (-1.0 if name == "sub" else 1.0)
+                c = -c if name == "neg" else c
+                st = ("aff", c) if c != 0 else None
+        elif name == "mul" and (ca or cb):
+            k = float(cval[a] if ca else cval[b])
+            s = sb if ca else sa
+            st = s if s == "per" else (("aff", s[1] * k) if k != 0 else None)
+        elif name == "div" and cb and not ca:
+            k = float(cval[b])
+            st = sa if sa == "per" else (("aff", sa[1] / k) if k != 0 else None)
+        elif name in ("sin", "cos"):
+            if isinstance(sa, tuple):
+                coefs.append(abs(sa[1]))
+            st = "per"
+        elif aff:
+            return None
+        else:
+            st = "per"
+        if st is None:
+            state.pop(int(out), None)
+        else:
+            state[int(out)] = st
+    for ids in prog.outs:
+        if any(isinstance(state.get(int(s)), tuple) for s in np.asarray(ids).ravel()):
+            return None
+    if not coefs:
+        return None
+    cmin = min(coefs)
+    r = np.asarray(coefs) / cmin
+    if not np.all(np.abs(r - np.round(r)) <= _PERIOD_RTOL * r):
+        return None
+    return 2 * np.pi / cmin
+
+
+def periodic_bounds(f, ineq, eq, lo, hi, integer=None):
+    """Bound free continuous variables that the model sees only periodically (``_period``).
+
+    If shifting ``x_j`` by ``T`` changes no output, every feasible point has an equally good
+    feasible point with ``x_j`` in any window of length ``T``: ``[lo, lo + T]`` when ``lo`` is
+    finite, ``[hi - T, hi]`` when ``hi`` is, else ``[-T/2, T/2]``. Typical case: voltage angles in
+    power-flow models, which enter only through ``cos``/``sin`` of angle differences.
+    """
+    lo, hi = np.array(lo, np.float64), np.array(hi, np.float64)
+    free = ~(np.isfinite(lo) & np.isfinite(hi))
+    if integer is not None:
+        free &= ~np.asarray(integer, bool)
+    if not free.any():
+        return lo, hi
+    from .fbbt import _has_tracer
+    from .fbbt_interp import scalarize
+
+    with jax.ensure_compile_time_eval():
+        tape = joint_tape(f, ineq, eq, np.zeros(lo.size))
+    if _has_tracer(tape):
+        return lo, hi
+    prog = scalarize(tape, lo.size)
+    if prog is None:
+        return lo, hi
+    for j in np.where(free)[0]:
+        T = _period(prog, j)
+        if T is None:
+            continue
+        if np.isfinite(lo[j]):
+            hi[j] = lo[j] + T
+        elif np.isfinite(hi[j]):
+            lo[j] = hi[j] - T
+        else:
+            lo[j], hi[j] = -T / 2, T / 2
+    return lo, hi
 
 
 def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed=0, deadline=None, integer=None):
@@ -346,6 +460,12 @@ def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed
         unused = free & ~used_variables(f, ineq, eq, lo.size)
         pt = np.clip(0.0, lo, hi)
         lo, hi = np.where(unused, pt, lo), np.where(unused, pt, hi)
+        if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
+            keep = lo.copy(), hi.copy()
+            lo, hi = periodic_bounds(f, ineq, eq, lo, hi, integer=integer)
+            if np.any(lo != keep[0]) or np.any(hi != keep[1]):
+                if tighten(np.inf):  # a window keeps a feasible point if there is one: be conservative anyway
+                    lo, hi = keep
     struct = []
 
     def settle(cutoff):

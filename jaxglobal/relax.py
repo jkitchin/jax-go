@@ -360,12 +360,29 @@ def mc_mul(a: MC, b: MC, multivariate: bool = False) -> MC:
 
 
 def mc_recip(x: MC) -> MC:
+    """``1 / x``. On a box that touches 0 from one side (``lo == 0 < hi`` or ``lo < 0 == hi``), 1/x is
+    not defined at 0, so (as for ``log``, ``mc_log``) no point of the problem has ``x = 0`` there: on
+    ``(0, hi]`` 1/x is in ``[1/hi, +inf]``, convex and decreasing, so ``1 / x.cc`` underestimates it;
+    on ``[lo, 0)`` it is in ``[-inf, 1/lo]``, concave and decreasing, overestimated by ``1 / x.cv``.
+    Before, such a box gave the whole line, and ``y >= 1/x + ...`` with ``x in [0, 10]`` bounded
+    nothing."""
     pos, neg = x.lo > 0, x.hi < 0
     xp = safe_mc(x, pos, 1.0, 2.0)
     rpos = convex_rule(lambda z: 1.0 / z, xp, xp.hi)
     xn = safe_mc(x, neg, -2.0, -1.0)
     rneg = concave_rule(lambda z: 1.0 / z, xn, xn.lo)
-    return select_mc(pos, rpos, select_mc(neg, rneg, unbounded_like(x)))
+    zpos = (x.lo == 0) & (x.hi > 0)
+    zneg = (x.hi == 0) & (x.lo < 0)
+    inf = jnp.full_like(x.lo, INF)
+    lo_p = 1.0 / jnp.where(zpos, x.hi, 1.0)  # 0 when hi = inf
+    cc_x = jnp.where(zpos, jnp.minimum(x.cc, x.hi), 1.0)
+    cv_p = jnp.where(cc_x > 0, 1.0 / jnp.where(cc_x > 0, cc_x, 1.0), lo_p)  # x.cc <= 0: only x = 0, outside the domain
+    rzp = MC(lo_p, inf, jnp.maximum(cv_p, lo_p), inf)
+    hi_n = 1.0 / jnp.where(zneg, x.lo, -1.0)  # -0 when lo = -inf
+    cv_x = jnp.where(zneg, jnp.maximum(x.cv, x.lo), -1.0)
+    cc_n = jnp.where(cv_x < 0, 1.0 / jnp.where(cv_x < 0, cv_x, -1.0), hi_n)
+    rzn = MC(-inf, hi_n, -inf, jnp.minimum(cc_n, hi_n))
+    return select_mc(pos, rpos, select_mc(neg, rneg, select_mc(zpos, rzp, select_mc(zneg, rzn, unbounded_like(x)))))
 
 
 def mc_exp(x: MC) -> MC:

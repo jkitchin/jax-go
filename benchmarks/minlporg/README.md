@@ -52,11 +52,11 @@ solves m266/m267 or m478/m479 in 60 s.
 
 ## Gaps found
 
-1. **Unbounded variables (3 instances: m245, m478, m479).** Unlike MINLPLib, minlp.org models often
-   leave variables without bounds. jaxglobal stops with `unbounded_domain` when bound tightening
-   does not find finite bounds ("no finite bounds found for variables [9, ..., 19]" on m245),
-   while SCIP solves m245 in 0.07 s. Three more instances (m7, m383, m389) also have unbounded
-   variables in the model but their bounds are inferred.
+1. **Unbounded variables (3 instances: m245, m478, m479). Fixed; see below.** Unlike MINLPLib,
+   minlp.org models often leave variables without bounds. jaxglobal stopped with
+   `unbounded_domain` when it could not derive finite bounds ("no finite bounds found for
+   variables [9, ..., 19]" on m245), while SCIP solves m245 in 0.07 s. Three more instances (m7,
+   m383, m389) have unbounded variables in the model but their bounds were already inferred.
 2. **Fixed cost per solve.** Where both solve, jaxglobal needs 5 to 48 s against SCIP's 0.07 to
    4 s. The four Haverly pooling instances (37 to 43 variables) take 5 to 17 s warm and 12 to 30 s
    cold against under 0.25 s, so most of it is setup and compilation, not search.
@@ -68,6 +68,40 @@ solves m266/m267 or m478/m479 in 60 s.
    On m7 jaxglobal has the optimal incumbent (warm) but its lower bound stays at 2224.5 against
    2260.26 in both runs; on m419 the bound reaches 1.813 against 1.8475. SCIP solves them in
    0.7 s and 12 s.
+
+## Gap 1 fix: unbounded variables
+
+Three changes, each of which keeps every optimal point (the box is never guessed):
+
+* **`1/x` on a box touching 0** (`relax.mc_recip`). For `x in [0, U]` the interval was the whole
+  line; it is now `[1/U, +inf]` (and `[-inf, 1/L]` for `[L, 0]`), since `x = 0` is outside the
+  domain of `1/x`, the convention `log` already uses. On m245 (`D2 >= 1/X1 + X2^2 + ...`, `X1 in
+  [0, 10]`), the unbounded `1/X1` let the LP bounds of `domain.LinearRelaxation` make `X2^2`
+  arbitrarily large; with it the objective cutoff bounds every variable.
+* **The feasible-point search** (`domain._feasible_points`) that gives that cutoff starts off the
+  bounds (a start at `X1 = 0` made SLSQP stop at once on `1/0`) and asks for inequalities with a
+  margin of half the feasibility tolerance (points ended at a violation of 1.5e-6 against 1e-6).
+* **Variables seen only through `sin`/`cos`** (`domain.periodic_bounds`, new). In m478/m479 the
+  voltage angles enter only as `cos(d(N) - d(NP) - phi)` and `sin(...)`. A forward pass over the
+  scalar tape checks that a variable reaches every output only through `sin`/`cos` of an affine
+  argument with commensurate coefficients; shifting it by the period then changes nothing, so it
+  is limited to one period (here `[-pi, pi]`).
+
+Rerun after the fix (jaxglobal cold, 60 s; SCIP rows from stage 1; raw rows in
+`benchmarks/results/minlporg_gap1_cold.csv`):
+
+| instance | before | after | SCIP |
+|---|---|---|---|
+| m245_Model_E2 | unsupported | optimal 27 s, 2068.2006 | optimal 0.07 s, 2068.2005 |
+| m478_MINLP_example_case1_2 | unsupported | time limit, no incumbent at 60 s | time limit, 0.127887 (bound -228) |
+| m479_MINLP_example_case2_1 | unsupported | time limit, no incumbent at 60 s | time limit, 0.0675034 (bound -228) |
+
+jaxglobal now solves 10 of 16 (SCIP 12), with none unsupported and no wrong answers; the other 13
+instances give the same results as before. m478 and m479 are now hard rather than unsupported:
+with 300 s, m478 has the best known value 0.12788818 from the first iteration, but after 16,000
+nodes its bound is only -2065 (the angle windows of width 2 pi are wide for differences of about 1e-3, and the
+trigonometric relaxations on them are weak). Solve times in this rerun vary with the state of the
+kernel cache (m465 and m467 now pass at 7 s), so compare times within one run.
 
 ## Notes on the instances
 
@@ -85,7 +119,7 @@ solves m266/m267 or m478/m479 in 60 s.
 
 ## Next steps
 
-* Stage 1 follow-ups, by expected gain: bounds for variables left unbounded (e.g. from linear
-  equalities and the objective, or a bounded-domain fallback that is reported as such); the
-  root-node cost on dense binary quadratics; the fixed cost per solve on small models.
+* Stage 1 follow-ups, by expected gain: the root-node cost on dense binary quadratics; the fixed
+  cost per solve on small models; tighter angle bounds and trigonometric relaxations for the
+  power-flow models (m478/m479).
 * Stage 2: larger instances (`python benchmarks/minlporg/fetch.py --max-vars 500 --max-cons 500`).

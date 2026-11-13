@@ -237,3 +237,108 @@ def test_jitted_sweeps_match_eager(case, monkeypatch):
         mb = D.monotone_bounds(f, g, h, lo.copy(), hi.copy(), struct=s) if s is not None else None
         out[mode] = (D.used_variables(f, g, h, lo.size), rows, mb, D.bound_domain(f, g, h, lo, hi)[:3])
     assert _same(out["jit"], out["eager"])
+
+
+# --- reciprocal on a box touching 0, and models only bounded through it (minlp.org m245) -------
+
+from jaxglobal.domain import periodic_bounds  # noqa: E402
+from jaxglobal.relax import interval, relax  # noqa: E402
+
+
+@pytest.mark.parametrize("lo,hi", [(0.0, 10.0), (0.0, 0.5), (-4.0, 0.0), (-0.3, 0.0), (0.0, INF), (-INF, 0.0)])
+def test_reciprocal_one_sided_box_sound(lo, hi):
+    """1/x on [0, U] is in [1/U, inf] (x = 0 is outside its domain), and cv/cc stay on their sides."""
+    f = lambda x: 1.0 / x[0]  # noqa: E731
+    L, H = interval(f)(jnp.array([lo]), jnp.array([hi]))
+    a, b = (lo, min(hi, 1e6)) if lo == 0 else (max(lo, -1e6), hi)
+    X = np.linspace(a, b, 2001)[1:] if lo == 0 else np.linspace(a, b, 2001)[:-1]  # without 0
+    F = 1.0 / X
+    tol = 1e-12 * np.abs(F)
+    assert np.all(L <= F + tol) and np.all(F <= H + tol)
+    assert (L > -INF) if lo == 0 else (H < INF)
+    if np.isfinite(lo) and np.isfinite(hi):
+        r = relax(f)
+        for x0 in X[:: 97]:
+            m = r(jnp.array([x0]), jnp.array([lo]), jnp.array([hi]))
+            t = 1e-12 * abs(1.0 / x0)
+            assert float(m.cv) <= 1.0 / x0 + t and 1.0 / x0 <= float(m.cc) + t
+
+
+def test_quotient_one_sided_divisor():
+    """a / b with b in [0, 10]: a > 0 gives [a/10, inf], a of both signs the whole line."""
+    q = lambda x: x[1] / x[0]  # noqa: E731
+    L, H = interval(q)(jnp.array([0.0, 2.0]), jnp.array([10.0, 3.0]))
+    assert float(L) == pytest.approx(0.2) and H == INF
+    L, H = interval(q)(jnp.array([0.0, -1.0]), jnp.array([10.0, 3.0]))
+    assert L == -INF and H == INF
+
+
+def _cycle_model():
+    """X2 free, D >= 0: X2 bounded below only through D >= 1/X1 + X2^2 and the D^3 in the objective."""
+    f = lambda x: 2.0 * x[1] + x[2] ** 3  # noqa: E731
+    g = lambda x: jnp.stack([1.0 / x[0] + x[1] ** 2 - x[2], x[0] ** 2 + 2 * x[1] - 30.0])  # noqa: E731
+    return f, g, np.array([0.0, -INF, 0.0]), np.array([10.0, INF, INF])
+
+
+def test_reciprocal_lets_cutoff_bound_a_cycle():
+    f, g, lo, hi = _cycle_model()
+    L, H, infeasible, xf, ff = bound_domain(f, g, None, lo, hi)
+    assert not infeasible and xf is not None
+    assert np.all(np.isfinite(L)) and np.all(np.isfinite(H))
+
+
+def test_cycle_model_solved():
+    f, g, lo, hi = _cycle_model()
+    r = minimize(f, lo, hi, ineq=g)
+    assert r.status == "optimal"
+    # D = 1/X1 + X2^2 at the optimum (D only raises f): a dense grid over (X1, X2) with X1^2 + 2 X2 <= 30
+    a, t = np.meshgrid(np.linspace(1e-3, 10, 2001), np.linspace(-3, 3, 2001))
+    v = np.where(a**2 + 2 * t <= 30, 2 * t + (1 / a + t**2) ** 3, np.inf)
+    ref = v.min()
+    assert r.lower_bound <= ref + 1e-9 and r.fun <= ref + 1e-6
+
+
+# --- variables seen only periodically (minlp.org m478/m479: voltage angles) ---------------------
+
+
+def _pf(x):
+    """Two angles d1, d2 (free) and a magnitude v: a power-flow-like model in cos/sin of d1 - d2 - 0.3."""
+    d1, d2, v = x[0], x[1], x[2]
+    return v**2 - 2.0 * v * jnp.cos(d1 - d2 - 0.3) + 0.5 * jnp.sin(2 * d1)
+
+
+def test_periodic_angles_bounded():
+    lo, hi = np.array([-INF, -INF, 0.9]), np.array([INF, INF, 1.1])
+    L, H = periodic_bounds(_pf, None, None, lo, hi)
+    np.testing.assert_allclose(L[:2], -np.pi)
+    np.testing.assert_allclose(H[:2], np.pi)
+    L, H = periodic_bounds(_pf, None, None, np.array([1.0, -INF, 0.9]), np.array([INF, INF, 1.1]))
+    assert L[0] == 1.0 and H[0] == pytest.approx(1.0 + 2 * np.pi)
+
+
+@pytest.mark.parametrize("fn", [
+    lambda x: jnp.cos(x[0]) + 0.01 * x[0],          # also linear in x0
+    lambda x: jnp.cos(x[0] ** 2),                    # not affine inside cos
+    lambda x: jnp.cos(x[0]) + jnp.cos(np.sqrt(2.0) * x[0]),  # incommensurate periods
+    lambda x: jnp.cos(x[0] * x[1]),                  # coefficient not constant
+    lambda x: jnp.exp(x[0]) * 0 + jnp.cos(x[0]),     # exp of x0 (times 0 still depends structurally)
+], ids=["linear", "square", "incommensurate", "product", "exp"])
+def test_periodic_rejects(fn):
+    L, H = periodic_bounds(fn, None, None, np.array([-INF, 0.5]), np.array([INF, 1.0]))
+    assert L[0] == -INF and H[0] == INF
+
+
+def test_periodic_commensurate_and_constraint():
+    fn = lambda x: jnp.cos(x[0]) + jnp.sin(3 * x[0])  # noqa: E731
+    con = lambda x: jnp.cos(x[0] - x[1]) - 0.5  # noqa: E731
+    L, H = periodic_bounds(fn, con, None, np.array([-INF, 0.0]), np.array([INF, 1.0]))
+    assert H[0] == pytest.approx(np.pi)
+
+
+def test_periodic_model_solved():
+    r = minimize(_pf, [-INF, -INF, 0.9], [INF, INF, 1.1])
+    assert r.status == "optimal"
+    from scipy.optimize import minimize as smin
+    best = min(smin(lambda z: float(_pf(jnp.asarray(z))), z0, bounds=[(-4, 4), (-4, 4), (0.9, 1.1)]).fun
+               for z0 in np.random.default_rng(0).uniform([-4, -4, 0.9], [4, 4, 1.1], (60, 3)))
+    assert r.fun <= best + 1e-6 and r.lower_bound <= best + 1e-9

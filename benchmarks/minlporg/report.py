@@ -6,7 +6,7 @@ with ``benchmarks/report.classify`` (solved / unsolved / wrong / unsupported, at
 relative tolerance) and passes if it is solved within max(2 x SCIP time, 10 s), the rule of
 docs/PLAN-scip-gap-v2.md.
 
-Run:  python benchmarks/minlporg/report.py [--cold TAG] [--warm TAG]
+Run:  python benchmarks/minlporg/report.py [--cold TAG] [--warm TAG] [--scip TAG]
 """
 
 import argparse
@@ -41,15 +41,16 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--cold", default="minlporg_stage1_cold", help="results tag with jaxglobal and scip runs")
     ap.add_argument("--warm", default="minlporg_stage1_warm", help="results tag with a second jaxglobal run")
+    ap.add_argument("--scip", default="", help="results tag with the scip runs (default: --cold)")
     a = ap.parse_args()
-    cold, warm = load(a.cold), load(a.warm)
+    cold, warm, scip = load(a.cold), load(a.warm), load(a.scip or a.cold)
     insts = list(csv.DictReader(open(HERE / "instances.csv")))
     print("| instance | type | vars (bin) | cons | reference | SCIP | jaxglobal cold | jaxglobal warm | class | pass (cold / warm) |")
     print("|---|---|---:|---:|---:|---|---|---|---|---|")
     counts = {}
     for inst in insts:
         name, s = inst["name"], (1 if inst["objsense"] == "min" else -1)
-        sc = cold.get(("scip", name), {})
+        sc = scip.get(("scip", name), {})
         best = [v for v in (num(inst["primalbound"]), num(sc.get("primal"))) if v == v]
         ref = dict(objsense=inst["objsense"], primalbound=str(min(best, key=lambda v: s * v)) if best else "",
                    dualbound=sc.get("dual", ""))  # fmt: skip
