@@ -159,9 +159,15 @@ r2j, t2j = solve(ipv2_jnp, LO, HI, time_limit=600)
 print(f"jnp formula: {r2j}\n  {t2j:.1f} s")
 
 # %% [markdown]
-# Both certify the same maximum. The time includes compiling the bounding
-# kernels, which is most of it for the primitives; the formula's relaxation is
-# so loose that it needs far more nodes.
+# Both certify the same maximum, NIPV $= -0.40931$ at $(0.698, 0.120)$, with a
+# proven bound $4\times10^{-5}$ away. The primitives need 3,055 nodes, the
+# `jnp` formula 11,663. On the first run on a 4-core VM both took 17 to 18 s,
+# most of it compiling the bounding kernels; the stored outputs, with
+# jaxglobal's on-disk kernel cache filled by that run, show 3.6 s and 5.1 s.
+# So on this problem the formula is good enough. The primitives matter when the noise is small
+# (with $\tau^2 = 10^{-4}$ and 10 clustered points, a test case in
+# `tests/test_gp.py` went from 458,000 nodes and 178 s to 1,900 nodes and
+# 19 s) and in more dimensions (section 2).
 #
 # The landscape, with every local maximum of NIPV that L-BFGS-B found from
 # 200 random starts:
@@ -254,6 +260,34 @@ def compare(ipv, vg, batch, r, t, lo, hi, reps=50, samples=(100, 1_000, 10_000, 
 res2 = compare(ipv2, vg2, batch2, r2, t2, LO, HI)
 res2
 
+# %% [markdown]
+# NIPV has six local maxima here, and only 28% of L-BFGS-B starts end at the
+# global one: the others stop at bumps between other pairs of data points
+# (the yellow crosses). The certified value matches the maximum over a
+# $301\times301$ grid.
+#
+# In the table, `gap_to_bound_worst` is the worst IPV of 50 runs minus the
+# certified *lower* bound, so $4.1\times10^{-5}$ (the solver's tolerance) means
+# "found the optimum" and anything larger is the suboptimality proven to be at
+# least that much minus $4\times10^{-5}$.
+#
+# * **Random sampling alone** is slow to converge: it needs 10,000 points to
+#   find the optimum in 94% of runs and 100,000 for all of them, and even
+#   then it stops a few $10^{-6}$ short because it never lands exactly on the
+#   maximizer.
+# * **Sampling + one L-BFGS-B polish** found the optimum in every run, even
+#   from the best of 100 samples (4 ms): in 2-D 100 samples are enough to
+#   land in the right basin.
+# * **Multistart L-BFGS-B** is the weak one here: with one start it finds the
+#   optimum in 28% of runs (the same 28% as above), with 5 starts in 76% and
+#   with 10 in 96%. A miss stops at the second-best bump, $\mathrm{IPV} =
+#   0.4193$ against $0.4093$: it gives up a fifth of the variance reduction
+#   available at this step (from $0.4615$ to $0.4093$), and nothing in its
+#   result says so.
+# * **Branch and bound** takes 3.6 s with the kernel cache warm (18 s on the
+#   first run), against milliseconds for all the others,
+#   and is the only one that says how far from the optimum it can be.
+
 # %%
 def plot_compare(res, title):
     fig, ax = plt.subplots(figsize=(7.5, 4.2))
@@ -288,15 +322,36 @@ D4 = 4
 LO4, HI4 = -np.ones(D4), np.ones(D4)
 Z4 = qmc.scale(qmc.LatinHypercube(d=D4, seed=4).random(12), LO4, HI4)
 XREF4 = qmc.scale(qmc.Sobol(D4, seed=1).random(128), LO4, HI4)
-ipv4, _, _, _ = make_ipv(Z4, XREF4)
+ipv4, ipv4_jnp, _, _ = make_ipv(Z4, XREF4)
 r4, t4 = solve(ipv4, LO4, HI4, time_limit=1200)
-print(f"{r4}\n  {t4:.1f} s")
+print(f"primitives: {r4}\n  {t4:.1f} s")
+r4j, t4j = solve(ipv4_jnp, LO4, HI4, time_limit=1200)
+print(f"jnp formula: {r4j}\n  {t4j:.1f} s")
 vg4 = jax.jit(jax.value_and_grad(ipv4))
 res4 = compare(ipv4, vg4, jax.jit(jax.vmap(ipv4)), r4, t4, LO4, HI4)
 res4
 
 # %%
 plot_compare(res4, "4-D: worst case of each method against its time")
+
+# %% [markdown]
+# In 4-D the certified solve takes 105,000 nodes and 111 s with the
+# primitives (140 s on the first run), and 272,000 nodes and 237 s with the
+# `jnp` formula. The
+# heuristics now miss much more often:
+#
+# * random sampling alone does not find the optimum even with 100,000 points;
+# * sampling + L-BFGS-B needs the best of 10,000 samples to find it in 96%
+#   of runs and 100,000 for all 50;
+# * multistart L-BFGS-B finds it in 8% of runs with one start, 38% with five
+#   and 76% with twenty; the worst of the 20-start runs stops at
+#   $\mathrm{IPV} = 0.8823$ against $0.8806$.
+#
+# The cheapest method that never missed in these 50 runs is 100,000 samples
+# + L-BFGS-B (0.19 s), and that is known only because branch and bound
+# gave the reference. Its time is fixed by the sample count, which has to
+# grow with the dimension; how many samples are enough in 6-D is again a
+# question only a certificate answers.
 
 # %% [markdown]
 # ## 3. Along an active-learning loop (2-D)
@@ -335,4 +390,39 @@ loop = pd.DataFrame(rows)
 loop
 
 # %% [markdown]
+# Every step is certified (`status`, and `lower_bound` within $4\times10^{-5}$
+# of `IPV_certified`), in 3,000 to 5,500 nodes. On the first run a step took
+# about 20 s, almost all of it compiling, because each new data set is a new
+# function for jaxglobal; the stored outputs, from a second run with the
+# kernel cache filled, show 3.4 to 4.9 s. The
+# mean posterior variance over the reference points drops from 0.46 to 0.20
+# in 8 steps.
+#
+# Five-start multistart finds the certified point in 55% to 85% of the runs
+# per step. Its worst run gives up 11% to 35% of the reduction available at
+# that step. A thousand samples polished by L-BFGS-B finds it in all runs
+# but one (step 4, 18 of 20).
+#
 # ## Summary
+#
+# * NIPV is the mean posterior variance over reference points after one more
+#   measurement. With `integrated_posterior_variance` (built from `gp_cov`
+#   and `gp_std`) it is a plain JAX function, and `minimize` returns its
+#   maximum with a proven bound: 4 s in 2-D and 110 s in 4-D on a 4-core VM
+#   with the kernel cache warm (18 s and 140 s on the first run, compiling
+#   included).
+# * It is multimodal (six local maxima in the 2-D example), and multistart
+#   L-BFGS-B, the usual inner optimizer in Bayesian optimization, misses the
+#   global one often: 24% of 5-start runs in 2-D, 24% of 20-start runs in
+#   4-D, with no sign in its result.
+# * Dense sampling followed by one local polish was much more reliable than
+#   multistart on these problems, and hundreds of times faster than branch
+#   and bound. How many samples are enough depends on the dimension (100 in
+#   2-D, 100,000 in 4-D here); the certified solve is how to find out.
+# * The primitives cut the node count against the `jnp` formula by 4× in 2-D
+#   and 2.6× in 4-D here, and by 245× when the noise is small; on the 2-D
+#   problem the solve times were close (3.6 s and 5.1 s).
+#
+# Not covered: batch NIPV ($q > 1$ points at once), and fitting the
+# hyperparameters, which does not change the optimization (NIPV depends on
+# them only through constants).
