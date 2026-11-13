@@ -1,0 +1,55 @@
+solver,name,status,time,primal,dual,nodes,message,load
+scip,m3_del_asl_miqp,optimal,0.00775,1.4737777777777779,1.4737777777777779,0.0,optimal (10.0 pyscipopt 6.3.0),0.08
+scip,m4_del_asl_hfix,optimal,0.047432999999999996,1.4735037330910408,1.4735037330910408,1.0,optimal (10.0 pyscipopt 6.3.0),0.08
+scip,m5_del_asl_minlp,optimal,0.544378,1.536415123076631,1.5362949746649648,1114.0,gaplimit (10.0 pyscipopt 6.3.0),0.08
+scip,m19_MTG_EX1,optimal,48.916618,352.4461478897578,352.4461478897578,13487.0,optimal (10.0 pyscipopt 6.3.0),0.08
+scip,m20_MTG_EX1a,time_limit,60.000103,388.4889258665778,1308.8656565749397,8437.0,timelimit (10.0 pyscipopt 6.3.0),0.08
+scip,m31_nonconvex1,optimal,0.627861,285506.5081213598,285497.70636691095,100.0,gaplimit (10.0 pyscipopt 6.3.0),1.33
+scip,m32_nonconvex2,optimal,0.7516229999999999,2687026.7759186863,2686818.269394763,1.0,gaplimit (10.0 pyscipopt 6.3.0),1.33
+scip,m33_convex1,optimal,0.403051,285506.5081466924,285506.5081466924,13.0,optimal (10.0 pyscipopt 6.3.0),1.33
+scip,m21_MTG_EX1b,time_limit,60.000123,382.9497307795244,4777.22242719879,8875.0,timelimit (10.0 pyscipopt 6.3.0),1.21
+scip,m48_bcp7,time_limit,60.000177,nan,0.999975496915817,1819.0,timelimit (10.0 pyscipopt 6.3.0),1.38
+scip,m49_bcp6,time_limit,60.000113,nan,0.9999698951447263,294.0,timelimit (10.0 pyscipopt 6.3.0),1.71
+scip,m60_GMA_ethanol_model_BigM,optimal,0.22644999999999998,-157.58653367279777,-157.5894159425224,1.0,gaplimit (10.0 pyscipopt 6.3.0),1.90
+scip,m61_GMA_ethanol_model_CH,optimal,0.134145,-157.58653367279322,-157.59623493533962,1.0,gaplimit (10.0 pyscipopt 6.3.0),1.90
+scip,m50_bcp5,time_limit,60.000058,nan,0.9999132780884165,887.0,timelimit (10.0 pyscipopt 6.3.0),1.78
+scip,m77_Specilized_Model_Case2_NLP_Improvement,optimal,38.83435,634977.826510592,634914.381155155,28831.0,gaplimit (10.0 pyscipopt 6.3.0),1.92
+scip,m76_General_Model_Case1,time_limit,60.000509,170750.35098672844,100500.0,22121.0,timelimit (10.0 pyscipopt 6.3.0),1.90
+scip,m126_generalizedpooling_lee1,optimal,2.091398,-4640.0824129549255,-4640.0824129549255,708.0,optimal (10.0 pyscipopt 6.3.0),2.23
+scip,m127_generalizedpooling_lee2,optimal,4.463433,-3849.2654238130294,-3849.2654238130294,1325.0,optimal (10.0 pyscipopt 6.3.0),2.23
+scip,m78_Specilized_Model_Case1,time_limit,60.000417,154997.33351508787,146551.98394511762,33152.0,timelimit (10.0 pyscipopt 6.3.0),2.01
+scip,m274_MPBP_029,optimal,2.224229,13.359399999999997,13.359399999999997,641.0,optimal (10.0 pyscipopt 6.3.0),2.09
+scip,m384_pareto_linear_convex,optimal,0.021522,0.9928988803071551,0.9929167519942295,1.0,gaplimit (10.0 pyscipopt 6.3.0),2.09
+scip,m390_CLay0204BM,optimal,1.008219,6545.0,6545.0,412.0,optimal (10.0 pyscipopt 6.3.0),2.09
+scip,m392_CLay0303BM,optimal,0.627429,26669.109558890275,26669.109558890275,99.0,optimal (10.0 pyscipopt 6.3.0),2.09
+scip,m393_CLay0304BM,optimal,1.632383,40262.38753030168,40262.38753030168,277.0,optimal (10.0 pyscipopt 6.3.0),2.09
+scip,m423_kClus_5_10_2_BM_1,optimal,3.968029,0.10115047865974088,0.10115047865974088,2524.0,optimal (10.0 pyscipopt 6.3.0),2.32
+scip,m128_generalizedpooling_meyer4,time_limit,60.000334,1249812.1211599822,751212.0590766161,39910.0,timelimit (10.0 pyscipopt 6.3.0),2.21
+scip,m424_kClus_5_10_3_BM_1,optimal,20.177169,0.3736966056113259,0.3736966056113259,15781.0,optimal (10.0 pyscipopt 6.3.0),2.30
+scip,m425_kClus_5_10_5_BM_1,time_limit,60.000218,0.9993555118881321,0.3788951340727895,53073.0,timelimit (10.0 pyscipopt 6.3.0),2.30
+scip,m469_Adhya1_2Player_PriceTaker_FixedCharge0,time_limit,60.000442,1089.1751689584783,1132.8031210135832,68797.0,timelimit (10.0 pyscipopt 6.3.0),2.53
+scip,m470_Adhya1_2Player_PriceTaker_FixedCharge1,optimal,43.18913,545.0000062198394,545.0000062198394,25424.0,optimal (10.0 pyscipopt 6.3.0),2.32
+scip,m471_Adhya1_2Player_NashCournot_FixedCharge0,time_limit,60.00035,894.1751650737873,984.3226480032695,44712.0,timelimit (10.0 pyscipopt 6.3.0),2.25
+jaxglobal,m3_del_asl_miqp,optimal,22.037017573999947,1.473777777696758,1.4737685684617,1,optimal,2.09
+scip,m480_OPF_33_SBB,time_limit,60.001706,2.1098746106173722,-37.14999999995871,4200.0,timelimit (10.0 pyscipopt 6.3.0),2.16
+jaxglobal,m4_del_asl_hfix,unsupported,11.382224764999933,,,,"unbounded variables: no finite bounds found for variables [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80]",2.64
+jaxglobal,m5_del_asl_minlp,time_limit,61.07937984399996,1.536415162226583,1.518111529782631,1393,time_limit,2.59
+jaxglobal,m19_MTG_EX1,time_limit,61.10880539800007,nan,nan,0,time_limit,2.82
+jaxglobal,m20_MTG_EX1a,time_limit,63.11924756899998,nan,nan,0,time_limit,4.69
+jaxglobal,m21_MTG_EX1b,time_limit,61.30100899800004,nan,nan,0,time_limit,4.87
+jaxglobal,m31_nonconvex1,time_limit,72.23631806399999,403046.88094525033,157761.77662023297,1,time_limit,5.74
+jaxglobal,m32_nonconvex2,time_limit,60.0004038269999,nan,nan,0,time_limit,5.68
+jaxglobal,m33_convex1,optimal,46.54391147299998,285506.508244175,285505.9105149665,3,optimal,6.49
+jaxglobal,m48_bcp7,time_limit,60.0,,,,killed,7.47
+jaxglobal,m49_bcp6,time_limit,146.80316259200004,nan,0.9999887912961446,1,time_limit,7.47
+jaxglobal,m50_bcp5,time_limit,129.550343775,0.9509799570769613,0.999980328825148,1,time_limit,8.02
+jaxglobal,m60_GMA_ethanol_model_BigM,time_limit,60.00044910099996,nan,nan,0,time_limit,8.02
+jaxglobal,m76_General_Model_Case1,unsupported,25.04904446500018,,,,"unbounded variables: no finite bounds found for variables [68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79]",6.58
+jaxglobal,m77_Specilized_Model_Case2_NLP_Improvement,unsupported,15.013763371999858,,,,"unbounded variables: no finite bounds found for variables [2, 5, 8, 11, 14]",5.73
+jaxglobal,m78_Specilized_Model_Case1,unsupported,57.935168303999944,,,,"unbounded variables: no finite bounds found for variables [2, 5, 8, 11]",4.91
+jaxglobal,m61_GMA_ethanol_model_CH,time_limit,60.00033026199981,nan,nan,0,time_limit,6.58
+jaxglobal,m126_generalizedpooling_lee1,optimal,43.82549309000001,-4640.0823978281005,-4640.4564184610235,1605,optimal,4.79
+jaxglobal,m127_generalizedpooling_lee2,time_limit,61.27224897399992,-3849.265423726437,-3861.9245127185523,3051,time_limit,4.55
+jaxglobal,m128_generalizedpooling_meyer4,time_limit,62.33668701300007,1122782.5447060391,651729.3477079655,533,time_limit,4.65
+jaxglobal,m274_MPBP_029,optimal,43.06404641800009,13.359399999970003,13.35968599787181,353,optimal,5.69
+jaxglobal,m384_pareto_linear_convex,optimal,32.59138356299991,0.992898880307372,0.9929028614530468,5211,optimal,5.90
