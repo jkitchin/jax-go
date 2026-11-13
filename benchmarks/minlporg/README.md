@@ -334,7 +334,7 @@ Per instance, from profiles of cold solves (`benchmarks/profile_root.py`) at 60 
 | instance | what stops it | status |
 |---|---|---|
 | m60, m61 (GMA kinetics) | five `x**0` made the tape interpreters refuse the whole model; `bound_domain`'s straight-line FBBT kernel (6.6 MB of HLO) did not compile in 10 minutes. Then the straight-line relaxation kernel (25 s trace, 81 s compile) | `x**0` fixed (scalarized as the constant 1: FBBT kernel compiles in 1.3 s). With `relax_interp.RULE = "ops"` both find SCIP's optimum -157.5865 within 60 s alone (bound -682); under two-solve load a bound but no incumbent |
-| m19 (also m20, m21) | unbounded `PROFIT` (the objective variable) and inventories `STGM`, bounded only through the objective cutoff, and `bound_domain`'s SLSQP search finds no feasible point in 28 s (48 binaries) | open: needs a stronger feasible-point search in `bound_domain` (e.g. pounce with integer rounding, as `minimize` does) |
+| m19 (also m20, m21) | unbounded `PROFIT` (the objective variable) and inventories `STGM`, bounded only through the objective cutoff, and `bound_domain`'s SLSQP search finds no feasible point in 28 s (48 binaries) | fixed: see *Feasible-point search in `bound_domain`* (incumbents, weak bounds) |
 | m32 | the root bound kernel: 17 s trace, 37 s compile, then 22 s for its first call (601 rows interpreted, 7.3 M scalar rules per box) | open: kernel cost (gap 2 of stage 1) |
 | m31 | the root bound kernel's compile under the straight-line rule; with `RULE = "ops"` one node, incumbent 374,648 | as m60 |
 | m423-m425 (k-means, 50 binaries) | weak bounds: 1,300-3,700 nodes in 60 s, incumbents 0.1076 / 0.515 / 1.113 against 0.1011 / 0.3736 / 0.9913 | open: bounds (big-M disaggregation) |
@@ -346,6 +346,29 @@ a time, 60 s: it helps m31, m60, m61 (a bound, and for m31 an incumbent) and m42
 0.054), but m470 drops from 127 to 15 nodes with a looser bound (-1207 against -1130). Making it
 the default needs the A3 ablation on MINLPLib (node rate of the instances it flips), as the
 roadmap says; not done here.
+
+## Feasible-point search in `bound_domain`
+
+A free variable bounded only through the objective needs a feasible point, whose value is the
+cutoff. The search was scipy SLSQP from 6 starts, rounding the integers independently; on the
+periodic scheduling models m19-m21 (48 to 93 binaries in assignment rows `sum_j y_ij = 1`) it
+found nothing in 20-30 s, so the solve stopped without a node or as `unbounded_domain`.
+
+`domain._feasible_points` now solves the continuous relaxation with pounce, projects the least
+violated relaxation points onto the constraints linearized there with one small MILP each (scipy
+HiGHS: the nearest integers in L1, so rows linear in `x` hold exactly), fixes those integers and
+solves the continuous variables. Independent rounding is tried only if that finds nothing, and
+SLSQP only if pounce finds nothing.
+
+On the six instances that reach the search (`main` against this change, cold, two at a time, 60 s):
+
+| instance | main | now | SCIP |
+|---|---|---|---|
+| m19_MTG_EX1 | time limit, no incumbent | incumbent 242.56, bound 1,430 | 352.45 (optimal) |
+| m20_MTG_EX1a | time limit, no incumbent | incumbent 274.16, bound 4,901 | 388.49 |
+| m21_MTG_EX1b | time limit, no incumbent | incumbent 350.06 | 382.95 |
+| m245_Model_E2 | optimal, 16.1 s | optimal, 17.3 s | optimal, 0.07 s |
+| m4, m76 | unsupported | unsupported (bounds need other rules) | |
 
 ## Notes on the instances
 
