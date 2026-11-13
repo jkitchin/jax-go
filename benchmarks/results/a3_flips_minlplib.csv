@@ -1,0 +1,841 @@
+instance,mode,load_1_5_15,category,item,seconds,note
+hadamard_5,cold,"0.00, 0.00, 0.00",total,minimize_wall,40.642,optimal
+hadamard_5,cold,"0.00, 0.00, 0.00",total,import_jax_jaxglobal,1.306,not in minimize
+hadamard_5,cold,"0.00, 0.00, 0.00",total,read_nl,0.002,not in minimize
+hadamard_5,cold,"0.00, 0.00, 0.00",stage,pre_domain,0.000,
+hadamard_5,cold,"0.00, 0.00, 0.00",stage,bound_domain,5.475,
+hadamard_5,cold,"0.00, 0.00, 0.00",stage,setup,0.000,
+hadamard_5,cold,"0.00, 0.00, 0.00",stage,cut_pool,0.113,
+hadamard_5,cold,"0.00, 0.00, 0.00",stage,kernels,0.001,
+hadamard_5,cold,"0.00, 0.00, 0.00",stage,pseudo_boolean,0.338,
+hadamard_5,cold,"0.00, 0.00, 0.00",stage,start_compile,0.021,
+hadamard_5,cold,"0.00, 0.00, 0.00",stage,start_dive_compile,0.000,
+hadamard_5,cold,"0.00, 0.00, 0.00",stage,nonlinear,0.908,
+hadamard_5,cold,"0.00, 0.00, 0.00",stage,quadratic,0.010,
+hadamard_5,cold,"0.00, 0.00, 0.00",stage,make_local,2.901,
+hadamard_5,cold,"0.00, 0.00, 0.00",stage,root_bound,1.573,
+hadamard_5,cold,"0.00, 0.00, 0.00",stage,root_incumbent,7.851,
+hadamard_5,cold,"0.00, 0.00, 0.00",stage,root_dives,0.047,
+hadamard_5,cold,"0.00, 0.00, 0.00",stage,root_enum,0.000,
+hadamard_5,cold,"0.00, 0.00, 0.00",stage,root_obbt,2.351,
+hadamard_5,cold,"0.00, 0.00, 0.00",stage,root_obbt_incumbent,0.026,
+hadamard_5,cold,"0.00, 0.00, 0.00",stage,probe,3.109,
+hadamard_5,cold,"0.00, 0.00, 0.00",stage,search,15.917,
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_bound_domain,bound_domain,5.474,calls=1
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_bound_domain,jax_compile,2.183,calls=0
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_bound_domain,domain_used_variables,1.171,calls=3
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_bound_domain,jax_trace,0.243,calls=0
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_bound_domain,jax_lower,0.138,calls=0
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_cut_pool,jax_trace,0.049,calls=0
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_cut_pool,jax_compile,0.008,calls=0
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_pseudo_boolean,jax_trace,0.054,calls=0
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_pseudo_boolean,K.quadratic,0.046,calls=1
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_nonlinear,K.nonlinear,0.908,calls=1
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_nonlinear,K.structure,0.908,calls=1
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_nonlinear,jax_trace,0.032,calls=0
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_make_local,make_local,2.888,calls=1
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_make_local,jax_compile,1.802,calls=0
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_make_local,jax_lower,0.012,calls=0
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_root_bound,run:bound,1.316,calls=1 boxes=16
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_root_bound,wait:bound,0.181,calls=1
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_root_bound,jax_compile,0.022,calls=0
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_root_incumbent,local_solve,7.535,calls=8 #1 starts=1;#2 starts=2;#3 starts=6
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_root_incumbent,jax_compile,0.218,calls=0
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_root_incumbent,jax_trace,0.064,calls=0
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_root_incumbent,jax_lower,0.018,calls=0
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_root_dives,jax_compile,0.037,calls=0
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_root_obbt,run:obbt,1.993,calls=1 boxes=1
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_root_obbt,run:bound,0.348,calls=1 boxes=16
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_root_obbt,jax_compile,0.006,calls=0
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_root_obbt_incumbent,local_solve,0.025,calls=2 #9 starts=1;#10 starts=2
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_probe,run:bound,3.107,calls=4 boxes=16;boxes=16;boxes=16
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_search,run:bound,15.540,calls=21 boxes=16;boxes=16;boxes=16
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_search,jax_compile,0.165,calls=0
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_search,local_solve,0.099,calls=6 #11 starts=1;#12 starts=2;#13 starts=1
+hadamard_5,cold,"0.00, 0.00, 0.00",main_in_search,jax_lower,0.012,calls=0
+hadamard_5,cold,"0.00, 0.00, 0.00",main_jax,jax_trace,0.476,union
+hadamard_5,cold,"0.00, 0.00, 0.00",main_jax,jax_lower,0.184,union
+hadamard_5,cold,"0.00, 0.00, 0.00",main_jax,jax_compile,4.442,union
+hadamard_5,cold,"0.00, 0.00, 0.00",background,jax_trace@jaxglobal-domain,0.870,ends at 0.9s; overlaps bound_domain 0.9
+hadamard_5,cold,"0.00, 0.00, 0.00",background,jax_lower@jaxglobal-domain,0.235,ends at 1.0s; overlaps bound_domain 0.2
+hadamard_5,cold,"0.00, 0.00, 0.00",background,jax_compile@jaxglobal-domain,1.264,ends at 2.0s; overlaps bound_domain 1.3
+hadamard_5,cold,"0.00, 0.00, 0.00",background,K.quadratic,0.000,ends at 9.8s; overlaps 
+hadamard_5,cold,"0.00, 0.00, 0.00",background,jax_trace@jaxglobal-trace,3.195,"ends at 11.0s; overlaps root_bound 1.3, make_local 1.1, nonlinear 0.8"
+hadamard_5,cold,"0.00, 0.00, 0.00",background,jax_lower@jaxglobal-trace,0.898,"ends at 11.2s; overlaps make_local 0.6, root_bound 0.2, nonlinear 0.1"
+hadamard_5,cold,"0.00, 0.00, 0.00",background,trace_lower:bound[b=16],1.278,"ends at 7.2s; overlaps nonlinear 0.9, make_local 0.3"
+hadamard_5,cold,"0.00, 0.00, 0.00",background,trace_lower:dive[b=16],1.369,ends at 8.6s; overlaps make_local 1.4
+hadamard_5,cold,"0.00, 0.00, 0.00",background,jax_trace@jaxglobal-local,1.304,"ends at 13.5s; overlaps root_incumbent 0.9, root_bound 0.4"
+hadamard_5,cold,"0.00, 0.00, 0.00",background,jax_lower@jaxglobal-local,0.187,ends at 13.7s; overlaps root_incumbent 0.2
+hadamard_5,cold,"0.00, 0.00, 0.00",background,jax_trace@jaxglobal-screen,0.303,ends at 10.1s; overlaps root_bound 0.3
+hadamard_5,cold,"0.00, 0.00, 0.00",background,jax_lower@jaxglobal-screen,0.083,ends at 10.2s; overlaps root_bound 0.1
+hadamard_5,cold,"0.00, 0.00, 0.00",background,jax_compile@jaxglobal-local,5.455,"ends at 16.8s; overlaps root_incumbent 4.4, root_bound 1.0"
+hadamard_5,cold,"0.00, 0.00, 0.00",background,jax_compile@jaxglobal-screen,0.578,ends at 10.8s; overlaps root_bound 0.6
+hadamard_5,cold,"0.00, 0.00, 0.00",background,jax_compile@jaxglobal-compile,5.244,"ends at 12.6s; overlaps make_local 3.7, root_bound 1.6, root_incumbent 1.3"
+hadamard_5,cold,"0.00, 0.00, 0.00",background,compile:bound[b=16],2.745,"ends at 10.0s; overlaps make_local 2.6, root_bound 0.2"
+hadamard_5,cold,"0.00, 0.00, 0.00",background,compile:dive[b=16],2.499,"ends at 11.1s; overlaps root_bound 1.3, make_local 1.2"
+hadamard_5,cold,"0.00, 0.00, 0.00",background,trace_lower:obbt[b=1],1.477,ends at 11.2s; overlaps root_bound 1.5
+hadamard_5,cold,"0.00, 0.00, 0.00",background,compile:obbt[b=1],1.366,"ends at 12.6s; overlaps root_incumbent 1.3, root_bound 0.1"
+hadamard_5,cold,"0.00, 0.00, 0.00",path,use_interpreter,,who=fbbt.interpreted args=[] rows=505 result=True
+hadamard_5,cold,"0.00, 0.00, 0.00",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=505 result=True"
+hadamard_5,cold,"0.00, 0.00, 0.00",info,n,,26
+hadamard_5,cold,"0.00, 0.00, 0.00",info,n_int,,25
+hadamard_5,cold,"0.00, 0.00, 0.00",info,free,,1
+hadamard_5,cold,"0.00, 0.00, 0.00",info,status,,optimal
+hadamard_5,cold,"0.00, 0.00, 0.00",info,nodes,,263
+hadamard_5,cold,"0.00, 0.00, 0.00",info,fun,,-5.0
+hadamard_5,cold,"0.00, 0.00, 0.00",info,lower_bound,,-5.000001000000724
+hadamard_5,cold,"0.00, 0.00, 0.00",info,message,,
+hadamard_5,cold,"0.00, 0.00, 0.00",info,rows,,505
+hadamard_5,cold,"0.00, 0.00, 0.00",info,quadratic,,False
+hadamard_5,cold,"0.00, 0.00, 0.00",info,structure,,True
+hadamard_5,cold,"0.00, 0.00, 0.00",info,load_gate,,gate=ok load1=0.00
+hadamard_5,cold,"0.00, 0.00, 0.00",bucket,kernel wait: trace+lower,0.000,
+hadamard_5,cold,"0.00, 0.00, 0.00",bucket,kernel wait: XLA compile,0.180,
+hadamard_5,cold,"0.00, 0.00, 0.00",bucket,kernel wait: other,0.000,
+hadamard_5,cold,"0.00, 0.00, 0.00",bucket,bound_domain,5.475,
+hadamard_5,cold,"0.00, 0.00, 0.00",bucket,structure/nonlinear/quadratic,0.918,
+hadamard_5,cold,"0.00, 0.00, 0.00",bucket,make_local,2.901,
+hadamard_5,cold,"0.00, 0.00, 0.00",bucket,root bound: kernel run (first LP),1.316,
+hadamard_5,cold,"0.00, 0.00, 0.00",bucket,root local solves + incumbent,7.877,
+hadamard_5,cold,"0.00, 0.00, 0.00",bucket,root dives + enum,0.047,
+hadamard_5,cold,"0.00, 0.00, 0.00",bucket,root OBBT: kernel run,2.351,
+hadamard_5,cold,"0.00, 0.00, 0.00",bucket,probing: run,3.109,
+hadamard_5,cold,"0.00, 0.00, 0.00",bucket,search,15.917,
+hadamard_5,cold,"0.00, 0.00, 0.00",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.023,
+hadamard_5,cold,"0.00, 0.00, 0.00",bucket,root bound: other,0.076,
+hadamard_5,cold,"0.73, 0.34, 0.12",total,minimize_wall,38.963,optimal
+hadamard_5,cold,"0.73, 0.34, 0.12",total,import_jax_jaxglobal,0.558,not in minimize
+hadamard_5,cold,"0.73, 0.34, 0.12",total,read_nl,0.001,not in minimize
+hadamard_5,cold,"0.73, 0.34, 0.12",stage,pre_domain,0.000,
+hadamard_5,cold,"0.73, 0.34, 0.12",stage,bound_domain,4.964,
+hadamard_5,cold,"0.73, 0.34, 0.12",stage,setup,0.000,
+hadamard_5,cold,"0.73, 0.34, 0.12",stage,cut_pool,0.110,
+hadamard_5,cold,"0.73, 0.34, 0.12",stage,kernels,0.001,
+hadamard_5,cold,"0.73, 0.34, 0.12",stage,pseudo_boolean,0.261,
+hadamard_5,cold,"0.73, 0.34, 0.12",stage,start_compile,0.022,
+hadamard_5,cold,"0.73, 0.34, 0.12",stage,start_dive_compile,0.000,
+hadamard_5,cold,"0.73, 0.34, 0.12",stage,nonlinear,0.765,
+hadamard_5,cold,"0.73, 0.34, 0.12",stage,quadratic,0.008,
+hadamard_5,cold,"0.73, 0.34, 0.12",stage,make_local,1.416,
+hadamard_5,cold,"0.73, 0.34, 0.12",stage,root_bound,3.578,
+hadamard_5,cold,"0.73, 0.34, 0.12",stage,root_incumbent,7.139,
+hadamard_5,cold,"0.73, 0.34, 0.12",stage,root_dives,0.051,
+hadamard_5,cold,"0.73, 0.34, 0.12",stage,root_enum,0.000,
+hadamard_5,cold,"0.73, 0.34, 0.12",stage,root_obbt,2.260,
+hadamard_5,cold,"0.73, 0.34, 0.12",stage,root_obbt_incumbent,0.036,
+hadamard_5,cold,"0.73, 0.34, 0.12",stage,probe,3.382,
+hadamard_5,cold,"0.73, 0.34, 0.12",stage,search,14.970,
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_bound_domain,bound_domain,4.964,calls=1
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_bound_domain,jax_compile,2.056,calls=0
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_bound_domain,domain_used_variables,1.072,calls=3
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_bound_domain,jax_trace,0.193,calls=0
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_bound_domain,jax_lower,0.117,calls=0
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_cut_pool,jax_trace,0.051,calls=0
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_cut_pool,jax_compile,0.007,calls=0
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_pseudo_boolean,jax_trace,0.051,calls=0
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_pseudo_boolean,K.quadratic,0.045,calls=1
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_nonlinear,K.nonlinear,0.765,calls=1
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_nonlinear,K.structure,0.765,calls=1
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_nonlinear,jax_trace,0.030,calls=0
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_make_local,make_local,1.412,calls=1
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_make_local,jax_compile,0.634,calls=0
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_make_local,jax_lower,0.029,calls=0
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_root_bound,run:bound,1.815,calls=1 boxes=16
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_root_bound,wait:bound,1.714,calls=1
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_root_bound,jax_compile,0.023,calls=0
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_root_incumbent,local_solve,6.756,calls=8 #1 starts=1;#2 starts=2;#3 starts=6
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_root_incumbent,jax_compile,0.258,calls=0
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_root_incumbent,jax_trace,0.081,calls=0
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_root_incumbent,jax_lower,0.025,calls=0
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_root_dives,jax_compile,0.041,calls=0
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_root_obbt,run:obbt,1.901,calls=1 boxes=1
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_root_obbt,run:bound,0.349,calls=1 boxes=16
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_root_obbt,jax_compile,0.006,calls=0
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_root_obbt_incumbent,local_solve,0.033,calls=2 #9 starts=1;#10 starts=2
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_probe,run:bound,3.379,calls=4 boxes=16;boxes=16;boxes=16
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_search,run:bound,14.658,calls=21 boxes=16;boxes=16;boxes=16
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_search,jax_compile,0.144,calls=0
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_search,local_solve,0.072,calls=6 #11 starts=1;#12 starts=2;#13 starts=1
+hadamard_5,cold,"0.73, 0.34, 0.12",main_in_search,jax_lower,0.009,calls=0
+hadamard_5,cold,"0.73, 0.34, 0.12",main_jax,jax_trace,0.440,union
+hadamard_5,cold,"0.73, 0.34, 0.12",main_jax,jax_lower,0.183,union
+hadamard_5,cold,"0.73, 0.34, 0.12",main_jax,jax_compile,3.169,union
+hadamard_5,cold,"0.73, 0.34, 0.12",background,jax_trace@jaxglobal-domain,0.652,ends at 0.7s; overlaps bound_domain 0.7
+hadamard_5,cold,"0.73, 0.34, 0.12",background,jax_lower@jaxglobal-domain,0.144,ends at 0.8s; overlaps bound_domain 0.1
+hadamard_5,cold,"0.73, 0.34, 0.12",background,jax_compile@jaxglobal-domain,1.135,ends at 1.7s; overlaps bound_domain 1.1
+hadamard_5,cold,"0.73, 0.34, 0.12",background,K.quadratic,0.000,ends at 7.6s; overlaps 
+hadamard_5,cold,"0.73, 0.34, 0.12",background,jax_trace@jaxglobal-trace,2.428,"ends at 8.3s; overlaps make_local 1.0, root_bound 0.8, nonlinear 0.7"
+hadamard_5,cold,"0.73, 0.34, 0.12",background,jax_lower@jaxglobal-trace,0.689,"ends at 8.6s; overlaps make_local 0.4, root_bound 0.2, nonlinear 0.1"
+hadamard_5,cold,"0.73, 0.34, 0.12",background,trace_lower:bound[b=16],0.962,"ends at 6.3s; overlaps nonlinear 0.8, make_local 0.2"
+hadamard_5,cold,"0.73, 0.34, 0.12",background,trace_lower:dive[b=16],1.170,ends at 7.5s; overlaps make_local 1.2
+hadamard_5,cold,"0.73, 0.34, 0.12",background,jax_trace@jaxglobal-local,1.378,"ends at 12.8s; overlaps root_incumbent 0.7, root_bound 0.6"
+hadamard_5,cold,"0.73, 0.34, 0.12",background,jax_lower@jaxglobal-local,0.242,"ends at 12.9s; overlaps root_incumbent 0.1, root_bound 0.1"
+hadamard_5,cold,"0.73, 0.34, 0.12",background,jax_trace@jaxglobal-screen,0.106,ends at 8.3s; overlaps root_bound 0.1
+hadamard_5,cold,"0.73, 0.34, 0.12",background,jax_lower@jaxglobal-screen,0.035,ends at 8.3s; overlaps 
+hadamard_5,cold,"0.73, 0.34, 0.12",background,jax_compile@jaxglobal-screen,1.711,ends at 9.4s; overlaps root_bound 1.7
+hadamard_5,cold,"0.73, 0.34, 0.12",background,trace_lower:obbt[b=1],1.020,ends at 8.6s; overlaps root_bound 1.0
+hadamard_5,cold,"0.73, 0.34, 0.12",background,jax_compile@jaxglobal-local,6.593,"ends at 15.8s; overlaps root_incumbent 3.8, root_bound 2.8"
+hadamard_5,cold,"0.73, 0.34, 0.12",background,jax_compile@jaxglobal-compile,5.175,"ends at 11.5s; overlaps root_bound 7.8, make_local 1.3, root_incumbent 0.3"
+hadamard_5,cold,"0.73, 0.34, 0.12",background,compile:bound[b=16],3.009,"ends at 9.3s; overlaps root_bound 1.8, make_local 1.2"
+hadamard_5,cold,"0.73, 0.34, 0.12",background,compile:dive[b=16],3.536,"ends at 11.0s; overlaps root_bound 3.5, make_local 0.1"
+hadamard_5,cold,"0.73, 0.34, 0.12",background,compile:obbt[b=1],2.898,"ends at 11.5s; overlaps root_bound 2.5, root_incumbent 0.3"
+hadamard_5,cold,"0.73, 0.34, 0.12",path,use_interpreter,,who=fbbt.interpreted args=[] rows=505 result=True
+hadamard_5,cold,"0.73, 0.34, 0.12",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=505 result=True"
+hadamard_5,cold,"0.73, 0.34, 0.12",info,n,,26
+hadamard_5,cold,"0.73, 0.34, 0.12",info,n_int,,25
+hadamard_5,cold,"0.73, 0.34, 0.12",info,free,,1
+hadamard_5,cold,"0.73, 0.34, 0.12",info,status,,optimal
+hadamard_5,cold,"0.73, 0.34, 0.12",info,nodes,,263
+hadamard_5,cold,"0.73, 0.34, 0.12",info,fun,,-5.0
+hadamard_5,cold,"0.73, 0.34, 0.12",info,lower_bound,,-5.000001000000724
+hadamard_5,cold,"0.73, 0.34, 0.12",info,message,,
+hadamard_5,cold,"0.73, 0.34, 0.12",info,rows,,505
+hadamard_5,cold,"0.73, 0.34, 0.12",info,quadratic,,False
+hadamard_5,cold,"0.73, 0.34, 0.12",info,structure,,True
+hadamard_5,cold,"0.73, 0.34, 0.12",info,load_gate,,gate=ok load1=0.73
+hadamard_5,cold,"0.73, 0.34, 0.12",bucket,kernel wait: trace+lower,0.000,
+hadamard_5,cold,"0.73, 0.34, 0.12",bucket,kernel wait: XLA compile,1.710,
+hadamard_5,cold,"0.73, 0.34, 0.12",bucket,kernel wait: other,0.000,
+hadamard_5,cold,"0.73, 0.34, 0.12",bucket,bound_domain,4.964,
+hadamard_5,cold,"0.73, 0.34, 0.12",bucket,structure/nonlinear/quadratic,0.773,
+hadamard_5,cold,"0.73, 0.34, 0.12",bucket,make_local,1.416,
+hadamard_5,cold,"0.73, 0.34, 0.12",bucket,root bound: kernel run (first LP),1.815,
+hadamard_5,cold,"0.73, 0.34, 0.12",bucket,root local solves + incumbent,7.175,
+hadamard_5,cold,"0.73, 0.34, 0.12",bucket,root dives + enum,0.051,
+hadamard_5,cold,"0.73, 0.34, 0.12",bucket,root OBBT: kernel run,2.260,
+hadamard_5,cold,"0.73, 0.34, 0.12",bucket,probing: run,3.382,
+hadamard_5,cold,"0.73, 0.34, 0.12",bucket,search,14.970,
+hadamard_5,cold,"0.73, 0.34, 0.12",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.023,
+hadamard_5,cold,"0.73, 0.34, 0.12",bucket,root bound: other,0.049,
+hadamard_5,cold,"0.97, 0.62, 0.25",total,minimize_wall,37.548,optimal
+hadamard_5,cold,"0.97, 0.62, 0.25",total,import_jax_jaxglobal,0.528,not in minimize
+hadamard_5,cold,"0.97, 0.62, 0.25",total,read_nl,0.001,not in minimize
+hadamard_5,cold,"0.97, 0.62, 0.25",stage,pre_domain,0.000,
+hadamard_5,cold,"0.97, 0.62, 0.25",stage,bound_domain,4.825,
+hadamard_5,cold,"0.97, 0.62, 0.25",stage,setup,0.000,
+hadamard_5,cold,"0.97, 0.62, 0.25",stage,cut_pool,0.139,
+hadamard_5,cold,"0.97, 0.62, 0.25",stage,kernels,0.001,
+hadamard_5,cold,"0.97, 0.62, 0.25",stage,pseudo_boolean,0.245,
+hadamard_5,cold,"0.97, 0.62, 0.25",stage,start_compile,0.021,
+hadamard_5,cold,"0.97, 0.62, 0.25",stage,start_dive_compile,0.000,
+hadamard_5,cold,"0.97, 0.62, 0.25",stage,nonlinear,0.774,
+hadamard_5,cold,"0.97, 0.62, 0.25",stage,quadratic,0.008,
+hadamard_5,cold,"0.97, 0.62, 0.25",stage,make_local,2.119,
+hadamard_5,cold,"0.97, 0.62, 0.25",stage,root_bound,3.373,
+hadamard_5,cold,"0.97, 0.62, 0.25",stage,root_incumbent,6.307,
+hadamard_5,cold,"0.97, 0.62, 0.25",stage,root_dives,0.042,
+hadamard_5,cold,"0.97, 0.62, 0.25",stage,root_enum,0.000,
+hadamard_5,cold,"0.97, 0.62, 0.25",stage,root_obbt,2.245,
+hadamard_5,cold,"0.97, 0.62, 0.25",stage,root_obbt_incumbent,0.033,
+hadamard_5,cold,"0.97, 0.62, 0.25",stage,probe,3.169,
+hadamard_5,cold,"0.97, 0.62, 0.25",stage,search,14.246,
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_bound_domain,bound_domain,4.825,calls=1
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_bound_domain,jax_compile,1.938,calls=0
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_bound_domain,domain_used_variables,1.087,calls=3
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_bound_domain,jax_trace,0.185,calls=0
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_bound_domain,jax_lower,0.120,calls=0
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_cut_pool,jax_trace,0.065,calls=0
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_cut_pool,jax_compile,0.011,calls=0
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_pseudo_boolean,jax_trace,0.044,calls=0
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_pseudo_boolean,K.quadratic,0.041,calls=1
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_nonlinear,K.nonlinear,0.774,calls=1
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_nonlinear,K.structure,0.774,calls=1
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_nonlinear,jax_trace,0.030,calls=0
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_make_local,make_local,2.119,calls=1
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_make_local,jax_compile,1.296,calls=0
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_make_local,jax_lower,0.012,calls=0
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_root_bound,run:bound,2.628,calls=1 boxes=16
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_root_bound,jax_compile,0.380,calls=0
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_root_bound,wait:bound,0.362,calls=1
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_root_incumbent,local_solve,5.979,calls=8 #1 starts=1;#2 starts=2;#3 starts=6
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_root_incumbent,jax_compile,0.226,calls=0
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_root_incumbent,jax_trace,0.069,calls=0
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_root_incumbent,jax_lower,0.018,calls=0
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_root_dives,jax_compile,0.034,calls=0
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_root_obbt,run:obbt,1.886,calls=1 boxes=1
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_root_obbt,run:bound,0.350,calls=1 boxes=16
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_root_obbt,jax_compile,0.006,calls=0
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_root_obbt_incumbent,local_solve,0.031,calls=2 #9 starts=1;#10 starts=2
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_probe,run:bound,3.167,calls=4 boxes=16;boxes=16;boxes=16
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_search,run:bound,13.900,calls=21 boxes=16;boxes=16;boxes=16
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_search,jax_compile,0.157,calls=0
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_search,local_solve,0.077,calls=6 #11 starts=1;#12 starts=2;#13 starts=1
+hadamard_5,cold,"0.97, 0.62, 0.25",main_in_search,jax_lower,0.011,calls=0
+hadamard_5,cold,"0.97, 0.62, 0.25",main_jax,jax_trace,0.428,union
+hadamard_5,cold,"0.97, 0.62, 0.25",main_jax,jax_lower,0.165,union
+hadamard_5,cold,"0.97, 0.62, 0.25",main_jax,jax_compile,4.049,union
+hadamard_5,cold,"0.97, 0.62, 0.25",background,jax_trace@jaxglobal-domain,0.660,ends at 0.7s; overlaps bound_domain 0.7
+hadamard_5,cold,"0.97, 0.62, 0.25",background,jax_lower@jaxglobal-domain,0.151,ends at 0.8s; overlaps bound_domain 0.2
+hadamard_5,cold,"0.97, 0.62, 0.25",background,jax_compile@jaxglobal-domain,1.095,ends at 1.7s; overlaps bound_domain 1.1
+hadamard_5,cold,"0.97, 0.62, 0.25",background,K.quadratic,0.000,ends at 8.1s; overlaps 
+hadamard_5,cold,"0.97, 0.62, 0.25",background,jax_trace@jaxglobal-trace,2.508,"ends at 9.0s; overlaps make_local 1.0, root_bound 0.8, nonlinear 0.7"
+hadamard_5,cold,"0.97, 0.62, 0.25",background,jax_lower@jaxglobal-trace,0.650,"ends at 9.1s; overlaps make_local 0.4, root_bound 0.2, nonlinear 0.1"
+hadamard_5,cold,"0.97, 0.62, 0.25",background,trace_lower:bound[b=16],1.001,"ends at 6.2s; overlaps nonlinear 0.8, make_local 0.2"
+hadamard_5,cold,"0.97, 0.62, 0.25",background,trace_lower:dive[b=16],1.194,ends at 7.4s; overlaps make_local 1.2
+hadamard_5,cold,"0.97, 0.62, 0.25",background,jax_trace@jaxglobal-local,1.415,"ends at 12.4s; overlaps root_bound 0.7, root_incumbent 0.7"
+hadamard_5,cold,"0.97, 0.62, 0.25",background,jax_lower@jaxglobal-local,0.208,"ends at 12.5s; overlaps root_incumbent 0.1, root_bound 0.1"
+hadamard_5,cold,"0.97, 0.62, 0.25",background,jax_trace@jaxglobal-screen,0.128,ends at 8.5s; overlaps root_bound 0.1
+hadamard_5,cold,"0.97, 0.62, 0.25",background,jax_lower@jaxglobal-screen,0.070,ends at 8.5s; overlaps root_bound 0.1
+hadamard_5,cold,"0.97, 0.62, 0.25",background,jax_compile@jaxglobal-local,5.779,"ends at 15.6s; overlaps root_incumbent 3.2, root_bound 2.5"
+hadamard_5,cold,"0.97, 0.62, 0.25",background,jax_compile@jaxglobal-screen,1.284,ends at 9.6s; overlaps root_bound 1.3
+hadamard_5,cold,"0.97, 0.62, 0.25",background,jax_compile@jaxglobal-compile,5.184,"ends at 11.4s; overlaps root_bound 4.9, make_local 2.6"
+hadamard_5,cold,"0.97, 0.62, 0.25",background,compile:bound[b=16],2.651,"ends at 8.9s; overlaps make_local 1.9, root_bound 0.7"
+hadamard_5,cold,"0.97, 0.62, 0.25",background,trace_lower:obbt[b=1],0.991,ends at 9.1s; overlaps root_bound 1.0
+hadamard_5,cold,"0.97, 0.62, 0.25",background,compile:dive[b=16],2.631,"ends at 10.0s; overlaps root_bound 1.9, make_local 0.7"
+hadamard_5,cold,"0.97, 0.62, 0.25",background,compile:obbt[b=1],2.273,ends at 11.4s; overlaps root_bound 2.3
+hadamard_5,cold,"0.97, 0.62, 0.25",path,use_interpreter,,who=fbbt.interpreted args=[] rows=505 result=True
+hadamard_5,cold,"0.97, 0.62, 0.25",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=505 result=True"
+hadamard_5,cold,"0.97, 0.62, 0.25",info,n,,26
+hadamard_5,cold,"0.97, 0.62, 0.25",info,n_int,,25
+hadamard_5,cold,"0.97, 0.62, 0.25",info,free,,1
+hadamard_5,cold,"0.97, 0.62, 0.25",info,status,,optimal
+hadamard_5,cold,"0.97, 0.62, 0.25",info,nodes,,263
+hadamard_5,cold,"0.97, 0.62, 0.25",info,fun,,-5.0
+hadamard_5,cold,"0.97, 0.62, 0.25",info,lower_bound,,-5.000001000000724
+hadamard_5,cold,"0.97, 0.62, 0.25",info,message,,
+hadamard_5,cold,"0.97, 0.62, 0.25",info,rows,,505
+hadamard_5,cold,"0.97, 0.62, 0.25",info,quadratic,,False
+hadamard_5,cold,"0.97, 0.62, 0.25",info,structure,,True
+hadamard_5,cold,"0.97, 0.62, 0.25",info,load_gate,,gate=ok load1=0.97
+hadamard_5,cold,"0.97, 0.62, 0.25",bucket,kernel wait: trace+lower,0.000,
+hadamard_5,cold,"0.97, 0.62, 0.25",bucket,kernel wait: XLA compile,0.360,
+hadamard_5,cold,"0.97, 0.62, 0.25",bucket,kernel wait: other,0.000,
+hadamard_5,cold,"0.97, 0.62, 0.25",bucket,bound_domain,4.825,
+hadamard_5,cold,"0.97, 0.62, 0.25",bucket,structure/nonlinear/quadratic,0.782,
+hadamard_5,cold,"0.97, 0.62, 0.25",bucket,make_local,2.119,
+hadamard_5,cold,"0.97, 0.62, 0.25",bucket,root bound: kernel run (first LP),2.628,
+hadamard_5,cold,"0.97, 0.62, 0.25",bucket,root local solves + incumbent,6.340,
+hadamard_5,cold,"0.97, 0.62, 0.25",bucket,root dives + enum,0.042,
+hadamard_5,cold,"0.97, 0.62, 0.25",bucket,root OBBT: kernel run,2.245,
+hadamard_5,cold,"0.97, 0.62, 0.25",bucket,probing: run,3.169,
+hadamard_5,cold,"0.97, 0.62, 0.25",bucket,search,14.246,
+hadamard_5,cold,"0.97, 0.62, 0.25",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.022,
+hadamard_5,cold,"0.97, 0.62, 0.25",bucket,root bound: other,0.383,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",total,minimize_wall,37.520,optimal
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",total,import_jax_jaxglobal,0.508,not in minimize
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",total,read_nl,0.001,not in minimize
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",stage,pre_domain,0.000,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",stage,bound_domain,4.612,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",stage,setup,0.000,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",stage,cut_pool,0.108,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",stage,kernels,0.001,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",stage,pseudo_boolean,0.254,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",stage,start_compile,0.022,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",stage,start_dive_compile,0.000,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",stage,nonlinear,0.824,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",stage,quadratic,0.014,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",stage,make_local,1.449,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",stage,root_bound,3.959,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",stage,root_incumbent,6.797,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",stage,root_dives,0.048,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",stage,root_enum,0.000,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",stage,root_obbt,2.142,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",stage,root_obbt_incumbent,0.026,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",stage,probe,2.913,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",stage,search,14.353,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_bound_domain,bound_domain,4.612,calls=1
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_bound_domain,jax_compile,1.901,calls=0
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_bound_domain,domain_used_variables,0.967,calls=3
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_bound_domain,jax_trace,0.169,calls=0
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_bound_domain,jax_lower,0.109,calls=0
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_cut_pool,jax_trace,0.050,calls=0
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_cut_pool,jax_compile,0.007,calls=0
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_pseudo_boolean,jax_trace,0.050,calls=0
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_pseudo_boolean,K.quadratic,0.044,calls=1
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_nonlinear,K.nonlinear,0.824,calls=1
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_nonlinear,K.structure,0.824,calls=1
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_nonlinear,jax_trace,0.034,calls=0
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_make_local,make_local,1.446,calls=1
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_make_local,jax_compile,0.661,calls=0
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_make_local,jax_lower,0.015,calls=0
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_root_bound,run:bound,2.299,calls=1 boxes=16
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_root_bound,jax_compile,0.914,calls=0
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_root_bound,wait:bound,0.736,calls=1
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_root_incumbent,local_solve,6.475,calls=8 #1 starts=1;#2 starts=2;#3 starts=6
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_root_incumbent,jax_compile,0.221,calls=0
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_root_incumbent,jax_trace,0.068,calls=0
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_root_incumbent,jax_lower,0.019,calls=0
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_root_dives,jax_compile,0.039,calls=0
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_root_obbt,run:obbt,1.812,calls=1 boxes=1
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_root_obbt,run:bound,0.321,calls=1 boxes=16
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_root_obbt,jax_compile,0.006,calls=0
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_root_obbt_incumbent,local_solve,0.024,calls=2 #9 starts=1;#10 starts=2
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_probe,run:bound,2.911,calls=4 boxes=16;boxes=16;boxes=16
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_search,run:bound,14.030,calls=21 boxes=16;boxes=16;boxes=16
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_search,jax_compile,0.150,calls=0
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_search,local_solve,0.076,calls=6 #11 starts=1;#12 starts=2;#13 starts=1
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_in_search,jax_lower,0.009,calls=0
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_jax,jax_trace,0.401,union
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_jax,jax_lower,0.156,union
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",main_jax,jax_compile,3.900,union
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",background,jax_trace@jaxglobal-domain,0.618,ends at 0.6s; overlaps bound_domain 0.6
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",background,jax_lower@jaxglobal-domain,0.152,ends at 0.8s; overlaps bound_domain 0.2
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",background,jax_compile@jaxglobal-domain,1.097,ends at 1.7s; overlaps bound_domain 1.1
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",background,K.quadratic,0.000,ends at 7.3s; overlaps 
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",background,jax_trace@jaxglobal-trace,2.317,"ends at 7.9s; overlaps make_local 0.9, nonlinear 0.7, root_bound 0.7"
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",background,jax_lower@jaxglobal-trace,0.615,"ends at 8.0s; overlaps make_local 0.4, root_bound 0.1, nonlinear 0.1"
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",background,trace_lower:bound[b=16],1.057,"ends at 6.0s; overlaps nonlinear 0.8, make_local 0.2"
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",background,trace_lower:dive[b=16],1.165,ends at 7.2s; overlaps make_local 1.2
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",background,jax_trace@jaxglobal-local,1.207,"ends at 12.6s; overlaps root_incumbent 0.8, root_bound 0.4"
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",background,jax_lower@jaxglobal-local,0.216,"ends at 12.8s; overlaps root_incumbent 0.1, root_bound 0.1"
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",background,jax_trace@jaxglobal-screen,0.125,ends at 8.9s; overlaps root_bound 0.1
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",background,jax_lower@jaxglobal-screen,0.053,ends at 8.9s; overlaps root_bound 0.1
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",background,trace_lower:obbt[b=1],0.746,ends at 8.0s; overlaps root_bound 0.7
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",background,jax_compile@jaxglobal-local,7.153,"ends at 15.9s; overlaps root_incumbent 3.8, root_bound 3.4"
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",background,jax_compile@jaxglobal-screen,3.293,ends at 10.8s; overlaps root_bound 3.3
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",background,jax_compile@jaxglobal-compile,4.986,"ends at 11.0s; overlaps root_bound 8.0, make_local 1.3"
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",background,compile:bound[b=16],2.909,"ends at 8.9s; overlaps root_bound 1.7, make_local 1.2"
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",background,compile:dive[b=16],3.411,"ends at 10.6s; overlaps root_bound 3.3, make_local 0.1"
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",background,compile:obbt[b=1],2.989,ends at 11.0s; overlaps root_bound 3.0
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",path,use_interpreter,,who=fbbt.interpreted args=[] rows=505 result=True
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=505 result=True"
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",info,n,,26
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",info,n_int,,25
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",info,free,,1
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",info,status,,optimal
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",info,nodes,,263
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",info,fun,,-5.0
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",info,lower_bound,,-5.000001000000724
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",info,message,,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",info,rows,,505
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",info,quadratic,,False
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",info,structure,,True
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",info,load_gate,,gate=ok load1=1.12
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",bucket,kernel wait: trace+lower,0.000,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",bucket,kernel wait: XLA compile,0.736,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",bucket,kernel wait: other,0.000,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",bucket,bound_domain,4.612,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",bucket,structure/nonlinear/quadratic,0.837,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",bucket,make_local,1.449,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",bucket,root bound: kernel run (first LP),2.299,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",bucket,root local solves + incumbent,6.823,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",bucket,root dives + enum,0.048,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",bucket,root OBBT: kernel run,2.142,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",bucket,probing: run,2.913,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",bucket,search,14.352,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.023,
+hadamard_5,cold+opsrule,"1.12, 0.86, 0.37",bucket,root bound: other,0.924,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",total,minimize_wall,39.135,optimal
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",total,import_jax_jaxglobal,0.520,not in minimize
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",total,read_nl,0.001,not in minimize
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",stage,pre_domain,0.000,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",stage,bound_domain,4.738,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",stage,setup,0.000,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",stage,cut_pool,0.119,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",stage,kernels,0.001,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",stage,pseudo_boolean,0.269,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",stage,start_compile,0.022,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",stage,start_dive_compile,0.000,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",stage,nonlinear,0.869,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",stage,quadratic,0.010,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",stage,make_local,2.519,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",stage,root_bound,3.513,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",stage,root_incumbent,6.658,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",stage,root_dives,0.049,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",stage,root_enum,0.000,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",stage,root_obbt,2.247,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",stage,root_obbt_incumbent,0.027,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",stage,probe,3.142,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",stage,search,14.953,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_bound_domain,bound_domain,4.738,calls=1
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_bound_domain,jax_compile,1.965,calls=0
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_bound_domain,domain_used_variables,0.937,calls=3
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_bound_domain,jax_trace,0.166,calls=0
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_bound_domain,jax_lower,0.119,calls=0
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_cut_pool,jax_trace,0.053,calls=0
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_cut_pool,jax_compile,0.008,calls=0
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_pseudo_boolean,jax_trace,0.056,calls=0
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_pseudo_boolean,K.quadratic,0.046,calls=1
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_nonlinear,K.nonlinear,0.869,calls=1
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_nonlinear,K.structure,0.869,calls=1
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_nonlinear,jax_trace,0.026,calls=0
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_make_local,make_local,2.516,calls=1
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_make_local,jax_compile,1.503,calls=0
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_make_local,jax_lower,0.011,calls=0
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_root_bound,run:bound,2.977,calls=1 boxes=16
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_root_bound,wait:bound,0.293,calls=1
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_root_bound,jax_compile,0.148,calls=0
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_root_incumbent,local_solve,6.323,calls=8 #1 starts=1;#2 starts=2;#3 starts=6
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_root_incumbent,jax_compile,0.240,calls=0
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_root_incumbent,jax_trace,0.065,calls=0
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_root_incumbent,jax_lower,0.017,calls=0
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_root_dives,jax_compile,0.041,calls=0
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_root_obbt,run:obbt,1.901,calls=1 boxes=1
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_root_obbt,run:bound,0.335,calls=1 boxes=16
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_root_obbt,jax_compile,0.007,calls=0
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_root_obbt_incumbent,local_solve,0.025,calls=2 #9 starts=1;#10 starts=2
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_probe,run:bound,3.140,calls=4 boxes=16;boxes=16;boxes=16
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_search,run:bound,14.638,calls=21 boxes=16;boxes=16;boxes=16
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_search,jax_compile,0.138,calls=0
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_search,local_solve,0.074,calls=6 #11 starts=1;#12 starts=2;#13 starts=1
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_in_search,jax_lower,0.009,calls=0
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_jax,jax_trace,0.409,union
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_jax,jax_lower,0.160,union
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",main_jax,jax_compile,4.050,union
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",background,jax_trace@jaxglobal-domain,0.646,ends at 0.6s; overlaps bound_domain 0.6
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",background,jax_lower@jaxglobal-domain,0.155,ends at 0.8s; overlaps bound_domain 0.2
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",background,jax_compile@jaxglobal-domain,1.063,ends at 1.7s; overlaps bound_domain 1.1
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",background,K.quadratic,0.000,ends at 8.6s; overlaps 
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",background,jax_trace@jaxglobal-trace,2.968,"ends at 9.8s; overlaps root_bound 1.2, make_local 1.0, nonlinear 0.7"
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",background,jax_lower@jaxglobal-trace,0.733,"ends at 10.0s; overlaps make_local 0.4, root_bound 0.2, nonlinear 0.1"
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",background,trace_lower:bound[b=16],1.108,"ends at 6.2s; overlaps nonlinear 0.9, make_local 0.2"
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",background,trace_lower:dive[b=16],1.189,ends at 7.4s; overlaps make_local 1.2
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",background,jax_trace@jaxglobal-local,1.415,"ends at 13.1s; overlaps root_incumbent 0.8, root_bound 0.6"
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",background,jax_lower@jaxglobal-local,0.272,"ends at 13.3s; overlaps root_incumbent 0.1, root_bound 0.1"
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",background,jax_trace@jaxglobal-screen,0.230,ends at 8.9s; overlaps root_bound 0.2
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",background,jax_lower@jaxglobal-screen,0.068,ends at 9.0s; overlaps root_bound 0.1
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",background,jax_compile@jaxglobal-local,6.093,"ends at 16.4s; overlaps root_incumbent 3.3, root_bound 2.7"
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",background,jax_compile@jaxglobal-screen,0.940,ends at 9.8s; overlaps root_bound 0.9
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",background,jax_compile@jaxglobal-compile,5.955,"ends at 12.2s; overlaps root_bound 4.1, make_local 3.4, root_incumbent 0.1"
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",background,compile:bound[b=16],2.833,"ends at 9.1s; overlaps make_local 2.3, root_bound 0.5"
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",background,trace_lower:obbt[b=1],1.436,ends at 10.0s; overlaps root_bound 1.4
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",background,compile:dive[b=16],2.603,"ends at 10.0s; overlaps root_bound 1.5, make_local 1.1"
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",background,compile:obbt[b=1],2.183,"ends at 12.2s; overlaps root_bound 2.1, root_incumbent 0.1"
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",path,use_interpreter,,who=fbbt.interpreted args=[] rows=505 result=True
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=505 result=True"
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",info,n,,26
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",info,n_int,,25
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",info,free,,1
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",info,status,,optimal
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",info,nodes,,263
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",info,fun,,-5.0
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",info,lower_bound,,-5.000001000000724
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",info,message,,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",info,rows,,505
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",info,quadratic,,False
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",info,structure,,True
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",info,load_gate,,gate=ok load1=1.02
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",bucket,kernel wait: trace+lower,0.000,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",bucket,kernel wait: XLA compile,0.290,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",bucket,kernel wait: other,0.000,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",bucket,bound_domain,4.738,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",bucket,structure/nonlinear/quadratic,0.879,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",bucket,make_local,2.519,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",bucket,root bound: kernel run (first LP),2.977,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",bucket,root local solves + incumbent,6.685,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",bucket,root dives + enum,0.049,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",bucket,root OBBT: kernel run,2.247,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",bucket,probing: run,3.142,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",bucket,search,14.953,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.023,
+hadamard_5,cold+opsrule,"1.02, 0.99, 0.46",bucket,root bound: other,0.242,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",total,minimize_wall,37.638,optimal
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",total,import_jax_jaxglobal,0.448,not in minimize
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",total,read_nl,0.001,not in minimize
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",stage,pre_domain,0.000,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",stage,bound_domain,4.680,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",stage,setup,0.000,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",stage,cut_pool,0.105,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",stage,kernels,0.001,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",stage,pseudo_boolean,0.254,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",stage,start_compile,0.024,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",stage,start_dive_compile,0.000,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",stage,nonlinear,0.800,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",stage,quadratic,0.011,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",stage,make_local,1.523,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",stage,root_bound,3.927,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",stage,root_incumbent,6.919,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",stage,root_dives,0.041,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",stage,root_enum,0.000,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",stage,root_obbt,2.071,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",stage,root_obbt_incumbent,0.028,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",stage,probe,2.979,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",stage,search,14.274,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_bound_domain,bound_domain,4.680,calls=1
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_bound_domain,jax_compile,1.924,calls=0
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_bound_domain,domain_used_variables,1.032,calls=3
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_bound_domain,jax_trace,0.191,calls=0
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_bound_domain,jax_lower,0.118,calls=0
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_cut_pool,jax_trace,0.048,calls=0
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_cut_pool,jax_compile,0.006,calls=0
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_pseudo_boolean,jax_trace,0.047,calls=0
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_pseudo_boolean,K.quadratic,0.044,calls=1
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_nonlinear,K.nonlinear,0.800,calls=1
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_nonlinear,K.structure,0.800,calls=1
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_nonlinear,jax_trace,0.028,calls=0
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_make_local,make_local,1.515,calls=1
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_make_local,jax_compile,0.665,calls=0
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_make_local,jax_lower,0.014,calls=0
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_root_bound,run:bound,2.010,calls=1 boxes=16
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_root_bound,jax_compile,1.030,calls=0
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_root_bound,wait:bound,0.837,calls=1
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_root_incumbent,local_solve,6.552,calls=8 #1 starts=1;#2 starts=2;#3 starts=6
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_root_incumbent,jax_compile,0.246,calls=0
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_root_incumbent,jax_trace,0.084,calls=0
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_root_incumbent,jax_lower,0.022,calls=0
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_root_dives,jax_compile,0.034,calls=0
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_root_obbt,run:obbt,1.739,calls=1 boxes=1
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_root_obbt,run:bound,0.324,calls=1 boxes=16
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_root_obbt,jax_compile,0.006,calls=0
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_root_obbt_incumbent,local_solve,0.026,calls=2 #9 starts=1;#10 starts=2
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_probe,run:bound,2.977,calls=4 boxes=16;boxes=16;boxes=16
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_search,run:bound,13.953,calls=21 boxes=16;boxes=16;boxes=16
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_search,jax_compile,0.143,calls=0
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_search,local_solve,0.081,calls=6 #11 starts=1;#12 starts=2;#13 starts=1
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_in_search,jax_lower,0.010,calls=0
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_jax,jax_trace,0.433,union
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_jax,jax_lower,0.167,union
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",main_jax,jax_compile,4.053,union
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",background,jax_trace@jaxglobal-domain,0.629,ends at 0.6s; overlaps bound_domain 0.6
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",background,jax_lower@jaxglobal-domain,0.147,ends at 0.8s; overlaps bound_domain 0.1
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",background,jax_compile@jaxglobal-domain,1.017,ends at 1.6s; overlaps bound_domain 1.0
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",background,K.quadratic,0.000,ends at 7.4s; overlaps 
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",background,jax_trace@jaxglobal-trace,2.476,"ends at 8.2s; overlaps make_local 0.9, root_bound 0.8, nonlinear 0.7"
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",background,jax_lower@jaxglobal-trace,0.557,"ends at 8.3s; overlaps make_local 0.3, root_bound 0.1, nonlinear 0.1"
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",background,trace_lower:bound[b=16],1.025,"ends at 6.1s; overlaps nonlinear 0.8, make_local 0.2"
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",background,trace_lower:dive[b=16],1.106,ends at 7.2s; overlaps make_local 1.1
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",background,jax_trace@jaxglobal-local,1.113,"ends at 12.9s; overlaps root_incumbent 0.8, root_bound 0.3"
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",background,jax_lower@jaxglobal-local,0.201,ends at 13.0s; overlaps root_incumbent 0.2
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",background,jax_trace@jaxglobal-screen,0.132,ends at 9.0s; overlaps root_bound 0.1
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",background,jax_lower@jaxglobal-screen,0.050,ends at 9.0s; overlaps 
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",background,trace_lower:obbt[b=1],0.929,ends at 8.3s; overlaps root_bound 0.9
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",background,jax_compile@jaxglobal-local,7.188,"ends at 15.9s; overlaps root_incumbent 3.6, root_bound 3.5"
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",background,jax_compile@jaxglobal-screen,3.473,ends at 11.1s; overlaps root_bound 3.5
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",background,jax_compile@jaxglobal-compile,5.361,"ends at 11.4s; overlaps root_bound 8.4, make_local 1.6, root_incumbent 0.1"
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",background,compile:bound[b=16],3.202,"ends at 9.3s; overlaps root_bound 1.9, make_local 1.3"
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",background,compile:dive[b=16],3.740,"ends at 10.9s; overlaps root_bound 3.5, make_local 0.2"
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",background,compile:obbt[b=1],3.107,"ends at 11.4s; overlaps root_bound 3.0, root_incumbent 0.1"
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",path,use_interpreter,,who=fbbt.interpreted args=[] rows=505 result=True
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=505 result=True"
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",info,n,,26
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",info,n_int,,25
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",info,free,,1
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",info,status,,optimal
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",info,nodes,,263
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",info,fun,,-5.0
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",info,lower_bound,,-5.000001000000724
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",info,message,,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",info,rows,,505
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",info,quadratic,,False
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",info,structure,,True
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",info,load_gate,,gate=ok load1=1.00
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",bucket,kernel wait: trace+lower,0.000,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",bucket,kernel wait: XLA compile,0.837,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",bucket,kernel wait: other,0.000,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",bucket,bound_domain,4.680,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",bucket,structure/nonlinear/quadratic,0.812,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",bucket,make_local,1.523,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",bucket,root bound: kernel run (first LP),2.010,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",bucket,root local solves + incumbent,6.947,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",bucket,root dives + enum,0.041,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",bucket,root OBBT: kernel run,2.071,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",bucket,probing: run,2.979,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",bucket,search,14.273,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.025,
+hadamard_5,cold+opsrule,"1.00, 1.09, 0.55",bucket,root bound: other,1.080,
+batch,cold,"1.04, 1.19, 0.64",total,minimize_wall,26.760,optimal
+batch,cold,"1.04, 1.19, 0.64",total,import_jax_jaxglobal,0.519,not in minimize
+batch,cold,"1.04, 1.19, 0.64",total,read_nl,0.001,not in minimize
+batch,cold,"1.04, 1.19, 0.64",stage,pre_domain,0.000,
+batch,cold,"1.04, 1.19, 0.64",stage,bound_domain,0.000,
+batch,cold,"1.04, 1.19, 0.64",stage,setup,0.000,
+batch,cold,"1.04, 1.19, 0.64",stage,cut_pool,0.580,
+batch,cold,"1.04, 1.19, 0.64",stage,kernels,0.131,
+batch,cold,"1.04, 1.19, 0.64",stage,pseudo_boolean,0.000,
+batch,cold,"1.04, 1.19, 0.64",stage,start_compile,0.007,
+batch,cold,"1.04, 1.19, 0.64",stage,start_dive_compile,0.000,
+batch,cold,"1.04, 1.19, 0.64",stage,nonlinear,0.208,
+batch,cold,"1.04, 1.19, 0.64",stage,quadratic,0.000,
+batch,cold,"1.04, 1.19, 0.64",stage,make_local,1.356,
+batch,cold,"1.04, 1.19, 0.64",stage,root_bound,11.966,
+batch,cold,"1.04, 1.19, 0.64",stage,root_incumbent,4.295,
+batch,cold,"1.04, 1.19, 0.64",stage,root_dives,4.356,
+batch,cold,"1.04, 1.19, 0.64",stage,root_enum,0.000,
+batch,cold,"1.04, 1.19, 0.64",stage,root_obbt,0.802,
+batch,cold,"1.04, 1.19, 0.64",stage,root_obbt_incumbent,0.536,
+batch,cold,"1.04, 1.19, 0.64",stage,probe,0.317,
+batch,cold,"1.04, 1.19, 0.64",stage,search,2.204,
+batch,cold,"1.04, 1.19, 0.64",main_in_cut_pool,jax_compile,0.355,calls=0
+batch,cold,"1.04, 1.19, 0.64",main_in_cut_pool,jax_trace,0.094,calls=0
+batch,cold,"1.04, 1.19, 0.64",main_in_cut_pool,jax_lower,0.042,calls=0
+batch,cold,"1.04, 1.19, 0.64",main_in_kernels,K.quadratic,0.074,calls=1
+batch,cold,"1.04, 1.19, 0.64",main_in_kernels,jax_trace,0.054,calls=0
+batch,cold,"1.04, 1.19, 0.64",main_in_kernels,jax_compile,0.008,calls=0
+batch,cold,"1.04, 1.19, 0.64",main_in_nonlinear,K.nonlinear,0.208,calls=1
+batch,cold,"1.04, 1.19, 0.64",main_in_nonlinear,K.structure,0.208,calls=1
+batch,cold,"1.04, 1.19, 0.64",main_in_nonlinear,jax_trace,0.048,calls=0
+batch,cold,"1.04, 1.19, 0.64",main_in_make_local,make_local,1.349,calls=1
+batch,cold,"1.04, 1.19, 0.64",main_in_make_local,jax_compile,0.429,calls=0
+batch,cold,"1.04, 1.19, 0.64",main_in_make_local,jax_lower,0.025,calls=0
+batch,cold,"1.04, 1.19, 0.64",main_in_root_bound,wait:bound_pool,11.069,calls=1
+batch,cold,"1.04, 1.19, 0.64",main_in_root_bound,run:bound_pool,0.455,calls=1 boxes=16
+batch,cold,"1.04, 1.19, 0.64",main_in_root_bound,jax_compile,0.027,calls=0
+batch,cold,"1.04, 1.19, 0.64",main_in_root_incumbent,jax_compile,2.799,calls=0
+batch,cold,"1.04, 1.19, 0.64",main_in_root_incumbent,local_solve,1.135,calls=3 #1 starts=1;#2 starts=5;#3 starts=1
+batch,cold,"1.04, 1.19, 0.64",main_in_root_incumbent,jax_lower,0.052,calls=0
+batch,cold,"1.04, 1.19, 0.64",main_in_root_incumbent,jax_trace,0.030,calls=0
+batch,cold,"1.04, 1.19, 0.64",main_in_root_dives,local_solve,2.931,calls=4 #4 starts=15;#5 starts=8;#6 starts=10
+batch,cold,"1.04, 1.19, 0.64",main_in_root_dives,jax_compile,0.933,calls=0
+batch,cold,"1.04, 1.19, 0.64",main_in_root_dives,run:dive,0.312,calls=5 boxes=16;boxes=16;boxes=16
+batch,cold,"1.04, 1.19, 0.64",main_in_root_dives,jax_trace,0.108,calls=0
+batch,cold,"1.04, 1.19, 0.64",main_in_root_dives,jax_lower,0.048,calls=0
+batch,cold,"1.04, 1.19, 0.64",main_in_root_obbt,run:obbt,0.399,calls=1 boxes=1
+batch,cold,"1.04, 1.19, 0.64",main_in_root_obbt,run:bound_pool,0.373,calls=1 boxes=16
+batch,cold,"1.04, 1.19, 0.64",main_in_root_obbt,jax_compile,0.008,calls=0
+batch,cold,"1.04, 1.19, 0.64",main_in_root_obbt_incumbent,local_solve,0.530,calls=3 #8 starts=1;#9 starts=5;#10 starts=1
+batch,cold,"1.04, 1.19, 0.64",main_in_probe,run:bound_pool,0.305,calls=1 boxes=16
+batch,cold,"1.04, 1.19, 0.64",main_in_search,local_solve,1.386,calls=6 #11 starts=2;#12 starts=1;#13 starts=5
+batch,cold,"1.04, 1.19, 0.64",main_in_search,jax_compile,0.384,calls=0
+batch,cold,"1.04, 1.19, 0.64",main_in_search,run:bound_pool,0.308,calls=1 boxes=16
+batch,cold,"1.04, 1.19, 0.64",main_in_search,jax_lower,0.025,calls=0
+batch,cold,"1.04, 1.19, 0.64",main_in_search,jax_trace,0.006,calls=0
+batch,cold,"1.04, 1.19, 0.64",main_jax,jax_trace,0.369,union
+batch,cold,"1.04, 1.19, 0.64",main_jax,jax_lower,0.195,union
+batch,cold,"1.04, 1.19, 0.64",main_jax,jax_compile,4.943,union
+batch,cold,"1.04, 1.19, 0.64",background,K.quadratic,0.000,ends at 8.1s; overlaps 
+batch,cold,"1.04, 1.19, 0.64",background,jax_trace@jaxglobal-trace,12.702,"ends at 14.5s; overlaps root_bound 10.9, make_local 1.4, nonlinear 0.2, root_incumbent 0.2"
+batch,cold,"1.04, 1.19, 0.64",background,jax_lower@jaxglobal-trace,1.308,"ends at 14.8s; overlaps root_bound 1.0, root_incumbent 0.3"
+batch,cold,"1.04, 1.19, 0.64",background,jax_compile@jaxglobal-trace,5.374,"ends at 12.9s; overlaps root_bound 5.1, make_local 0.3"
+batch,cold,"1.04, 1.19, 0.64",background,jax_trace@jaxglobal-local,0.408,ends at 3.6s; overlaps root_bound 0.4
+batch,cold,"1.04, 1.19, 0.64",background,jax_lower@jaxglobal-local,0.080,ends at 3.6s; overlaps root_bound 0.1
+batch,cold,"1.04, 1.19, 0.64",background,jax_trace@jaxglobal-screen,0.078,ends at 2.4s; overlaps root_bound 0.1
+batch,cold,"1.04, 1.19, 0.64",background,jax_lower@jaxglobal-screen,0.045,ends at 2.5s; overlaps 
+batch,cold,"1.04, 1.19, 0.64",background,jax_compile@jaxglobal-local,0.968,ends at 3.8s; overlaps root_bound 1.0
+batch,cold,"1.04, 1.19, 0.64",background,jax_compile@jaxglobal-screen,0.652,ends at 3.1s; overlaps root_bound 0.7
+batch,cold,"1.04, 1.19, 0.64",background,trace_lower:bound_pool[b=16],5.249,"ends at 6.0s; overlaps root_bound 3.7, make_local 1.4, nonlinear 0.2"
+batch,cold,"1.04, 1.19, 0.64",background,trace_lower:dive[b=16],1.423,ends at 8.1s; overlaps root_bound 1.4
+batch,cold,"1.04, 1.19, 0.64",background,jax_compile@jaxglobal-compile,11.021,"ends at 18.4s; overlaps root_bound 12.2, root_incumbent 3.6"
+batch,cold,"1.04, 1.19, 0.64",background,compile:dive[b=16],3.031,ends at 11.2s; overlaps root_bound 3.0
+batch,cold,"1.04, 1.19, 0.64",background,compile:bound_pool[b=16],7.432,ends at 13.4s; overlaps root_bound 7.4
+batch,cold,"1.04, 1.19, 0.64",background,trace_lower:obbt[b=1],6.676,"ends at 14.8s; overlaps root_bound 6.1, root_incumbent 0.6"
+batch,cold,"1.04, 1.19, 0.64",background,compile:obbt[b=1],3.612,ends at 18.4s; overlaps root_incumbent 3.6
+batch,cold,"1.04, 1.19, 0.64",path,use_interpreter,,who=fbbt.interpreted args=[] rows=388 result=True
+batch,cold,"1.04, 1.19, 0.64",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=388 result=True"
+batch,cold,"1.04, 1.19, 0.64",path,use_interpreter,,"who=lp._nonlinear_vars args=[['min_rows', 0]] rows=388 result=True"
+batch,cold,"1.04, 1.19, 0.64",path,alphabb_jacfwd_fallback,,eqns=453
+batch,cold,"1.04, 1.19, 0.64",path,use_interpreter,,"who=use_relax_interpreter>use_relax_interpreter args=[['min_rows', 0]] rows=96 result=True"
+batch,cold,"1.04, 1.19, 0.64",path,use_relax_interpreter,,rule=rows n=46 rows=96 ops=437664 result=False
+batch,cold,"1.04, 1.19, 0.64",info,n,,46
+batch,cold,"1.04, 1.19, 0.64",info,n_int,,24
+batch,cold,"1.04, 1.19, 0.64",info,free,,0
+batch,cold,"1.04, 1.19, 0.64",info,status,,optimal
+batch,cold,"1.04, 1.19, 0.64",info,nodes,,3
+batch,cold,"1.04, 1.19, 0.64",info,fun,,285506.5082441608
+batch,cold,"1.04, 1.19, 0.64",info,lower_bound,,285505.9003899772
+batch,cold,"1.04, 1.19, 0.64",info,message,,incumbent repaired from violation 1e-06 to 5.4e-16 (f 285505.9015 -> 285506.5082)
+batch,cold,"1.04, 1.19, 0.64",info,rows,,388
+batch,cold,"1.04, 1.19, 0.64",info,quadratic,,False
+batch,cold,"1.04, 1.19, 0.64",info,structure,,True
+batch,cold,"1.04, 1.19, 0.64",info,load_gate,,gate=ok load1=1.04
+batch,cold,"1.04, 1.19, 0.64",bucket,kernel wait: trace+lower,3.640,
+batch,cold,"1.04, 1.19, 0.64",bucket,kernel wait: XLA compile,7.429,
+batch,cold,"1.04, 1.19, 0.64",bucket,kernel wait: other,0.000,
+batch,cold,"1.04, 1.19, 0.64",bucket,bound_domain,0.000,
+batch,cold,"1.04, 1.19, 0.64",bucket,structure/nonlinear/quadratic,0.208,
+batch,cold,"1.04, 1.19, 0.64",bucket,make_local,1.356,
+batch,cold,"1.04, 1.19, 0.64",bucket,root bound: kernel run (first LP),0.000,
+batch,cold,"1.04, 1.19, 0.64",bucket,root local solves + incumbent,4.831,
+batch,cold,"1.04, 1.19, 0.64",bucket,root dives + enum,4.356,
+batch,cold,"1.04, 1.19, 0.64",bucket,root OBBT: kernel run,0.802,
+batch,cold,"1.04, 1.19, 0.64",bucket,probing: run,0.317,
+batch,cold,"1.04, 1.19, 0.64",bucket,search,2.204,
+batch,cold,"1.04, 1.19, 0.64",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.138,
+batch,cold,"1.04, 1.19, 0.64",bucket,root bound: other,11.966,
+batch,cold,"0.90, 1.18, 0.68",total,minimize_wall,28.096,optimal
+batch,cold,"0.90, 1.18, 0.68",total,import_jax_jaxglobal,0.486,not in minimize
+batch,cold,"0.90, 1.18, 0.68",total,read_nl,0.001,not in minimize
+batch,cold,"0.90, 1.18, 0.68",stage,pre_domain,0.000,
+batch,cold,"0.90, 1.18, 0.68",stage,bound_domain,0.000,
+batch,cold,"0.90, 1.18, 0.68",stage,setup,0.000,
+batch,cold,"0.90, 1.18, 0.68",stage,cut_pool,0.613,
+batch,cold,"0.90, 1.18, 0.68",stage,kernels,0.112,
+batch,cold,"0.90, 1.18, 0.68",stage,pseudo_boolean,0.000,
+batch,cold,"0.90, 1.18, 0.68",stage,start_compile,0.008,
+batch,cold,"0.90, 1.18, 0.68",stage,start_dive_compile,0.000,
+batch,cold,"0.90, 1.18, 0.68",stage,nonlinear,0.210,
+batch,cold,"0.90, 1.18, 0.68",stage,quadratic,0.000,
+batch,cold,"0.90, 1.18, 0.68",stage,make_local,1.352,
+batch,cold,"0.90, 1.18, 0.68",stage,root_bound,12.124,
+batch,cold,"0.90, 1.18, 0.68",stage,root_incumbent,4.686,
+batch,cold,"0.90, 1.18, 0.68",stage,root_dives,4.713,
+batch,cold,"0.90, 1.18, 0.68",stage,root_enum,0.000,
+batch,cold,"0.90, 1.18, 0.68",stage,root_obbt,0.871,
+batch,cold,"0.90, 1.18, 0.68",stage,root_obbt_incumbent,0.634,
+batch,cold,"0.90, 1.18, 0.68",stage,probe,0.355,
+batch,cold,"0.90, 1.18, 0.68",stage,search,2.418,
+batch,cold,"0.90, 1.18, 0.68",main_in_cut_pool,jax_compile,0.401,calls=0
+batch,cold,"0.90, 1.18, 0.68",main_in_cut_pool,jax_trace,0.089,calls=0
+batch,cold,"0.90, 1.18, 0.68",main_in_cut_pool,jax_lower,0.041,calls=0
+batch,cold,"0.90, 1.18, 0.68",main_in_kernels,K.quadratic,0.070,calls=1
+batch,cold,"0.90, 1.18, 0.68",main_in_kernels,jax_trace,0.048,calls=0
+batch,cold,"0.90, 1.18, 0.68",main_in_kernels,jax_compile,0.009,calls=0
+batch,cold,"0.90, 1.18, 0.68",main_in_nonlinear,K.nonlinear,0.210,calls=1
+batch,cold,"0.90, 1.18, 0.68",main_in_nonlinear,K.structure,0.210,calls=1
+batch,cold,"0.90, 1.18, 0.68",main_in_nonlinear,jax_trace,0.064,calls=0
+batch,cold,"0.90, 1.18, 0.68",main_in_make_local,make_local,1.345,calls=1
+batch,cold,"0.90, 1.18, 0.68",main_in_make_local,jax_compile,0.481,calls=0
+batch,cold,"0.90, 1.18, 0.68",main_in_make_local,jax_lower,0.034,calls=0
+batch,cold,"0.90, 1.18, 0.68",main_in_root_bound,wait:bound_pool,11.343,calls=1
+batch,cold,"0.90, 1.18, 0.68",main_in_root_bound,run:bound_pool,0.417,calls=1 boxes=16
+batch,cold,"0.90, 1.18, 0.68",main_in_root_bound,jax_compile,0.022,calls=0
+batch,cold,"0.90, 1.18, 0.68",main_in_root_incumbent,jax_compile,2.983,calls=0
+batch,cold,"0.90, 1.18, 0.68",main_in_root_incumbent,local_solve,1.267,calls=3 #1 starts=1;#2 starts=5;#3 starts=1
+batch,cold,"0.90, 1.18, 0.68",main_in_root_incumbent,jax_lower,0.061,calls=0
+batch,cold,"0.90, 1.18, 0.68",main_in_root_incumbent,jax_trace,0.039,calls=0
+batch,cold,"0.90, 1.18, 0.68",main_in_root_dives,local_solve,3.030,calls=4 #4 starts=15;#5 starts=8;#6 starts=10
+batch,cold,"0.90, 1.18, 0.68",main_in_root_dives,jax_compile,1.108,calls=0
+batch,cold,"0.90, 1.18, 0.68",main_in_root_dives,run:dive,0.343,calls=5 boxes=16;boxes=16;boxes=16
+batch,cold,"0.90, 1.18, 0.68",main_in_root_dives,jax_trace,0.140,calls=0
+batch,cold,"0.90, 1.18, 0.68",main_in_root_dives,jax_lower,0.064,calls=0
+batch,cold,"0.90, 1.18, 0.68",main_in_root_obbt,run:bound_pool,0.428,calls=1 boxes=16
+batch,cold,"0.90, 1.18, 0.68",main_in_root_obbt,run:obbt,0.416,calls=1 boxes=1
+batch,cold,"0.90, 1.18, 0.68",main_in_root_obbt,jax_compile,0.010,calls=0
+batch,cold,"0.90, 1.18, 0.68",main_in_root_obbt_incumbent,local_solve,0.626,calls=3 #8 starts=1;#9 starts=5;#10 starts=1
+batch,cold,"0.90, 1.18, 0.68",main_in_probe,run:bound_pool,0.351,calls=1 boxes=16
+batch,cold,"0.90, 1.18, 0.68",main_in_search,local_solve,1.567,calls=6 #11 starts=2;#12 starts=1;#13 starts=5
+batch,cold,"0.90, 1.18, 0.68",main_in_search,jax_compile,0.412,calls=0
+batch,cold,"0.90, 1.18, 0.68",main_in_search,run:bound_pool,0.312,calls=1 boxes=16
+batch,cold,"0.90, 1.18, 0.68",main_in_search,jax_lower,0.027,calls=0
+batch,cold,"0.90, 1.18, 0.68",main_in_search,jax_trace,0.007,calls=0
+batch,cold,"0.90, 1.18, 0.68",main_jax,jax_trace,0.419,union
+batch,cold,"0.90, 1.18, 0.68",main_jax,jax_lower,0.230,union
+batch,cold,"0.90, 1.18, 0.68",main_jax,jax_compile,5.426,union
+batch,cold,"0.90, 1.18, 0.68",background,K.quadratic,0.000,ends at 8.4s; overlaps 
+batch,cold,"0.90, 1.18, 0.68",background,jax_trace@jaxglobal-trace,13.089,"ends at 14.7s; overlaps root_bound 11.2, make_local 1.4, root_incumbent 0.3, nonlinear 0.2"
+batch,cold,"0.90, 1.18, 0.68",background,jax_lower@jaxglobal-trace,1.142,"ends at 15.1s; overlaps root_bound 0.8, root_incumbent 0.3"
+batch,cold,"0.90, 1.18, 0.68",background,jax_compile@jaxglobal-trace,5.442,"ends at 13.2s; overlaps root_bound 5.2, make_local 0.3"
+batch,cold,"0.90, 1.18, 0.68",background,jax_trace@jaxglobal-local,0.753,ends at 3.9s; overlaps root_bound 0.7
+batch,cold,"0.90, 1.18, 0.68",background,jax_lower@jaxglobal-local,0.126,ends at 4.0s; overlaps root_bound 0.1
+batch,cold,"0.90, 1.18, 0.68",background,jax_trace@jaxglobal-screen,0.070,ends at 2.4s; overlaps root_bound 0.1
+batch,cold,"0.90, 1.18, 0.68",background,jax_lower@jaxglobal-screen,0.023,ends at 2.5s; overlaps 
+batch,cold,"0.90, 1.18, 0.68",background,jax_compile@jaxglobal-local,0.922,ends at 4.1s; overlaps root_bound 0.9
+batch,cold,"0.90, 1.18, 0.68",background,jax_compile@jaxglobal-screen,0.643,ends at 3.0s; overlaps root_bound 0.6
+batch,cold,"0.90, 1.18, 0.68",background,trace_lower:bound_pool[b=16],5.210,"ends at 5.9s; overlaps root_bound 3.6, make_local 1.4, nonlinear 0.2"
+batch,cold,"0.90, 1.18, 0.68",background,jax_compile@jaxglobal-compile,11.766,"ends at 19.1s; overlaps root_bound 12.3, root_incumbent 4.0"
+batch,cold,"0.90, 1.18, 0.68",background,trace_lower:dive[b=16],1.707,ends at 8.4s; overlaps root_bound 1.7
+batch,cold,"0.90, 1.18, 0.68",background,compile:dive[b=16],2.921,ends at 11.4s; overlaps root_bound 2.9
+batch,cold,"0.90, 1.18, 0.68",background,compile:bound_pool[b=16],7.735,ends at 13.7s; overlaps root_bound 7.7
+batch,cold,"0.90, 1.18, 0.68",background,trace_lower:obbt[b=1],6.606,"ends at 15.1s; overlaps root_bound 6.0, root_incumbent 0.6"
+batch,cold,"0.90, 1.18, 0.68",background,compile:obbt[b=1],4.043,ends at 19.1s; overlaps root_incumbent 4.0
+batch,cold,"0.90, 1.18, 0.68",path,use_interpreter,,who=fbbt.interpreted args=[] rows=388 result=True
+batch,cold,"0.90, 1.18, 0.68",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=388 result=True"
+batch,cold,"0.90, 1.18, 0.68",path,use_interpreter,,"who=lp._nonlinear_vars args=[['min_rows', 0]] rows=388 result=True"
+batch,cold,"0.90, 1.18, 0.68",path,alphabb_jacfwd_fallback,,eqns=453
+batch,cold,"0.90, 1.18, 0.68",path,use_interpreter,,"who=use_relax_interpreter>use_relax_interpreter args=[['min_rows', 0]] rows=96 result=True"
+batch,cold,"0.90, 1.18, 0.68",path,use_relax_interpreter,,rule=rows n=46 rows=96 ops=437664 result=False
+batch,cold,"0.90, 1.18, 0.68",info,n,,46
+batch,cold,"0.90, 1.18, 0.68",info,n_int,,24
+batch,cold,"0.90, 1.18, 0.68",info,free,,0
+batch,cold,"0.90, 1.18, 0.68",info,status,,optimal
+batch,cold,"0.90, 1.18, 0.68",info,nodes,,3
+batch,cold,"0.90, 1.18, 0.68",info,fun,,285506.5082441608
+batch,cold,"0.90, 1.18, 0.68",info,lower_bound,,285505.9003899772
+batch,cold,"0.90, 1.18, 0.68",info,message,,incumbent repaired from violation 1e-06 to 5.4e-16 (f 285505.9015 -> 285506.5082)
+batch,cold,"0.90, 1.18, 0.68",info,rows,,388
+batch,cold,"0.90, 1.18, 0.68",info,quadratic,,False
+batch,cold,"0.90, 1.18, 0.68",info,structure,,True
+batch,cold,"0.90, 1.18, 0.68",info,load_gate,,gate=ok load1=0.90
+batch,cold,"0.90, 1.18, 0.68",bucket,kernel wait: trace+lower,3.610,
+batch,cold,"0.90, 1.18, 0.68",bucket,kernel wait: XLA compile,7.730,
+batch,cold,"0.90, 1.18, 0.68",bucket,kernel wait: other,0.000,
+batch,cold,"0.90, 1.18, 0.68",bucket,bound_domain,0.000,
+batch,cold,"0.90, 1.18, 0.68",bucket,structure/nonlinear/quadratic,0.210,
+batch,cold,"0.90, 1.18, 0.68",bucket,make_local,1.352,
+batch,cold,"0.90, 1.18, 0.68",bucket,root bound: kernel run (first LP),0.000,
+batch,cold,"0.90, 1.18, 0.68",bucket,root local solves + incumbent,5.320,
+batch,cold,"0.90, 1.18, 0.68",bucket,root dives + enum,4.713,
+batch,cold,"0.90, 1.18, 0.68",bucket,root OBBT: kernel run,0.871,
+batch,cold,"0.90, 1.18, 0.68",bucket,probing: run,0.355,
+batch,cold,"0.90, 1.18, 0.68",bucket,search,2.418,
+batch,cold,"0.90, 1.18, 0.68",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.120,
+batch,cold,"0.90, 1.18, 0.68",bucket,root bound: other,12.124,
