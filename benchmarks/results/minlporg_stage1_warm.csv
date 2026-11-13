@@ -1,0 +1,17 @@
+solver,name,status,time,primal,dual,nodes,message,load
+jaxglobal,m8_Model_P2,optimal,13.086510360000148,2260.256562836033,2260.093210472956,197,optimal,2.07
+jaxglobal,m245_Model_E2,unsupported,5.458836307000183,,,,"unbounded variables: no finite bounds found for variables [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]",3.14
+jaxglobal,m7_Model_P1,time_limit,60.18314591800004,2260.2591458691827,2224.500580021855,6995,time_limit,2.07
+jaxglobal,m266_Formulation_MINLP,time_limit,60.02457504600011,nan,nan,0,time_limit,3.69
+jaxglobal,m383_single_obj,optimal,9.300375685000063,335.1435362656437,335.1488013302631,355,optimal,5.06
+jaxglobal,m389_CLay0203BM,optimal,10.095073662999994,41573.26252221357,41573.25255897416,149,optimal,4.81
+jaxglobal,m267_Formulation_MIQP,time_limit,60.00870055600012,nan,nan,0,time_limit,5.15
+jaxglobal,m417_kClus_3_10_2_BM_1,optimal,23.632701401000077,0.32892289079402515,0.3288976803382727,2659,optimal,4.70
+jaxglobal,m418_kClus_3_10_3_BM_1,optimal,22.27469380599996,0.9836792813469533,0.9835960766177896,1561,optimal,4.34
+jaxglobal,m465_Haverly_2Player_PriceTaker_FixedCharge0,optimal,5.053735662000008,1749.9999999998195,1750.0038603150062,73,optimal,4.36
+jaxglobal,m466_Haverly_2Player_PriceTaker_FixedCharge1,optimal,14.946594526000126,1524.9999999999761,1525.0057484854103,93,optimal,4.49
+jaxglobal,m467_Haverly_2Player_NashCournot_FixedCharge0,optimal,5.419392990999995,1062.4999999998504,1062.5072420594956,207,optimal,4.22
+jaxglobal,m419_kClus_3_10_5_BM_1,time_limit,60.15019783899993,1.8475367073619586,1.8132288442640516,5621,time_limit,4.15
+jaxglobal,m468_Haverly_2Player_NashCournot_FixedCharge1,optimal,16.918638981999948,837.4999999999304,837.5059642949138,487,optimal,4.20
+jaxglobal,m478_MINLP_example_case1_2,unsupported,3.965560011999969,,,,"unbounded variables: no finite bounds found for variables [8, 9, 10, 11, 12, 13]",3.94
+jaxglobal,m479_MINLP_example_case2_1,unsupported,5.330997937999882,,,,"unbounded variables: no finite bounds found for variables [8, 9, 10, 11, 12, 13]",3.86

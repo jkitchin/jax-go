@@ -7,7 +7,8 @@ MPS files. This script lists all instances (``library/instances.php``), keeps th
 (the GAMS system that comes with the ``gamspy`` package and its demo license is enough at this
 size). Before converting, ``option <modeltype> = <solver>;`` lines are removed (they name solvers
 that may not be installed); a model with several solve statements is converted at its last
-one. MPS files go through ``mps2gms`` first.
+one. MPS files are read by SCIP (pyscipopt) and written as GAMS first; ``mps2gms`` changed the
+quadratic MPS models in this set.
 
 Writes instances.csv with the columns of benchmarks/minlplib/instances.csv (``primalbound`` is
 minlp.org's "best known objective value"; there is no dual bound) plus the minlp.org instance
@@ -94,11 +95,14 @@ def convert(src, nl):
     with tempfile.TemporaryDirectory() as tmp:
         tmp = pathlib.Path(tmp)
         if src.suffix.lower() == ".mps":
-            shutil.copy(src, tmp / "model.mps")
-            p = subprocess.run([str(g / "mps2gms"), "model.mps", "model.gdx", "model.gms", "PY="], cwd=tmp,
-                               capture_output=True, text=True)  # fmt: skip
-            if p.returncode or not (tmp / "model.gms").exists():
-                raise RuntimeError("mps2gms: " + (p.stdout + p.stderr)[-300:])
+            # through SCIP's MPS reader and GAMS writer: mps2gms changed the quadratic models here
+            # (the four Haverly instances lost about 20% of their optimal value)
+            import pyscipopt
+
+            m = pyscipopt.Model()
+            m.hideOutput()
+            m.readProblem(str(src))
+            m.writeProblem(str(tmp / "model.gms"), verbose=False)
         else:
             s = src.read_text(errors="ignore")
             (tmp / "model.gms").write_text(re.sub(rf"(?im)^\s*options?\s+({TYPES}|solver)\s*=\s*\w+\s*;", "", s))
