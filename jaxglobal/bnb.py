@@ -38,7 +38,7 @@ import numpy as np
 from .local import make_local, near_zero_options
 from .crown import crown_auto, crown_supported, make_crown
 from .domain import DomainTimeout, bound_domain
-from . import kcache
+from . import kcache, milpbound
 from .fbbt import make_fbbt
 from .lifted import make_lifted_bounder
 from .lp import make_constrained_bounder, make_obbt, make_pool_cuts, pool_parts, reduce_ranges
@@ -849,6 +849,7 @@ _LAM, _BETA = 0.75, 0.2  # branch_point="relax": pull toward the relaxation mini
 INT_TOL = 1e-6  # integer variables: a value within INT_TOL of an integer counts as integral
 ROUNDINGS = (0.5, INT_TOL, 1.0 - INT_TOL, 0.25, 0.75)  # incumbent candidates: round up fractions above each
 _DIVES = 16  # propagation dives per call (integer variables)
+MILP_ROOT_SHARE, MILP_ROOT_SECONDS = 0.25, 60.0  # integer-aware root bound: at most this share of time_limit and seconds
 _PROBE = True  # integer variables: root probing on binaries (``probe`` in ``minimize``)
 _ENUM = 32  # integer variables: at the root, fix-and-solve every assignment when there are at most this many
 _FLOOR = 0.05  # pseudocosts are floored at this fraction of the mean over observed variables
@@ -1026,6 +1027,7 @@ def minimize(
     crown=False,
     cut_pool=128,
     safe=SAFE_DEFAULT,
+    milp_root=True,
     time_limit=np.inf,
     verbose=False,
 ):
@@ -1079,6 +1081,12 @@ def minimize(
     A problem whose integer variables are all binary, posed as an epigraph ``min t, t >= P(x)``
     with ``P`` a polynomial of them at binary points and no other constraint, is solved without a search when the polynomial's induced width is small: exact
     variable elimination (``pseudoboolean.py``) gives the minimum and a minimizer.
+
+    ``milp_root`` (with integer variables, not with ``safe``): after the root's OBBT and probing,
+    bound the root by a MILP over the relaxation's linear cuts with the integers integral, with
+    outer-approximation rounds (``milpbound.py``; HiGHS's dual bound less a margin, so not
+    certified), within ``MILP_ROOT_SHARE`` of ``time_limit`` and ``MILP_ROOT_SECONDS``. It closes
+    root gaps that come from integrality alone (big-M models: minlp.org's k-means clustering).
 
     ``safe`` rounds every quantity feeding a lower bound outward (interval and
     McCormick values, envelopes, alphaBB, CROWN lines, LP rows and the dual
@@ -1955,6 +1963,24 @@ def minimize(
             rlo, rhi, lb = probe(rlo, rhi, lb)
         except _CompileTimeout:
             pass
+    _mark("milp_root")
+    if milp_root and imask.any() and not safe and np.all(np.isfinite(lb)) and not (ub - float(lb.min()) <= tol()):
+        # integer-aware root bound (milpbound.py): a MILP over the relaxation's cuts on the hull of the
+        # open root boxes bounds every one of them; it raises the bound where only integrality is missing
+        hlo, hhi = rlo.min(axis=0), rhi.max(axis=0)
+        left = np.inf if deadline is None else deadline - time.perf_counter()
+        budget = min(MILP_ROOT_SHARE * time_limit, MILP_ROOT_SECONDS, 0.5 * left)
+        if np.all(np.isfinite(hlo)) and np.all(np.isfinite(hhi)) and budget >= 1.0:
+            MB = _cached(("milp_root", f, ineq, eq, lo.size, feas_tol),
+                         lambda: milpbound.MilpBound(f, ineq, eq, lo.size, feas_tol=feas_tol))  # fmt: skip
+            try:
+                mlb = MB.bound(hlo, hhi, imask, extra=[xbest, *np.atleast_2d(rxr)[:4]], cutoff=ub, budget=budget, tol=tol())
+            except Exception:  # noqa: BLE001 -- a failed MILP build leaves the root bound as it was
+                mlb = None
+            if mlb is not None:
+                if verbose:
+                    print(f"milp root bound {mlb:.6g} (was {float(lb.min()):.6g})")
+                lb = np.maximum(lb, mlb)
     _mark("search")
     open_lo, open_hi, open_lb, open_xr = rlo, rhi, lb, rxr
     width0 = _branch_widths(width0, rlo, rhi)
