@@ -810,8 +810,10 @@ first-bound time, with the load of each repeat.
 
 #### A3 per-node kernel ablation and interpreter thresholds
 
-**Status: tooling and rule in place; thresholds not changed** (no valid timing:
-1-min load 10-77 and the shared lock busy for the 2 h measurement window).
+**Status: measured 2026-11-14; closed, `RULE = "rows"` stays the default and
+`"ops"` stays opt-in.** On current code the candidate rule changes no measured
+MINLPLib instance (results below); its effect is limited to a few large
+minlp.org models, where it is mixed.
 
 - `benchmarks/profile_root.py --ablate` runs the fixed variant list `ABLATE`,
   cold, and prints per (instance, variant) the median over `--repeats` of: node
@@ -867,6 +869,45 @@ Make `RULE = "ops"` the default only if hadamard_5's McCormick-only kernel
 compiles in < 15 s, no flipped instance loses > 10 % node rate or gains > 10 %
 cold wall, and bounds at the limit agree within 1e-6; otherwise raise `MIN_OPS`
 above the losing instances.
+
+**Measured (2026-11-14, `main` at 6c68f5e, 4-core VM, load < 1.5).**
+`profile_root.py --ablate --variants base,+opsrule --repeats 3 --time-limit 60`
+on hadamard_5, batch, tloss, st_rv7, pooling_rt2tp, clay0203m, tln5, flay04m,
+pooling_adhya1stp, kall_circlespolygons_c1p12, wastewater15m1 and nous1
+(`benchmarks/results/a3_flips_minlplib.csv`). Medians:
+
+| instance | base: wall, nodes | `+opsrule`: wall, nodes | status (both) |
+|---|---|---|---|
+| hadamard_5 | 39.0 s, 263 | 37.6 s, 263 | optimal |
+| batch | 28.0 s, 3 | 27.7 s, 3 | optimal |
+| tloss | 11.6 s, 31 | 11.9 s, 31 | optimal |
+| st_rv7 | 8.2 s, 73 | 8.0 s, 73 | optimal |
+| pooling_rt2tp | 7.6 s, 27 | 7.3 s, 27 | optimal |
+| clay0203m | 18.6 s, 149 | 17.8 s, 149 | optimal |
+| tln5 | 60.2 s, 17,149 | 60.2 s, 18,173 | time limit |
+| flay04m | 47.2 s, 2,021 | 45.7 s, 2,021 | optimal |
+| pooling_adhya1stp | 12.2 s, 275 | 12.2 s, 275 | optimal |
+| kall_circlespolygons_c1p12 | 60.3 s, 18,431 | 60.3 s, 18,431 | time limit |
+| wastewater15m1 | 60.3 s, 17,367 | 60.3 s, 17,367 | time limit |
+| nous1 | 30.3 s, 2,585 | 30.9 s, 2,585 | optimal |
+
+Same nodes and wall within noise everywhere: the flip list above is obsolete.
+Since it was drawn up, these models' relaxation tapes mostly go through other
+paths (no `use_relax_interpreter` decision is recorded for hadamard_5, tloss,
+st_rv7), and batch's tape is now 437,664 ops per box, below `MIN_OPS`.
+hadamard_5's node-bound kernel compiles in 2.7-3.2 s under both rules (the
+< 15 s criterion holds either way; 80.5 s when this plan was written).
+
+Where the rule does change the kernel (minlp.org, stage 2 of #87,
+`benchmarks/minlporg/README.md`; cold, two solves at a time, 60 s): it gets
+m31, m60 and m61 past the compile of their straight-line relaxation kernel (on
+m60 25 s of tracing and 81 s of compiling; with `"ops"` m60 and m61 reach the
+optimum -157.5865 within 60 s when run alone) and improves m424's bound (0.033
+-> 0.054), but m470 drops from 127 to 15 nodes with a looser bound (-1207
+against -1130). Not a case for changing the default; worth revisiting only as
+part of the kernel-cost work (compile time of large straight-line kernels).
+Not done: a scan of all MINLPLib models for tapes the rule flips on current
+code.
 
 ### Phase 3 — search (4 weeks)
 
