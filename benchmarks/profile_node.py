@@ -81,8 +81,8 @@ def lifted_bounder(Q, **kw):
     bound, whether the round ran)."""
     ns = dict(qd.__dict__)
     _patched(qd._ipm, [
-        ("z, _, _, _, _, _, _, best, yb, _, _ = jax.lax.while_loop(lambda st: ~done(st), body, st)\n    return z, yb, best",
-         "z, _, _, _, _, _, _, best, yb, kit, _ = jax.lax.while_loop(lambda st: ~done(st), body, st)\n    return z, yb, best, kit"),
+        ("z, _, _, _, _, _, _, best, yb, _, _ = jax.lax.while_loop(lambda st: ~done(st), body_pc if pc else body, st)\n    return z, yb, best",
+         "z, _, _, _, _, _, _, best, yb, kit, _ = jax.lax.while_loop(lambda st: ~done(st), body_pc if pc else body, st)\n    return z, yb, best, kit"),
     ], ns)  # fmt: skip
     _patched(qd.make_quadratic_bounder, [
         ("vals, b, cols, best, rlo, rhi, vprev, active = carry", "vals, b, cols, best, rlo, rhi, vprev, active = carry\n            act_in = active"),

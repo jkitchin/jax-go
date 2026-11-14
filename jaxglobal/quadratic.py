@@ -66,6 +66,12 @@ OFFSET_LIMIT = 10.0
 MAX_STATIC_CUTS = 6000  # _binary_cuts: static rows kept (in order of generation)
 MAX_POOL = 20000  # _binary_cuts: rows in the separation pool
 N_SEP = 1  # make_quadratic_bounder: rounds of pool separation (each one more IPM solve)
+# make_quadratic_bounder: a round after the first runs only while the previous one raised the
+# bound by more than this share of the gap (``lp.KELLEY_STALL``'s rule); < 0: no stall rule (the
+# default: 1e-4 raised the node rate 0-30 % on the minlp.org k-means models but lowered the
+# bounds per node, and was not better on the benchmark sets, docs/ANALYSIS-node-speed.md)
+ROUND_STALL = -1.0
+IPM_PC = True  # _ipm: Mehrotra predictor-corrector steps (False: fixed sigma)
 # _eigen_cuts: rows (v.x)^2 = sum_ij v_i v_j w_ij along the eigenvectors v of each row's quadratic part
 MAX_EIG_SUPPORT = 16  # a row's (connected) quadratic block is used only up to this many variables
 MAX_EIG_PAIRS = 400_000  # budget of (nonzero, nonzero) pairs of the eigen rows (the IPM's normal-matrix scatter)
@@ -1133,7 +1139,7 @@ def _certificate(pat, vals, b, y, cvec, safe):
 
 
 def _ipm(c, pat, vals, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10, target=jnp.inf, gap_tol=1e-9,
-         settled=None):
+         settled=None, pc=None):
     """``lp.ipm`` for ``min c.u, A u <= b, 0 <= u <= 1`` with ``A`` in the sparse pattern
     ``pat``: the box rows enter the normal matrix as a diagonal, the others through the pairs of
     nonzeros of each row. Returns ``(u, y_best, best_cert)`` (``y`` of the ``A`` rows).
@@ -1143,7 +1149,13 @@ def _ipm(c, pat, vals, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10, target=j
     hold to ``gap_tol``, or once ``settled(best, c.u)`` holds at such a point (the bound cannot
     improve in the units the caller rounds it to, ``_snap``); under ``vmap`` the loop runs until
     every box has stopped. The stopping rules only decide when to stop: ``best`` is a
-    certificate whatever they say."""
+    certificate whatever they say.
+
+    ``pc`` (default ``IPM_PC``): Mehrotra predictor-corrector steps (as ``lp._ipm_box``) instead
+    of the fixed ``sigma``: an affine step sets ``sigma = (mu_aff / mu)^3`` and a second-order
+    correction, both solved with the one (Jacobi-scaled) Cholesky factorization of the
+    iteration. Only the iterates change; every bound is still ``cert`` of some ``y``."""
+    pc = IPM_PC if pc is None else pc
     m, N = pat.m, c.size
     R, C = jnp.asarray(pat.rows), jnp.asarray(pat.cols)
     key = C[pat.pa] * N + C[pat.pb]  # the columns may be traced (separated rows)
@@ -1197,13 +1209,56 @@ def _ipm(c, pat, vals, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10, target=j
         # a failed step (the factorization broke down) leaves the iterate as it was: stop there
         return z, s, y, sh, yh, sl, yl, jnp.where(better, cy, best), jnp.where(better, y, yb), k + 1, ~ok
 
+    def body_pc(st):
+        z, s, y, sh, yh, sl, yl, best, yb, k, _ = st
+        rp, rph, rpl = Av(z) + s - b, z + sh - 1.0, sl - z
+        rd = c + ATy(y) + yh - yl
+        mt = m + 2 * N
+        mu = (s @ y + sh @ yh + sl @ yl) / mt
+        M = jnp.zeros(N * N).at[key].add(vv * (y / s)[rpa]).reshape(N, N)
+        M = M + jnp.diag(yh / sh + yl / sl + 1e-12)
+        dm = jnp.sqrt(jnp.diag(M))
+        fac = jax.scipy.linalg.cho_factor(M / dm[:, None] / dm[None, :], lower=True)
+
+        def direction(rc, rch, rcl):
+            t, th, tl = (rc + y * rp) / s, (rch + yh * rph) / sh, (rcl + yl * rpl) / sl
+            dz = jax.scipy.linalg.cho_solve(fac, (-rd - (ATy(t) + th - tl)) / dm) / dm
+            ds, dsh, dsl = -rp - Av(dz), -rph - dz, -rpl + dz
+            return dz, ds, dsh, dsl, (rc - y * ds) / s, (rch - yh * dsh) / sh, (rcl - yl * dsl) / sl
+
+        def lengths(d):
+            _, ds, dsh, dsl, dy, dyh, dyl = d
+            return (jnp.minimum(step_len(s, ds), jnp.minimum(step_len(sh, dsh), step_len(sl, dsl))),
+                    jnp.minimum(step_len(y, dy), jnp.minimum(step_len(yh, dyh), step_len(yl, dyl))))
+
+        aff = direction(-s * y, -sh * yh, -sl * yl)
+        pa, da = lengths(aff)
+        pa, da = jnp.minimum(1.0, pa), jnp.minimum(1.0, da)
+        _, ds_, dsh_, dsl_, dy_, dyh_, dyl_ = aff
+        mu_aff = ((s + pa * ds_) @ (y + da * dy_) + (sh + pa * dsh_) @ (yh + da * dyh_)
+                  + (sl + pa * dsl_) @ (yl + da * dyl_)) / mt
+        sg = jnp.clip((mu_aff / mu) ** 3, 0.0, 1.0)
+        sg = jnp.where(jnp.isfinite(sg), sg, sigma)
+        d = direction(sg * mu - s * y - ds_ * dy_, sg * mu - sh * yh - dsh_ * dyh_, sg * mu - sl * yl - dsl_ * dyl_)
+        ap, ad = lengths(d)
+        ap, ad = jnp.minimum(1.0, 0.99 * ap), jnp.minimum(1.0, 0.99 * ad)
+        dz, ds, dsh, dsl, dy, dyh, dyl = d
+        new = (z + ap * dz, s + ap * ds, y + ad * dy, sh + ap * dsh, yh + ad * dyh, sl + ap * dsl, yl + ad * dyl)
+        ok = jnp.all(jnp.isfinite(new[0])) & jnp.all(jnp.isfinite(new[2])) & jnp.all(jnp.isfinite(new[4])) & \
+            jnp.all(jnp.isfinite(new[6])) & (mu > mu_tol)  # fmt: skip
+        z, s, y, sh, yh, sl, yl = jax.tree.map(lambda a, b_: jnp.where(ok, a, b_), new, (z, s, y, sh, yh, sl, yl))
+        cy = cert(y)
+        cy = jnp.where(jnp.isnan(cy), -jnp.inf, cy)
+        better = cy > best
+        return z, s, y, sh, yh, sl, yl, jnp.where(better, cy, best), jnp.where(better, y, yb), k + 1, ~ok
+
     z0 = jnp.full(N, 0.5)
     s0 = jnp.maximum(b - Av(z0), 1.0)
     y0 = jnp.ones(m)
     ones = jnp.ones(N)
     c0 = cert(y0)
     st = (z0, s0, y0, ones, ones, ones, ones, jnp.where(jnp.isnan(c0), -jnp.inf, c0), y0, 0, jnp.array(False))
-    z, _, _, _, _, _, _, best, yb, _, _ = jax.lax.while_loop(lambda st: ~done(st), body, st)
+    z, _, _, _, _, _, _, best, yb, _, _ = jax.lax.while_loop(lambda st: ~done(st), body_pc if pc else body, st)
     return z, yb, best
 
 
@@ -1269,14 +1324,22 @@ def _snap(Q, lb, lo, hi, tol=0.0):
     return jnp.where(fb + err < lb, jnp.maximum(lb, lat), jnp.maximum(lb, jnp.minimum(lat, fb - err)))
 
 
-def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False, n_sep=N_SEP):
+def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False, n_sep=N_SEP, stall=None):
     """Return ``bound(lo, hi, cutoff) -> (lb, x_lp, infeasible, lo', hi')`` for one box
     (the contract of ``lp.make_constrained_bounder``) from the lifted LP of ``Q``.
 
     Rounds after the first add rows at the previous round's LP point: tangents of the squares
     (``n_kelley`` rounds) and the most violated rows of the binary-cut pool (``n_sep`` rounds,
     ``_separate``). The bound is the best certificate over the rounds, raised to the objective
-    lattice (``_snap``) when ``Q`` has one."""
+    lattice (``_snap``) when ``Q`` has one.
+
+    ``stall`` (default ``ROUND_STALL``; None in the module constant: no stall rule): a round
+    after the first runs only if the previous round raised the bound by more than ``stall`` of
+    the gap to ``cutoff`` (of ``1 + |bound|`` without a finite cutoff), as ``lp._kelley_go``. Any
+    number of rounds gives a valid bound (each round's certificate is one): this only trades
+    bound for time."""
+    stall = ROUND_STALL if stall is None else stall
+    stall = None if stall is not None and stall < 0 else stall
     need = square_needs_lower(Q)
     n_kelley = n_kelley if need.any() or Q.n_eig else 0  # else the tangents are redundant
     n_sep = n_sep if Q.pool_rhs.size else 0
@@ -1329,6 +1392,7 @@ def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False, n_s
             violated pool row) and the box is not pruned: otherwise that point stays feasible,
             hence optimal, with the new rows (no IPM iterations)."""
             vals, b, cols, best, rlo, rhi, vprev, active = carry
+            prev = best
             pk = pat._replace(cols=cols)
             A, bu = _unit(pk, vals, b, vlo, scale, safe)
             target = (prune_at - f0) / cn + 1e-9 * (1 + jnp.abs(prune_at) / cn)  # unit-space value that prunes
@@ -1358,6 +1422,9 @@ def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False, n_s
                     lambda: (cols, vals, b, jnp.array(False)))  # fmt: skip
                 cut = cut | live
             active = active & (best < prune_at) & cut
+            if stall is not None:  # the round raised the bound by at most ``stall`` of the gap: stop
+                gap = jnp.where(jnp.isfinite(cutoff), cutoff - best, 1.0 + jnp.abs(best))
+                active = active & ~(jnp.isfinite(prev) & jnp.isfinite(best) & (best - prev <= stall * gap))
             return (vals, b, cols, best, rlo, rhi, v, active), None
 
         init = (vals0, b0, jnp.asarray(pat.cols), jnp.array(-jnp.inf, lo.dtype), lo, hi, vlo + 0.5 * scale,
