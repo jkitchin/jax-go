@@ -17,6 +17,20 @@ Usage:
   python benchmarks/run.py --solvers jaxglobal,scip,couenne,baron --time-limit 60
   python benchmarks/run.py --max-vars 10 --jobs 4 --tag small
   python benchmarks/run.py --lib minlporg --solvers jaxglobal,scip --tag minlporg_stage1
+
+Threads: with ``--jobs N`` > 1 every solver process is capped at ``--threads-per-job K`` CPU
+threads (default ``max(1, os.cpu_count() // N)``; with ``--jobs 1`` no cap; ``0`` disables it),
+so concurrent runs do not oversubscribe the machine: unchecked, two jaxglobal workers on 4 cores
+drove the load to ~6.4 and stretched a single XLA call 9x. The cap goes into each subprocess's
+environment before JAX is imported, as
+  NPROC=K              size of XLA's CPU intra-op thread pool (jaxlib 0.11; measured: K=1 runs a
+                       jitted matmul at 1.0 CPU-s per wall-s instead of 3.7 on 4 cores)
+  RAYON_NUM_THREADS=K  pounce's (FERAL's) pool for the batched local solves
+  OMP_NUM_THREADS, OPENBLAS_NUM_THREADS, MKL_NUM_THREADS=K  NumPy/SciPy BLAS
+A variable already set in the caller's environment is left as it is. XLA_FLAGS
+``--xla_cpu_multi_thread_eigen=false`` and ``intra_op_parallelism_threads`` were tried and do
+not change thread use in this jaxlib. The cap of each run is recorded in the ``threads`` column
+(0: none).
 """
 
 from __future__ import annotations
@@ -43,7 +57,10 @@ EXTRA = {"safe": True} if os.environ.get("JAXGLOBAL_SAFE") == "1" else {}  # che
 EXTRA.update(json.loads(os.environ.get("JAXGLOBAL_OPTS", "{}")))  # extra minimize options, e.g. '{"branch_var": "reliability"}'
 # "load" (1-min load average when the run started) was added for the SCIP-gap re-baseline; CSVs
 # written before it have no such column and are appended to with their own header
-FIELDS = ["solver", "name", "status", "time", "primal", "dual", "nodes", "message", "load"]
+# "threads" (--threads-per-job, 0: no cap) was added the same way
+FIELDS = ["solver", "name", "status", "time", "primal", "dual", "nodes", "message", "load", "threads"]
+THREADS = 0  # per-process CPU thread cap set by main() (--threads-per-job); 0: none
+_THREAD_VARS = ("NPROC", "RAYON_NUM_THREADS", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
 TAG = "JAXGLOBAL-RESULT "  # marks the worker's result line among solver log output
 COUENNE = shutil.which("couenne") or "/Applications/AMPL/couenne"
 
@@ -225,11 +242,17 @@ def run_gams(name, tl, solver="baron"):
 # ---------------------------------------------------------------- helpers
 
 
+def _env():
+    """The environment of a solver subprocess: the caller's, with the thread cap (see the module
+    docstring) for every variable the caller has not set."""
+    cap = {v: str(THREADS) for v in _THREAD_VARS} if THREADS > 0 else {}
+    return {**cap, **os.environ, "PYTHONWARNINGS": "ignore"}
+
+
 def _run(cmd, tl, cwd=None):
     """stdout+stderr as text, or a result dict if the process hung or failed to start."""
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=tl * 1.5 + 60, cwd=cwd,
-                           env={**os.environ, "PYTHONWARNINGS": "ignore"})  # fmt: skip
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=tl * 1.5 + 60, cwd=cwd, env=_env())
     except subprocess.TimeoutExpired:
         return dict(status="time_limit", time=tl, message="killed")
     except OSError as e:
@@ -288,7 +311,7 @@ def solve(solver, inst, tl):
     except Exception as e:  # a crashing adapter must not stop the run
         r = dict(status="error", message=repr(e)[:200])
     r.setdefault("time", time.perf_counter() - t0)
-    return {k: r.get(k, "") for k in FIELDS} | dict(solver=solver, name=name, load=load)
+    return {k: r.get(k, "") for k in FIELDS} | dict(solver=solver, name=name, load=load, threads=THREADS)
 
 
 def main():
@@ -301,10 +324,15 @@ def main():
     ap.add_argument("--tag", default="baseline")
     ap.add_argument("--lib", default="minlplib", help="instance library under benchmarks/: minlplib or minlporg")
     ap.add_argument("--instances", default="instances.csv", help="instance list in --lib (not minlplib), e.g. instances_stage2.csv")
+    ap.add_argument("--threads-per-job", type=int, default=None,
+                    help="CPU threads per solver process (default: cpu_count // jobs when jobs > 1, else no cap; 0: no cap)")
     ap.add_argument("--worker", help=argparse.SUPPRESS)
     a = ap.parse_args()
-    global LIB, INSTANCES
+    global LIB, INSTANCES, THREADS
     LIB, INSTANCES = HERE / a.lib, a.instances
+    if a.threads_per_job is None:
+        a.threads_per_job = max(1, (os.cpu_count() or 1) // a.jobs) if a.jobs > 1 else 0
+    THREADS = max(0, a.threads_per_job)
     if a.worker:
         print(TAG + json.dumps(worker(a.worker, a.time_limit)), flush=True)
         sys.stdout.flush()
@@ -326,13 +354,14 @@ def main():
         with open(out) as fh:
             rd = csv.DictReader(fh)
             done = {(r["solver"], r["name"]) for r in rd}
-            fields = rd.fieldnames or FIELDS  # an older CSV keeps its columns (no "load")
+            fields = rd.fieldnames or FIELDS  # an older CSV keeps its columns (no "load", "threads")
     else:
         with open(out, "w", newline="") as fh:
             csv.DictWriter(fh, FIELDS).writeheader()
     insts = instances(a.max_vars, set(a.names.split(",")) if a.names else None)
     todo = [(s, i) for s in a.solvers.split(",") for i in insts if (s, i["name"]) not in done]
-    print(f"{len(todo)} runs ({len(done)} already in {out.name}), time limit {a.time_limit:g}s, {a.jobs} jobs")
+    print(f"{len(todo)} runs ({len(done)} already in {out.name}), time limit {a.time_limit:g}s, {a.jobs} jobs, "
+          f"{THREADS or 'uncapped'} threads per job")
 
     def go(job):
         r = solve(job[0], job[1], a.time_limit)

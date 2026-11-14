@@ -1,0 +1,5 @@
+solver,name,status,time,primal,dual,nodes,message,load,threads
+jaxglobal,m49_bcp6,time_limit,88.86634929299908,nan,0.9999887912961446,1,time_limit,4.85,0
+jaxglobal,m48_bcp7,time_limit,91.2046130409999,nan,0.9999909698158242,1,time_limit,4.85,0
+jaxglobal,m50_bcp5,time_limit,61.285583000999395,nan,0.999980328825148,1,time_limit,7.77,0
+jaxglobal,m424_kClus_5_10_3_BM_1,time_limit,60.47528240599968,0.37369890036434794,0.0326318068381706,2235,time_limit,7.55,0
