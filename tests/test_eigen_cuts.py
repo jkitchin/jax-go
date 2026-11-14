@@ -37,12 +37,24 @@ def lifted(Q, x):
 def test_eigen_rows_present():
     f, g, _, _ = random_qp(5, 0)
     Q = quadratic_form(f, g, None, 5)
-    assert Q.n_eig > 0
+    assert Q.n_eig > 0 and Q.n_sec > 0  # (indefinite rows: both kinds)
     x = np.random.default_rng(1).normal(size=5)
     v = lifted(Q, x)
-    t = np.bincount(Q.eig_row, Q.eig_cx * v[Q.eig_col], Q.n_eig)
-    s = np.bincount(Q.eig_row, Q.eig_cw * v[Q.eig_col], Q.n_eig)
-    np.testing.assert_allclose(s, t * t, rtol=1e-10, atol=1e-10)  # the identity (v.x)^2 = sum v_i v_j w_ij
+    for row, col, cw, cx, K in ((Q.eig_row, Q.eig_col, Q.eig_cw, Q.eig_cx, Q.n_eig),
+                                (Q.sec_row, Q.sec_col, Q.sec_cw, Q.sec_cx, Q.n_sec)):
+        t = np.bincount(row, cx * v[col], K)
+        s = np.bincount(row, cw * v[col], K)
+        np.testing.assert_allclose(s, t * t, rtol=1e-10, atol=1e-10)  # the identity (v.x)^2 = sum v_i v_j w_ij
+
+
+def test_kinds_follow_curvature():
+    """A convex objective gets tangents only, a concave constraint secants only."""
+    n = 4
+    f, _, _, _ = random_qp(n, 3, psd=True)
+    g = lambda x: jnp.stack([-(x[0] + x[1] + x[2]) ** 2 - (x[1] - x[3]) ** 2 + 1.0])  # noqa: E731
+    Q = quadratic_form(f, g, None, n)
+    assert Q.n_eig >= n and Q.n_sec >= 1
+    assert quadratic_form(f, None, None, n).n_sec == 0
 
 
 @pytest.mark.parametrize("safe", [False, True])
@@ -59,8 +71,8 @@ def test_rows_hold_at_sampled_points(seed, safe):
     R, C = L.pattern.rows, L.pattern.cols
     sel = np.zeros(L.pattern.m, bool)
     sel[:4 * len(Q.pairs)] = True  # McCormick
-    sel[L.pattern.m - L.eig_types * Q.n_eig:] = True  # eigen rows (last: no cutoff row)
-    assert L.eig_types == 6
+    sel[L.pattern.m - L.eig_types * Q.n_eig - Q.n_sec:] = True  # eigen rows (last: no cutoff row)
+    assert L.eig_types == 5 and Q.n_sec > 0
     for _ in range(5):
         c0, w = rng.normal(size=n) * 3, rng.uniform(0.01, 5.0, n)
         lo, hi = c0 - w, c0 + w
