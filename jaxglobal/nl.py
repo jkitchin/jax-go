@@ -194,6 +194,116 @@ def _parse_expr(R):
     raise NLError(f"bad expression token {c}{v!r}")
 
 
+MAX_POLY_TERMS = 16  # _cancel: largest expanded sum tracked
+
+
+def _cancel(e, nonzero):
+    """``e`` with products that cancel a division multiplied out: ``(a x / y + c) * y`` becomes
+    ``a x + c y``, when ``y`` is a variable that ``nonzero(j)`` says is bounded away from 0 (so the
+    two expressions agree on the whole box). Returns ``(tree, poly)``: ``poly`` is the expression
+    as ``{monomial: coefficient}`` (a monomial a sorted tuple of ``(atom, exponent)``, atoms being
+    variables or other subtrees), or None when it is not a small sum of such terms.
+
+    Models written by GAMS or AMPL keep such terms as typed (``(0.01 * (0.24 x / q) + 0.013) * q``,
+    an ordering cost per order times the order size): relaxed factor by factor, the McCormick
+    product of ``x / q`` in [0, x_max] and ``q`` in [1, q_max] gives back little of ``x``, which is
+    linear. The rewrite is exact algebra; only products in which some atom's exponents of both
+    signs meet are multiplied out, so other factored forms are kept."""
+    op = e[0]
+    if op == "num":
+        return e, {(): e[1]}
+    if op == "var":
+        return e, {((e, 1),): 1.0}
+    kids = [_cancel(a, nonzero) for a in e[1:]]
+    trees = [t for t, _ in kids]
+    polys = [q for _, q in kids]
+
+    def small(q):
+        return q if q is not None and len(q) <= MAX_POLY_TERMS else None
+
+    def add(qs, signs):
+        if any(q is None for q in qs):
+            return None
+        out = {}
+        for q, sg in zip(qs, signs):
+            for k, v in q.items():
+                out[k] = out.get(k, 0.0) + sg * v
+        return small({k: v for k, v in out.items() if v != 0.0 or k == ()})
+
+    def mul(a, b):
+        if a is None or b is None or len(a) * len(b) > 4 * MAX_POLY_TERMS:
+            return None, False
+        out, cancel = {}, False
+        for k1, v1 in a.items():
+            for k2, v2 in b.items():
+                ex = dict(k1)
+                for at, p in k2:
+                    q = ex.get(at, 0)
+                    if q * p < 0:
+                        if not (at[0] == "var" and nonzero(at[1])):
+                            return None, False
+                        cancel = True
+                    ex[at] = q + p
+                k = tuple(sorted(((at, p) for at, p in ex.items() if p != 0), key=repr))
+                out[k] = out.get(k, 0.0) + v1 * v2
+        return small(out), cancel
+
+    def atom():
+        t = (op, *trees)
+        return t, {((t, 1),): 1.0}
+
+    if op in ("sum", "add"):
+        return (op, *trees), add(polys, [1.0] * len(polys))
+    if op == "sub":
+        return (op, *trees), add(polys, [1.0, -1.0])
+    if op == "neg":
+        return (op, *trees), add(polys, [-1.0])
+    if op == "mul":
+        q, cancel = mul(*polys)
+        if cancel and q is not None:
+            return _tree(q), q
+        return (op, *trees), q
+    if op == "div":
+        b = polys[1]
+        if b is not None and len(b) == 1:
+            (k, v), = b.items()
+            if v != 0.0:
+                q, cancel = mul(polys[0], {tuple((at, -p) for at, p in k): 1.0 / v})
+                if cancel and q is not None:
+                    return _tree(q), q
+                if q is not None and all(p > 0 for _, p in k):  # (only a division by a monomial)
+                    return (op, *trees), q
+        return atom()
+    if op == "pow" and trees[1][0] == "num" and float(trees[1][1]).is_integer() and 1 <= trees[1][1] <= 3:
+        a = polys[0]
+        q = {(): 1.0}
+        for _ in range(int(trees[1][1])):
+            q, _ = mul(q, a)
+        return (op, *trees), q
+    return atom()
+
+
+def _tree(q):
+    """An expression tree for ``{monomial: coefficient}`` (``_cancel``): each term
+    ``c * (product of the atoms with positive exponents) / (product of the others)``."""
+    def prod(fs):
+        out = None
+        for at, p in fs:
+            f = at if p == 1 else ("pow", at, ("num", float(p)))
+            out = f if out is None else ("mul", out, f)
+        return out
+
+    terms = []
+    for k, c in q.items():
+        num = prod([(at, p) for at, p in k if p > 0])
+        den = prod([(at, -p) for at, p in k if p < 0])
+        t = ("num", c) if num is None else (num if c == 1.0 else ("mul", ("num", c), num))
+        if den is not None:
+            t = ("div", t, den)
+        terms.append(t)
+    return terms[0] if len(terms) == 1 else ("sum", *terms)
+
+
 def _range(R):
     """One range/bound entry -> (lo, hi) with +-inf."""
     k = R.code()
@@ -214,12 +324,13 @@ def _range(R):
     return lo, hi
 
 
-def parse_nl(data, name="model", integers="error"):
+def parse_nl(data, name="model", integers="error", simplify=True):
     """Parse ``.nl`` contents (bytes or str, text or binary format).
 
     ``integers``: for a model with integer variables, ``"error"`` raises
     ``NLError``, ``"mask"`` sets ``NLModel.integer``, and ``"relax"`` reads the
-    continuous relaxation (``integer`` all False).
+    continuous relaxation (``integer`` all False). ``simplify`` multiplies out products that
+    cancel a division by a variable bounded away from 0 (``_cancel``).
     """
     if integers not in ("error", "mask", "relax"):
         raise ValueError(f"integers must be 'error', 'mask' or 'relax', not {integers!r}")
@@ -293,6 +404,19 @@ def parse_nl(data, name="model", integers="error"):
         raise NLError(f"expected {ncom} defined variables, found {len(defined)}")
     if n_obj > 1:
         raise NLError("multiple objectives are not supported")
+    if simplify:
+        def nonzero(j):
+            return j < n and (lo[j] > 0 or hi[j] < 0)
+
+        def simp(e):
+            try:
+                return _cancel(e, nonzero)[0]
+            except RecursionError:
+                return e
+
+        exprs_o = [simp(e) for e in exprs_o]
+        exprs_c = [simp(e) for e in exprs_c]
+        defined = {j: (lin, simp(ex)) for j, (lin, ex) in defined.items()}
 
     def compile_(x, obj_wanted=True, rows=None):
         """Evaluate model expressions at x (one trace; defined vars cached).
@@ -388,12 +512,12 @@ def parse_nl(data, name="model", integers="error"):
     )  # fmt: skip
 
 
-def read_nl(path, integers="error"):
+def read_nl(path, integers="error", simplify=True):
     """Read a ``.nl`` file (see ``parse_nl``)."""
     import pathlib
 
     p = pathlib.Path(path)
-    return parse_nl(p.read_bytes(), name=p.stem, integers=integers)
+    return parse_nl(p.read_bytes(), name=p.stem, integers=integers, simplify=simplify)
 
 
 def _integer_mask(n, nlv, discrete):

@@ -66,6 +66,9 @@ OFFSET_LIMIT = 10.0
 MAX_STATIC_CUTS = 6000  # _binary_cuts: static rows kept (in order of generation)
 MAX_POOL = 20000  # _binary_cuts: rows in the separation pool
 N_SEP = 1  # make_quadratic_bounder: rounds of pool separation (each one more IPM solve)
+# _eigen_cuts: rows (v.x)^2 = sum_ij v_i v_j w_ij along the eigenvectors v of each row's quadratic part
+MAX_EIG_SUPPORT = 16  # a row's (connected) quadratic block is used only up to this many variables
+MAX_EIG_PAIRS = 400_000  # budget of (nonzero, nonzero) pairs of the eigen rows (the IPM's normal-matrix scatter)
 
 
 class Lattice(NamedTuple):
@@ -122,6 +125,129 @@ class QuadraticForm(NamedTuple):
     # symmetry group on the integer variables (x[p] feasible with f(x[p]) = f(x)), for lex-leader
     # pruning (``symmetry.lex_prune``); valid on a box only if p keeps its bounds
     sym: np.ndarray = np.zeros((0, 0), np.int64)
+    # eigenvector cuts (``_eigen_cuts``): for vector k, s_k = sum eig_cw w and t_k = sum eig_cx x
+    # over its entries (eig_row == k) satisfy s_k = t_k^2 at every point of the problem. The eig_*
+    # vectors get tangents (lower bounds on s_k), the sec_* vectors (same fields) secants.
+    n_eig: int = 0
+    eig_row: np.ndarray = np.zeros(0, np.int64)  # (nnz,) the vector of each entry
+    eig_col: np.ndarray = np.zeros(0, np.int64)  # (nnz,) its column (x_i or w_ij)
+    eig_cw: np.ndarray = np.zeros(0)  # (nnz,) v_i^2 on w_ii, 2 v_i v_j on w_ij, 0 on x
+    eig_cx: np.ndarray = np.zeros(0)  # (nnz,) v_i on x_i, 0 on w
+    n_sec: int = 0
+    sec_row: np.ndarray = np.zeros(0, np.int64)
+    sec_col: np.ndarray = np.zeros(0, np.int64)
+    sec_cw: np.ndarray = np.zeros(0)
+    sec_cx: np.ndarray = np.zeros(0)
+
+
+def _eigen_cuts(Q, n, max_support=None, max_pairs=None):
+    """``Q`` with eigenvector cuts. For every row (objective, inequalities, equalities) whose
+    quadratic part ``x' M x`` has a block of variables ``S`` (a connected component of ``M``'s
+    graph, 2 to ``max_support`` variables) in which every product ``x_i x_j`` (squares included)
+    is a column, each eigenvector ``v`` of ``M_SS`` gives the identity
+
+        (v.x)^2 = sum_i v_i^2 w_ii + 2 sum_{i<j} v_i v_j w_ij,
+
+    linear in ``w``, which holds at every point of the problem (``w = x x'``) for any ``v``.
+    The LP gets the secant of ``t^2`` over the interval of ``t = v.x`` on the box (an upper
+    bound on the left side) and tangents ``t^2 >= 2 p t - p^2`` (lower bounds: at the interval's
+    ends and midpoint, and Kelley tangents at LP points). The McCormick facets bound each
+    product separately; on a convex quadratic over a wide box they leave the sum of the
+    products far below ``x' M x`` (a general-integer QP with a positive definite objective on
+    [0, 200]^7: lifted LP -9471, the objective's minimum over the box -1106), while along
+    eigenvectors the tangents restore it (and the secants bound the concave directions of an
+    indefinite row). The identity is exact whatever ``v`` is, so the eigenvectors' accuracy does
+    not matter for validity; the coefficients' rounding is covered by the LP's row margins.
+    A row bounds its quadratic part from the side it is minimized on (objective, ``g <= 0``), so
+    an eigenvector with a positive eigenvalue gets the tangents, one with a negative eigenvalue
+    the secant; an equality row's get both. Vectors that are (up to sign) duplicates, or have a
+    single nonzero (a square column has its own tangents and secant), are skipped, and so are
+    secants of two-variable vectors (the McCormick facets of the three products give that
+    secant: the distances of circle packing). Rows are taken in order until ``max_pairs``
+    (pairs of nonzeros per LP row, summed over the rows) is used up."""
+    max_support = MAX_EIG_SUPPORT if max_support is None else max_support
+    max_pairs = MAX_EIG_PAIRS if max_pairs is None else max_pairs
+    col = {(int(a), int(b)): n + p for p, (a, b) in enumerate(Q.pairs) if a < n and b < n}
+    fam = {"tan": ([], [], [], [], [0]), "sec": ([], [], [], [], [0])}
+    seen = set()
+    budget = max_pairs
+    rows_per = {"tan": 7, "sec": 1}  # tangents: 3 per box and Kelley rounds (4 by default)
+    n_ineq = 1 + Q.n_g
+    for r in range(Q.E.shape[0]):
+        Mr = {}
+        for (a, b), c in col.items():
+            v = Q.E[r, c]
+            if v != 0.0:
+                Mr[(a, b)] = v
+        if not Mr:
+            continue
+        adj = {}
+        for a, b in Mr:
+            adj.setdefault(a, set()).add(b)
+            adj.setdefault(b, set()).add(a)
+        done = set()
+        for s0 in sorted(adj):
+            if s0 in done:
+                continue
+            comp, stack = set(), [s0]
+            while stack:
+                u = stack.pop()
+                if u not in comp:
+                    comp.add(u)
+                    stack += [w for w in adj[u] if w not in comp]
+            done |= comp
+            S = sorted(comp)
+            if not 2 <= len(S) <= max_support:
+                continue
+            if any((S[i], S[j]) not in col for i in range(len(S)) for j in range(i, len(S))):
+                continue
+            pos = {v: i for i, v in enumerate(S)}
+            M = np.zeros((len(S), len(S)))
+            for (a, b), v in Mr.items():
+                if a in pos:
+                    if a == b:
+                        M[pos[a], pos[a]] += v
+                    else:
+                        M[pos[a], pos[b]] += 0.5 * v
+                        M[pos[b], pos[a]] += 0.5 * v
+            lam, V = np.linalg.eigh(M)
+            big = np.max(np.abs(lam), initial=0.0)
+            for i in range(len(S)):
+                if not abs(lam[i]) > 1e-9 * big:
+                    continue
+                v = V[:, i].copy()
+                v[np.abs(v) < 1e-9] = 0.0
+                nz = np.flatnonzero(v)
+                if nz.size < 2:
+                    continue
+                v = v * np.sign(v[nz[0]])
+                kinds = ["tan", "sec"] if r >= n_ineq else ["tan" if lam[i] > 0 else "sec"]
+                ent = {}
+                for a in nz:
+                    for b in nz[nz >= a]:
+                        ent[col[(S[a], S[b])]] = (v[a] * v[a] if a == b else 2.0 * v[a] * v[b], 0.0)
+                    ent[S[a]] = (0.0, v[a])
+                for kind in kinds:
+                    key = (kind,) + tuple(np.round(v, 9).tolist()) + (tuple(S),)
+                    cost = rows_per[kind] * len(ent) ** 2
+                    if key in seen or (kind == "sec" and nz.size == 2) or cost > budget:
+                        continue
+                    budget -= cost
+                    seen.add(key)
+                    er, ec, ew, ex, k = fam[kind]
+                    for c_, (w, x) in sorted(ent.items()):
+                        er.append(k[0])
+                        ec.append(c_)
+                        ew.append(w)
+                        ex.append(x)
+                    k[0] += 1
+    out = {}
+    for kind, pre in (("tan", "eig"), ("sec", "sec")):
+        er, ec, ew, ex, k = fam[kind]
+        if k[0]:
+            out.update({f"n_{pre}": k[0], f"{pre}_row": np.asarray(er, np.int64), f"{pre}_col": np.asarray(ec, np.int64),
+                        f"{pre}_cw": np.asarray(ew), f"{pre}_cx": np.asarray(ex)})
+    return Q._replace(**out) if out else Q
 
 
 def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS, integer=None, max_poly_columns=None,
@@ -337,6 +463,7 @@ def quadratic_form(f, ineq, eq, n, degree=2, max_columns=MAX_COLUMNS, integer=No
                                                      seconds=SEARCH_SECONDS if sym_seconds is None else sym_seconds))
                 except Exception:
                     pass
+    Q = _eigen_cuts(Q, n)
     return ineq_rlt(Q, n) if degree == 2 else Q
 
 
@@ -694,6 +821,7 @@ class _Layout(NamedTuple):
     K: int = 0  # pool rows separated per round
     sep_row: int = 0  # first row of the pool slots
     sep_at: int = 0  # first pattern entry (and value) of the pool slots
+    eig_types: int = 0  # eigen tangent rows per tangent vector (``_eigen_cuts``): 3, then n_tan Kelley tangents
 
 
 def _sep_size(Q, n_sep):
@@ -738,6 +866,15 @@ def _layout(Q, n, n_tan, cutoff_row, n_sep=0):
         rows.append(m + np.repeat(np.arange(n_sep * K), W))
         cols.append(np.zeros(n_sep * K * W, np.int64))
         m += n_sep * K
+    if Q.n_sec:  # eigen secants (values per box)
+        rows.append(m + Q.sec_row)
+        cols.append(Q.sec_col)
+        m += Q.n_sec
+    eig_types = (3 + n_tan) if Q.n_eig else 0
+    for t in range(eig_types):  # eigen tangents (values per box; the Kelley ones per round)
+        rows.append(m + Q.eig_row)
+        cols.append(Q.eig_col)
+        m += Q.n_eig
     if cutoff_row:
         r, c = np.nonzero(Q.E[:1])
         rows.append(m + r)
@@ -745,7 +882,8 @@ def _layout(Q, n, n_tan, cutoff_row, n_sep=0):
         vals.append(Q.E[0, c])
         m += 1
     static = np.concatenate(vals) if vals else np.zeros(0)
-    return _Layout(_pattern(rows, cols, m), static, n_tan, cutoff_row, n_sep if K else 0, K, sep_row, sep_at)
+    return _Layout(_pattern(rows, cols, m), static, n_tan, cutoff_row, n_sep if K else 0, K, sep_row, sep_at,
+                   eig_types)
 
 
 def _binary_ok(Q, lo, hi):
@@ -829,6 +967,32 @@ def _lp(Q, L, lo, hi, tol, safe, cutoff=None):
         b += [cq * ql, -cq * qu]
     if L.K:
         b.append(jnp.full(L.n_sep * L.K, jnp.inf))
+    def t_range(row, col_, cx, K):  # interval of t = v.x over the box (outward rounded with safe)
+        isx = jnp.asarray(cx != 0.0)
+        cxj, cj = jnp.asarray(cx), jnp.asarray(col_)
+        xl, xu = jnp.where(isx, vlo[cj], 0.0), jnp.where(isx, vhi[cj], 0.0)
+        ta = _segsum(jnp.where(isx, jnp.minimum(cxj * xl, cxj * xu), 0.0), row, K)
+        tb = _segsum(jnp.where(isx, jnp.maximum(cxj * xl, cxj * xu), 0.0), row, K)
+        if safe:
+            te = SAFE_K * EPS * (len(row) + 3) * _segsum(jnp.abs(cxj) * jnp.where(isx, vmag[cj], 0.0), row, K)
+            ta, tb = ta - te, tb + te
+        fin = jnp.isfinite(ta) & jnp.isfinite(tb)
+        return jnp.where(fin, ta, 0.0), jnp.where(fin, tb, 0.0), fin
+
+    eig_vals = []
+    if Q.n_sec:  # t = v.x in [ta, tb]: secant t^2 <= (ta + tb) t - ta tb
+        sa, sb, sfin = t_range(Q.sec_row, Q.sec_col, Q.sec_cx, Q.n_sec)
+        eig_vals.append(jnp.asarray(Q.sec_cw) - (sa + sb)[jnp.asarray(Q.sec_row)] * jnp.asarray(Q.sec_cx))
+        b.append(jnp.where(sfin, -sa * sb, jnp.inf))
+    if L.eig_types:  # tangents t^2 >= 2 p t - p^2 at the ends and the midpoint, Kelley rows dead
+        K_e, er, ec = Q.n_eig, jnp.asarray(Q.eig_row), jnp.asarray(Q.eig_col)
+        ecw, ecx = jnp.asarray(Q.eig_cw), jnp.asarray(Q.eig_cx)
+        eta, etb, tfin = t_range(Q.eig_row, Q.eig_col, Q.eig_cx, K_e)
+        for p_ in (eta, 0.5 * (eta + etb), etb):
+            eig_vals.append(-ecw + 2.0 * p_[er] * ecx)
+            b.append(jnp.where(tfin, p_ * p_, jnp.inf))
+        eig_vals.append(jnp.zeros(L.n_tan * ecw.size))
+        b.append(jnp.full(L.n_tan * K_e, jnp.inf))
     if L.cutoff_row:
         b.append(jnp.atleast_1d(cutoff - c[0]))
     b = jnp.concatenate(b)
@@ -841,6 +1005,7 @@ def _lp(Q, L, lo, hi, tol, safe, cutoff=None):
         pieces.append(qr_vals)
     if L.K:
         pieces.append(jnp.zeros(L.n_sep * L.K * Q.pool_cols.shape[1]))
+    pieces += eig_vals
     if L.cutoff_row:
         pieces.append(jnp.asarray(L.static_vals[n_static:]))
     vals = jnp.concatenate(pieces)
@@ -862,14 +1027,26 @@ def _lp(Q, L, lo, hi, tol, safe, cutoff=None):
         qm = EPS * (N + 3) * (jnp.abs(b[q0:q0 + 2 * T2]) + abs(tol) + absAv[q0:q0 + 2 * T2])
         b = b.at[q0:q0 + 2 * T2].add(qm)
 
+    # first eigen Kelley row and value (blocks after the pool slots, ``_layout``)
+    ek_row = t0 + L.n_tan * P + 2 * T2 + L.n_sep * L.K + Q.n_sec + 3 * Q.n_eig
+    ek_at = tan_at + L.n_tan * 2 * P + 2 * len(Q.qr_row) + L.n_sep * L.K * Q.pool_cols.shape[1] \
+        + len(Q.sec_row) + 3 * len(Q.eig_row)
+
     def tangents(vals, b, x, k):
-        """Tangents ``-w + 2 p x_i <= p^2`` at ``p = x_i`` for the squares, as round ``k``'s rows."""
+        """Tangents ``-w + 2 p x_i <= p^2`` at ``p = x_i`` for the squares, and ``-s + 2 p t <= p^2``
+        at ``p = t`` for the eigenvectors (``_eigen_cuts``), as round ``k``'s rows."""
         p = jnp.clip(x[I], li, ui)
         tv = jnp.stack([jnp.where(sq, -1.0, 0.0), jnp.where(sq, 2 * p, 0.0)]).reshape(-1)
         tb = jnp.where(sq, p * p, 0.0)
         tb = margin(tb, jnp.where(sq, vmag[n:] + 2 * jnp.abs(p) * vmag[I], 0.0))
         vals = jax.lax.dynamic_update_slice(vals, tv, (tan_at + k * 2 * P,))
         b = jax.lax.dynamic_update_slice(b, jnp.where(sq, tb, jnp.inf), (t0 + k * P,))
+        if L.eig_types:
+            pe = jnp.clip(_segsum(ecx * x[ec], Q.eig_row, K_e), eta, etb)
+            ev = -ecw + 2.0 * pe[er] * ecx
+            eb = margin(pe * pe, _segsum(jnp.abs(ev) * vmag[ec], Q.eig_row, K_e))
+            vals = jax.lax.dynamic_update_slice(vals, ev, (ek_at + k * ecw.size,))
+            b = jax.lax.dynamic_update_slice(b, jnp.where(tfin, eb, jnp.inf), (ek_row + k * K_e,))
         return vals, b
 
     return vlo, vhi, vals, b, tangents
@@ -1101,7 +1278,7 @@ def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False, n_s
     ``_separate``). The bound is the best certificate over the rounds, raised to the objective
     lattice (``_snap``) when ``Q`` has one."""
     need = square_needs_lower(Q)
-    n_kelley = n_kelley if need.any() else 0  # else the tangents are redundant
+    n_kelley = n_kelley if need.any() or Q.n_eig else 0  # else the tangents are redundant
     n_sep = n_sep if Q.pool_rhs.size else 0
     layouts = {}
 
@@ -1168,6 +1345,10 @@ def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False, n_s
             if n_kelley:  # Kelley: tangents of the squares at the LP solution (not after the last round)
                 gap = jnp.where(needj, v[I] * v[J] - v[n:], -jnp.inf)  # x^2 - w: > 0 cuts the point off
                 cut = (k < n_kelley) & jnp.any(gap > 1e-9 * (1.0 + scale[n:]))
+                if Q.n_eig:  # t^2 - s at the LP point: > 0 cuts it off
+                    te = _segsum(jnp.asarray(Q.eig_cx) * v[jnp.asarray(Q.eig_col)], Q.eig_row, Q.n_eig)
+                    se = _segsum(jnp.asarray(Q.eig_cw) * v[jnp.asarray(Q.eig_col)], Q.eig_row, Q.n_eig)
+                    cut = cut | ((k < n_kelley) & jnp.any(te * te - se > 1e-9 * (1.0 + te * te)))
                 vals, b = jax.lax.cond(k < n_kelley, lambda: tangents(vals, b, v, jnp.minimum(k, n_kelley - 1)),
                                        lambda: (vals, b))  # fmt: skip
             if L.n_sep:  # pool rows violated at the LP solution
