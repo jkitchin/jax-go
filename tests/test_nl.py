@@ -196,3 +196,68 @@ def test_integer_mask_matches_pyomo(obj_only, tmp_path):
     want = [getattr(m, c).is_integer() or getattr(m, c).is_binary() for c in cols]
     assert M.n == len(cols) and M.integer.tolist() == want, (cols, M.integer)
     assert M.n_int == 5
+
+
+def _eval(e, x):
+    """Plain evaluation of an expression tree (``nl._cancel`` tests)."""
+    op = e[0]
+    if op == "num":
+        return e[1]
+    if op == "var":
+        return x[e[1]]
+    a = [_eval(t, x) for t in e[1:]]
+    if op == "sum":
+        return sum(a)
+    return {"add": lambda u, v: u + v, "sub": lambda u, v: u - v, "mul": lambda u, v: u * v,
+            "div": lambda u, v: u / v, "pow": lambda u, v: u ** v, "neg": lambda u: -u,
+            "exp": np.exp, "sqrt": np.sqrt}[op](*a)  # fmt: skip
+
+
+def _ops(e):
+    return [e[0]] + [o for t in e[1:] for o in _ops(t)] if e[0] not in ("num", "var") else []
+
+
+def test_cancel_multiplies_out_a_cancelled_division():
+    """(0.01 (0.24 x1 / x0) + 0.013) x0 becomes 0.0024 x1 + 0.013 x0 (linear: no div, no mul of
+    variables) when x0 is bounded away from 0; with x0 allowed to be 0 the tree is kept."""
+    from jaxglobal.nl import _cancel
+
+    v0, v1 = ("var", 0), ("var", 1)
+    e = ("mul", ("add", ("mul", ("num", 0.01), ("div", ("mul", ("num", 0.24), v1), v0)), ("num", 0.013)), v0)
+    t, _ = _cancel(e, lambda j: j == 0)
+    assert "div" not in _ops(t)
+    rng = np.random.default_rng(0)
+    for x in rng.uniform(0.5, 9.0, (20, 2)):
+        assert _eval(t, x) == pytest.approx(_eval(e, x), rel=1e-12)
+    assert _cancel(e, lambda j: False)[0] == e
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_cancel_is_exact_on_random_trees(seed):
+    """Random trees of sums, products, quotients and powers (and an exp atom) evaluate the same
+    after ``_cancel`` at random points with the variables away from 0."""
+    from jaxglobal.nl import _cancel
+
+    rng = np.random.default_rng(seed)
+
+    def rand(d):
+        if d == 0 or rng.random() < 0.25:
+            return ("var", int(rng.integers(3))) if rng.random() < 0.7 else ("num", float(rng.integers(1, 5)))
+        op = rng.choice(["add", "sub", "mul", "div", "mul", "pow", "exp", "neg"])
+        if op == "pow":
+            return ("pow", rand(d - 1), ("num", float(rng.integers(1, 3))))
+        if op in ("exp", "neg"):
+            return (op, ("mul", ("num", 0.1), rand(d - 1)) if op == "exp" else rand(d - 1))
+        return (op, rand(d - 1), rand(d - 1))
+
+    n_changed = 0
+    for _ in range(60):
+        e = rand(4)
+        t, _ = _cancel(e, lambda j: True)
+        n_changed += t != e
+        for x in rng.uniform(0.5, 2.0, (5, 3)):
+            with np.errstate(all="ignore"):
+                a, b = _eval(e, x), _eval(t, x)
+            if np.isfinite(a):
+                assert b == pytest.approx(a, rel=1e-9, abs=1e-9)
+    assert n_changed > 0
