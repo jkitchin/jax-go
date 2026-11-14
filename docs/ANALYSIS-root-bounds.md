@@ -158,3 +158,51 @@ LP already has the first kind (Kelley rounds at the node's LP point, `n_kelley`;
 relaxation of these sums of squares is exact), and its node counts are of the same order as
 SCIP's (m423: 5,459 vs 2,524; m424 at 180 s: 15,547 nodes vs 15,781 to optimality): the gap
 is nodes per second (jaxglobal ~90/s, SCIP ~1,000/s on m424).
+
+## 6. Weak terms in the nonconvex models, and two fixes
+
+Diagnosis per model (root box after jaxglobal's root processing; SCIP's `.cip` dump for the
+expression structure):
+
+| model | dominant weak term | status |
+|---|---|---|
+| nvs17 | the objective is a **convex** quadratic (eigenvalues 0.98-29.8) in 7 general integers on [0, 200]; its minimum over the box, -1105.9, is SCIP's root. The lifted quadratic LP (`quadratic.py`) bounds each product by its McCormick facets, which on a 200-wide box leave sum q_ij w_ij far below x'Qx (-9471) | fixed: eigenvector cuts |
+| m7 | `(0.01 (0.24 x3 / x0) + 0.013) x0` (ordering cost per order times order size): `x3` is linear, but relaxed as McCormick of `x3 / x0` in [0, 2e5] times `x0` in [1, 250] it can lose up to `0.0024 x3` (about 290 at total demand, against a root gap of 330 to SCIP). The EOQ part `10 x0 + 0.06 x3 / x0` is already at its envelope through `mc_frac`, and the concave risk-pooling term `sqrt(sum L y)` gains nothing at the root (its convex envelope over the assignment polytope has the same minimum as the secant) | fixed: cancellation in the `.nl` reader |
+| m31, m32 | batch design: `N_j V_j^0.6` (log-space monomial rule already applies), `N_j TL_i >= t_ij`, `sum Q_i TL_i / B_i <= H` (`mc_frac` applies). The model is convex in log variables, so the gap is integrality of `N_j` (1 + y1 + 2 y2) | not addressed |
+| m470 | bilinear pooling (quality times flow, p-formulation) with fixed charges; no complete quadratic blocks, so eigenvector cuts add 2 vectors and nothing | not addressed |
+| m19-m21 | scheduling: `PROFIT * H`, `DEMAND * H`, `RATE * (TF - TS)`, cubic inventory terms with big-M binaries; SCIP's roots are as weak (3.7-12x the optimum) | not addressed |
+
+**Eigenvector cuts (`quadratic._eigen_cuts`).** For every row of the lifted quadratic LP whose
+quadratic block (a connected component of up to 16 variables) has all its products as
+columns, each eigenvector `v` of the block gives the identity `(v.x)^2 = sum v_i v_j w_ij`,
+which holds at every point whatever `v` is. Positive eigenvalues of a minimized side (objective,
+`g <= 0`) get tangents of `t^2` at the ends and midpoint of the interval of `t = v.x` plus
+Kelley tangents at the LP points; negative ones the secant (equality rows both; two-variable
+secants are skipped, McCormick already implies them). Under `safe` the interval of `t` is
+rounded outward and the rows carry the LP's usual margins. Tests: `tests/test_eigen_cuts.py`
+(every row holds at 250 sampled points per random box, plain and safe; bound below sampled
+feasible values; at least 95% of the McCormick gap closed on random convex QPs).
+
+**Cancellation in the `.nl` reader (`nl._cancel`).** Expression trees are tracked as small sums
+of monomials; a product (or quotient) in which an atom's positive and negative exponents meet is
+multiplied out, if that atom is a variable whose bounds exclude 0 (so both forms agree on the
+box). Of the MINLPLib and minlp.org `.nl` files (up to 300 kB), 3 change: m7, ex8_4_8_bnd and
+st_e32 (max relative difference of f, g, h at random points 6e-14). `read_nl(simplify=False)`
+reads the trees as written.
+
+Before / after (`root_gap.py jaxglobal`; solves 120 s, rel_tol 1e-4, one at a time):
+
+| model | SCIP root | root before | root after | solve before | solve after |
+|---|---:|---:|---:|---|---|
+| nvs17 (min, opt -1100.4) | -1105.1 | -9470.8 | **-1105.6** | optimal, 4,617 nodes, 24.6 s | optimal, **41 nodes**, 26.8 s |
+| m7 (min, opt 2260.3) | 1142.9 | 814.6 | **1001.4** | limit: lb 2224.5, 22,867 nodes | **optimal in 6.2 s, 89 nodes** |
+| m470 (max, best 545) | 1156 | 1241.3 | 1241.3 | limit: 931.6 / 363.2, 1,781 nodes | identical |
+| m19-m21, m31, m32 | | | unchanged (neither rule applies) | | |
+
+`check_wrong.py --sample 12 --time-limit 20 --jobs 1`, seeds 0 and 1: no wrong answers; the
+statuses equal those of the base branch on seed 0 (pointpack10's 20 s bound was weaker with
+the first version of the cuts, which gave its distance rows secants; they now get none).
+
+Next: for m31/m32 the integer `N_j` (an integer-aware bound, section 2, or branching on it
+first); for m470 RLT products of the pool mass balance with the qualities (new columns
+`q_k f_i`), which is what closes p-formulation pooling gaps.
