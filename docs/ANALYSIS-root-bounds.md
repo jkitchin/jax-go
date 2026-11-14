@@ -124,3 +124,37 @@ against thousands of nodes it needs to be selective, e.g. when a node's LP point
 infeasible in many binaries), or cuts that carry integrality into the LP (big-M perspective /
 disjunctive cuts), which SCIP's 2,524-node, 3 s solve of m423 suggests matter more than the
 root bound.
+
+## 5. What makes SCIP fast on the k-means models (ablation)
+
+SCIP 10.0, 60 s, one component off at a time (`benchmarks` scratch script, settings as in
+section 1). Nodes (time) to optimality; m425 never solves in 60 s, so its dual bound at 60 s:
+
+| setting | m423 | m419 | m424 | m425 bound |
+|---|---:|---:|---:|---:|
+| default | 2,524 (2.8 s) | 6,478 (8.6 s) | 15,781 (15 s) | 0.503 |
+| all separation off (`setSeparating(OFF)`) | 14,531 | 27,649 | 112,407 (52 s) | 0.005 |
+| presolve off | 2,577 | 5,743 | 15,466 | 0.418 |
+| propagation off | 4,422 | 6,280 | 16,024 | 0.458 |
+| symmetry off | 2,524 | 6,478 | 15,781 | 0.519 |
+| heuristics off | 3,510 | 9,231 | 20,062 | 0.680 |
+| pscost / mostinf branching | 4,182 / 4,905 | 6,410 / 7,198 | 12,402 / 25,353 | 0.460 / 0.228 |
+| separation, presolve, symmetry off | 10,146 | 26,505 | limit, 0.237 | 0 |
+
+Which separation, on m424 (nodes; default 15,781):
+
+| off | nodes |
+|---|---:|
+| every separator plugin (constraint handlers' separation kept) | 15,279 |
+| `constraints/nonlinear` separation (gradient cuts of the convex constraints at the node LP point) | **80,143** |
+| implied bounds | 30,801 |
+| gomory, aggregation (cmir), flowcover | 11,032, 17,469, 14,230 |
+| rlt, minor, zerohalf, knapsack, clique, mcf, eccuts, gauge, disjunctive, linear, varbound | 15,781 (no change) |
+
+So SCIP's speed on these models is (1) outer-approximation cuts of the convex quadratic big-M
+constraints at every node's LP solution, kept in the global cut pool (they are valid
+everywhere), and (2) implied-bound cuts; no MIP cutting plane family matters. jaxglobal's node
+LP already has the first kind (Kelley rounds at the node's LP point, `n_kelley`; its McCormick
+relaxation of these sums of squares is exact), and its node counts are of the same order as
+SCIP's (m423: 5,459 vs 2,524; m424 at 180 s: 15,547 nodes vs 15,781 to optimality): the gap
+is nodes per second (jaxglobal ~90/s, SCIP ~1,000/s on m424).
