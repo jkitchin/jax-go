@@ -890,7 +890,17 @@ def _batched(fn, X):
     return np.asarray(fn(jnp.asarray(X, dtype=jnp.float64)))[:k]
 
 
-_NCPU = os.cpu_count() or 1  # pounce solves batches in parallel on this many threads (polish time caps)
+def _ncpu():
+    """Threads pounce solves batches on: ``RAYON_NUM_THREADS`` when set (benchmarks/run.py
+    --threads-per-job caps it), else the CPU count."""
+    try:
+        k = int(os.environ.get("RAYON_NUM_THREADS", "0"))
+    except ValueError:
+        k = 0
+    return k if k > 0 else (os.cpu_count() or 1)
+
+
+_NCPU = _ncpu()  # pounce solves batches in parallel on this many threads (polish time caps)
 _POLISH_FIRST = 8  # neighbours in the first batch, before the cost of a solve is known
 _POLISH_MIN, _POLISH_FRAC = 2.0, 0.1  # polish time budget: _POLISH_MIN s plus this fraction of the elapsed time
 _NEAR_ZERO_STARTS = 4  # extra random starts for the scaled local solves of a near-zero objective
