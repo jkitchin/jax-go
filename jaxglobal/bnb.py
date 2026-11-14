@@ -1027,7 +1027,7 @@ def minimize(
     crown=False,
     cut_pool=128,
     safe=SAFE_DEFAULT,
-    milp_root=True,
+    milp_root=False,
     time_limit=np.inf,
     verbose=False,
 ):
@@ -1087,6 +1087,8 @@ def minimize(
     outer-approximation rounds (``milpbound.py``; HiGHS's dual bound less a margin, so not
     certified), within ``MILP_ROOT_SHARE`` of ``time_limit`` and ``MILP_ROOT_SECONDS``. It closes
     root gaps that come from integrality alone (big-M models: minlp.org's k-means clustering).
+    Off by default: a raised root bound short of the incumbent prunes no node, so the search is
+    the same, minus the MILP's time (docs/ANALYSIS-root-bounds.md section 4).
 
     ``safe`` rounds every quantity feeding a lower bound outward (interval and
     McCormick values, envelopes, alphaBB, CROWN lines, LP rows and the dual

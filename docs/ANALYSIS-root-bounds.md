@@ -92,5 +92,35 @@ Findings:
    relaxation, not in integrality: structure-specific relaxations (concave functions of binary
    sums, perspective terms `x * phi(n, d)`, products of general integers) and search speed.
 
-Not done: the MILP bound inside jaxglobal (on its own root box and cuts); m419, m424, m425 with
-the prototype; why SCIP's roots on nvs17 and m32 are tight.
+Not done: why SCIP's roots on nvs17 and m32 are tight.
+
+## 4. The MILP root bound inside jaxglobal (`milp_root`)
+
+`jaxglobal/milpbound.py`, `minimize(milp_root=True)`: cuts at the center, the axis points of
+the nonlinear variables only (`lp._nonlinear_vars`; 10 of 70 on m423), random points in those
+coordinates, the incumbent and the relaxation points, then at each MILP solution and its
+midpoint with the previous one; run after root OBBT and probing on the hull of the open root
+boxes. On m423 the first MILP has 3,280 rows (the prototype: 22,000) and the bound reaches 0.089
+of 0.1011 in 10 rounds, 36 s.
+
+Full solves, 180 s limit, rel_tol 1e-4, one at a time (4-core VM):
+
+| instance | optimum | off: lb / ub / nodes / time | on: lb / ub / nodes / time |
+|---|---:|---|---|
+| m423 | 0.10113 | 0.10114 / 0.10115 / 5,459 / 56 s | same / same / 5,459 / 92 s |
+| m419 | 1.8475 | 1.8474 / 1.8475 / 6,255 / 58 s | same / same / 6,255 / 96 s |
+| m424 | 0.37365 | 0.316 / 0.3737 / 15,547 / limit | 0.250 / 0.3737 / 10,939 / limit |
+| m425 | 0.99127 | 0.401 / 1.0033 / 9,197 / limit | 0.342 / 1.1134 / 7,671 / limit |
+
+The search is identical (same node counts) and only loses the MILP's time. A root bound below
+the incumbent fathoms nothing; the leaves still have to reach the optimum by themselves, and
+children inherit the root's bound only as a floor that the search passes anyway. So a root MILP
+bound pays only when it closes the gap (a convex model whose outer approximation converges
+within the budget), which on these four it does not. The option stays, off by default.
+
+What would make integrality count in the search: the same MILP at nodes (the root's cuts stay
+valid on every child box, so a node MILP needs only the child's bounds; but at 0.2-3 s per MILP
+against thousands of nodes it needs to be selective, e.g. when a node's LP point is integral
+infeasible in many binaries), or cuts that carry integrality into the LP (big-M perspective /
+disjunctive cuts), which SCIP's 2,524-node, 3 s solve of m423 suggests matter more than the
+root bound.
