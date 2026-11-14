@@ -158,3 +158,32 @@ LP already has the first kind (Kelley rounds at the node's LP point, `n_kelley`;
 relaxation of these sums of squares is exact), and its node counts are of the same order as
 SCIP's (m423: 5,459 vs 2,524; m424 at 180 s: 15,547 nodes vs 15,781 to optimality): the gap
 is nodes per second (jaxglobal ~90/s, SCIP ~1,000/s on m424).
+
+### Where jaxglobal's time per node goes, and Kelley rounds
+
+`benchmarks/profile_root.py` on m424 (90 s, warm cache): the search is 82 of 90 s, and in it
+the bound kernel 79 s: 445 calls of about 15 boxes, 178 ms per call, ~11 ms per node (SCIP:
+~1 ms per node with warm-started dual simplex). Compile time is not the issue (0.1 s warm).
+
+Each Kelley round (`n_kelley`, default 4; rounds stop early when one raises the bound by at
+most `lp.KELLEY_STALL` = 1e-4 of the gap, but under `vmap` while any box of the batch still
+wants one) is a cold IPM solve. On m424, 60 s (clean code; the default run cold):
+
+| setting | nodes | bound (opt 0.3737) |
+|---|---:|---:|
+| `n_kelley=4` (default) | 2,747 | 0.054 |
+| `n_kelley=1` / `2` / `3` | 7,889 / 5,819 / 4,281 | 0.131 / **0.143** / 0.090 |
+| `KELLEY_STALL=0.01` / `0.05` | 4,283 / 4,795 | 0.094 / 0.128 |
+| `cut_pool` 0 / 512 / 2048 | no consistent effect | |
+
+Warm cache, quiet machine, 120 s, default vs `n_kelley=2`: m423 optimal 88 s vs **61 s**;
+m419 optimal **78 s** vs 120 s (3.4x the nodes); m424 bound 0.222 vs **0.287**; m425 0.272 vs
+**0.371**. On MINLPLib int50 / start50 (60 s, 2 jobs, cold): 45 / 40 solved with the default,
+45 / 41 with `n_kelley=2` (+kall_circlespolygons_c1p12), the same geometric mean time on the
+instances both solve. (A first default run under load from another session solved 40 / 38:
+A/B runs must be interleaved or on a quiet machine.)
+
+So two rounds is a mild gain, not a clear one (m419 loses), and the default stays 4. The
+throughput gap to SCIP is the cold LP per round: warm-starting the IPM from the parent's or
+the previous round's solution, or an active-set LP for the Kelley re-solves, is what would
+close it; fewer rounds only trades bound for nodes.
