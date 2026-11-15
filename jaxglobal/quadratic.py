@@ -1324,7 +1324,39 @@ def _snap(Q, lb, lo, hi, tol=0.0):
     return jnp.where(fb + err < lb, jnp.maximum(lb, lat), jnp.maximum(lb, jnp.minimum(lat, fb - err)))
 
 
-def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False, n_sep=N_SEP, stall=None):
+RAY_SCALES = (1e0, 1e2, 1e4, 1e6, 1e8, 1e10)  # _simplex_round: multiples of a unit dual ray certified
+
+
+def _simplex_round(host, key_lo, key_hi, k, chat, pk, A, bu, active, basis, sid, cert, target, settled, ipm_iters):
+    """One round's LP by the host simplex (``simplex.lp_callback``): ``(z, y, val, basis)`` as
+    ``_ipm``'s ``(z, y_best, best)`` plus the basis and session id of ``simplex.lp_callback``. ``val`` is ``cert`` of the simplex duals
+    or, for an infeasible LP, the best ``cert`` of the dual ray's multiples (``RAY_SCALES`` over
+    its largest entry, both signs). Where the solve failed, or an infeasible LP's ray does not
+    reach ``target``, the IPM runs for that box (zero iterations elsewhere); ``val`` is never
+    the simplex's own objective."""
+    from .simplex import FAILED, INFEASIBLE, OPTIMAL
+
+    zs, ys, st, basis, sid = host(key_lo, key_hi, k, chat, A, pk.cols, bu, active, basis, sid)
+    ok = active & (st == OPTIMAL)
+    nan0 = lambda v: jnp.where(jnp.isnan(v), -jnp.inf, v)  # noqa: E731
+    c_opt = nan0(cert(jnp.where(ok, ys, 0.0)))
+    unit = ys / jnp.maximum(jnp.max(jnp.abs(ys)), 1e-300)
+    rays = jnp.stack([s * t * unit for t in RAY_SCALES for s in (1.0, -1.0)])
+    c_ray = jax.vmap(lambda y: nan0(cert(y)))(rays)
+    jr = jnp.argmax(c_ray)
+    inf_ = active & (st == INFEASIBLE)
+    val_s = jnp.where(ok, c_opt, jnp.where(inf_, c_ray[jr], -jnp.inf))
+    y_s = jnp.where(ok, ys, jnp.where(inf_, rays[jr], 0.0))
+    need = active & ((st == FAILED) | (inf_ & (val_s < target)))
+    zi, yi, vi = _ipm(chat, pk, A, bu, jnp.where(need, ipm_iters, 0), target=target, settled=settled, cert=cert)
+    vi = nan0(vi)
+    use_i = need & (vi > val_s)
+    z = jnp.where(need, zi, zs)
+    return z, jnp.where(use_i, yi, y_s), jnp.where(use_i, vi, val_s), basis, sid
+
+
+def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False, n_sep=N_SEP, stall=None, node_lp="ipm",
+                           lp_store=None):
     """Return ``bound(lo, hi, cutoff) -> (lb, x_lp, infeasible, lo', hi')`` for one box
     (the contract of ``lp.make_constrained_bounder``) from the lifted LP of ``Q``.
 
@@ -1337,7 +1369,15 @@ def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False, n_s
     after the first runs only if the previous round raised the bound by more than ``stall`` of
     the gap to ``cutoff`` (of ``1 + |bound|`` without a finite cutoff), as ``lp._kelley_go``. Any
     number of rounds gives a valid bound (each round's certificate is one): this only trades
-    bound for time."""
+    bound for time.
+
+    ``node_lp="simplex"``: each round's LP is solved on the host by a warm-started dual simplex
+    (``simplex.lp_callback``; round 0 from the basis ``lp_store`` holds for the box ``key`` given
+    to ``bound``, later rounds from the previous round's), and the bound is the certificate of
+    its duals (of its dual ray, scaled, for an infeasible LP). A failed solve falls back to the
+    IPM for that box and round."""
+    if node_lp not in ("ipm", "simplex"):
+        raise ValueError(f"node_lp must be 'ipm' or 'simplex', not {node_lp!r}")
     stall = ROUND_STALL if stall is None else stall
     stall = None if stall is not None and stall < 0 else stall
     need = square_needs_lower(Q)
@@ -1345,12 +1385,18 @@ def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False, n_s
     n_sep = n_sep if Q.pool_rhs.size else 0
     layouts = {}
 
-    def bound(lo, hi, cutoff=jnp.inf):
+    def bound(lo, hi, cutoff=jnp.inf, key=None):
         n = lo.size
         if n not in layouts:
             layouts[n] = _layout(Q, n, n_kelley, False, n_sep)
         L = layouts[n]
         pat = L.pattern
+        host = None
+        if node_lp == "simplex":
+            from .simplex import lp_callback
+
+            host = lp_callback(pat.rows, pat.m, n + len(Q.pairs), lp_store, max(n_kelley, L.n_sep))
+            key_lo, key_hi = (lo, hi) if key is None else key
         vlo, vhi, vals0, b0, tangents = _lp(Q, L, lo, hi, tol, safe)
         finite = jnp.all(jnp.isfinite(vlo) & jnp.isfinite(vhi))
         vlo, vhi = jnp.where(finite, vlo, 0.0), jnp.where(finite, vhi, 1.0)
@@ -1391,13 +1437,19 @@ def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False, n_s
             that cuts its LP point off (a tangent of a square that needs one, ``need``, or a
             violated pool row) and the box is not pruned: otherwise that point stays feasible,
             hence optimal, with the new rows (no IPM iterations)."""
-            vals, b, cols, best, rlo, rhi, vprev, active = carry
+            vals, b, cols, best, rlo, rhi, vprev, active = carry[:8]
             prev = best
             pk = pat._replace(cols=cols)
             A, bu = _unit(pk, vals, b, vlo, scale, safe)
             target = (prune_at - f0) / cn + 1e-9 * (1 + jnp.abs(prune_at) / cn)  # unit-space value that prunes
-            z, y, val = _ipm(chat, pk, A, bu, jnp.where(active, ipm_iters, 0), target=target, settled=settled,
-                             cert=lambda y: _certificate(pk, A, bu, y, chat, safe)[0])  # fmt: skip
+            cert = lambda y: _certificate(pk, A, bu, y, chat, safe)[0]  # noqa: E731
+            if host is None:
+                z, y, val = _ipm(chat, pk, A, bu, jnp.where(active, ipm_iters, 0), target=target, settled=settled,
+                                 cert=cert)  # fmt: skip
+            else:
+                basis, sid = carry[8:]
+                z, y, val, basis, sid = _simplex_round(host, key_lo, key_hi, k, chat, pk, A, bu, active & finite, basis,
+                                                       sid, cert, target, settled, ipm_iters)  # fmt: skip
             lb = jnp.where(jnp.isnan(val) | ~finite | ~active, -jnp.inf, lower(val))
             best = jnp.maximum(best, lb)
             _, r = _certificate(pk, A, bu, y, chat, safe)
@@ -1425,11 +1477,15 @@ def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False, n_s
             if stall is not None:  # the round raised the bound by at most ``stall`` of the gap: stop
                 gap = jnp.where(jnp.isfinite(cutoff), cutoff - best, 1.0 + jnp.abs(best))
                 active = active & ~(jnp.isfinite(prev) & jnp.isfinite(best) & (best - prev <= stall * gap))
-            return (vals, b, cols, best, rlo, rhi, v, active), None
+            if host is None:
+                return (vals, b, cols, best, rlo, rhi, v, active), None
+            return (vals, b, cols, best, rlo, rhi, v, active, basis, sid), None
 
         init = (vals0, b0, jnp.asarray(pat.cols), jnp.array(-jnp.inf, lo.dtype), lo, hi, vlo + 0.5 * scale,
                 jnp.array(True))  # fmt: skip
-        (_, _, _, best, rlo, rhi, x, _), _ = jax.lax.scan(round_, init, jnp.arange(n_rounds + 1))
+        if host is not None:
+            init = init + (jnp.full(N + pat.m, -1, jnp.int8), jnp.array(0, jnp.int64))
+        (_, _, _, best, rlo, rhi, x, *_), _ = jax.lax.scan(round_, init, jnp.arange(n_rounds + 1))
         x = x[:n]
         best = _snap(Q, best, lo, hi, tol)
         infeasible = best == jnp.inf

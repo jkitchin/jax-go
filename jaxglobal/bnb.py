@@ -408,9 +408,16 @@ class _Kernels:
 
     def __init__(self, f, ineq, eq, *, n_fw, n_kelley, fbbt, fbbt_rounds, dbbt, obbt, obbt_rounds,
                  univariate, alphabb, multivariate, lifted, crown, feas_tol, safe, integer=(), quadratic=True,
-                 cut_pool=0, exact=False):  # fmt: skip
+                 cut_pool=0, exact=False, node_lp="ipm"):  # fmt: skip
         opts = {k: v for k, v in locals().items() if k not in ("self", "f", "ineq", "eq")}
+        if node_lp == "ipm":  # (as minimize: the default's fingerprint is unchanged)
+            opts.pop("node_lp")
         constrained = ineq is not None or eq is not None
+        self.lp_store = None
+        if node_lp == "simplex":
+            from .simplex import Store
+
+            self.lp_store = Store()
         g, h = _vec(ineq), _vec(eq)
 
         def violation(x):
@@ -441,7 +448,7 @@ class _Kernels:
                                             univariate=univariate, alphabb=alphabb,
                                             multivariate=multivariate, safe=safe)
 
-            def raw_bound(blo, bhi, cutoff, pool=None, root=None):
+            def raw_bound(blo, bhi, cutoff, pool=None, root=None, key=None):
                 lb, x, _, rlo, rhi = lb_lifted(blo, bhi, cutoff)
                 fx = jnp.where(violation(x) <= feas_tol, f(x), jnp.inf)
                 return lb, x, fx, rlo, rhi, x
@@ -449,19 +456,23 @@ class _Kernels:
             cb = make_constrained_bounder(f, ineq, eq, n_kelley=n_kelley, tol=feas_tol, univariate=univariate,
                                           alphabb=alphabb, multivariate=multivariate, safe=safe, exact=exact)
 
-            def raw_bound(blo, bhi, cutoff, pool=None, root=None):
+            def raw_bound(blo, bhi, cutoff, pool=None, root=None, key=None):
                 Q = lifted_form(blo.size)
                 if Q is None:
                     lb, x, _, rlo, rhi = cb(blo, bhi, cutoff, pool, root)
-                else:  # (the lifted LP takes no pool)
+                elif node_lp == "ipm":  # (the lifted LP takes no pool)
                     lb, x, _, rlo, rhi = make_quadratic_bounder(Q, n_kelley=n_kelley, tol=feas_tol, safe=safe)(blo, bhi, cutoff)
+                else:  # host simplex, the node's basis found by the box it was called with (``key``)
+                    lb, x, _, rlo, rhi = make_quadratic_bounder(Q, n_kelley=n_kelley, tol=feas_tol, safe=safe,
+                                                                node_lp=node_lp, lp_store=self.lp_store)(
+                        blo, bhi, cutoff, key=key)  # fmt: skip
                 fx = jnp.where(violation(x) <= feas_tol, f(x), jnp.inf)
                 return lb, x, fx, rlo, rhi, x
         else:
             unc_bound = make_bounder(f, n_fw, univariate=univariate, alphabb=alphabb, multivariate=multivariate,
                                      return_xr=True, safe=safe)
 
-            def raw_bound(blo, bhi, cutoff, pool=None, root=None):
+            def raw_bound(blo, bhi, cutoff, pool=None, root=None, key=None):
                 return unc_bound(blo, bhi, cutoff)
         tighten = make_fbbt(f, ineq, eq, rounds=fbbt_rounds, feas_tol=feas_tol, safe=safe, integer=integer) if fbbt else None
         cut_obbt = make_obbt(f, ineq, eq, rounds=obbt_rounds, tol=feas_tol, univariate=univariate,
@@ -487,11 +498,15 @@ class _Kernels:
             """Tighten, then bound one box (with the cut pool ``pool``, valid on ``root``; see
             ``make_constrained_bounder``). Returns (lb, x, f(x), lo', hi', xr)."""
             empty = jnp.array(False)
+            key = (blo, bhi)  # the box as called: names the node for the host simplex's bases
             if tighten is not None and not (constrained and not lifted and binary_only(lifted_form(blo.size), blo.size)):
                 blo, bhi, empty = tighten(blo, bhi, cutoff)
             blo, bhi, e = round_box(blo, bhi)
             empty |= e
-            lb, x, fx, rlo, rhi, xr = raw_bound(blo, bhi, cutoff, pool, root)
+            if node_lp == "ipm":
+                lb, x, fx, rlo, rhi, xr = raw_bound(blo, bhi, cutoff, pool, root)
+            else:
+                lb, x, fx, rlo, rhi, xr = raw_bound(blo, bhi, cutoff, pool, root, key=key)
             if crown_lb is not None:  # both bounds are valid on the box: take the larger
                 lb = jnp.maximum(jnp.where(jnp.isnan(lb), -jnp.inf, lb), crown_lb(blo, bhi))
             if not dbbt:
@@ -983,6 +998,7 @@ class Result:
     evaluations: int = 0  # boxes bounded, including strong-branching trials
     max_violation: float = float("nan")  # of x, re-evaluated outside jit: box, ineq > 0, |eq|
     verified: bool = False  # x is feasible to feas_tol and f(x) == fun, checked in float64 after the search
+    simplex: dict | None = None  # node_lp="simplex": host LP solves by status, simplex iterations, warm starts
 
     @property
     def gap(self):
@@ -1079,6 +1095,7 @@ def minimize(
     safe=SAFE_DEFAULT,
     milp_root=False,
     time_limit=np.inf,
+    node_lp="ipm",
     verbose=False,
 ):
     """Globally minimize ``f(x)`` over ``lo <= x <= hi``, ``ineq(x) <= 0``, ``eq(x) == 0``.
@@ -1139,6 +1156,14 @@ def minimize(
     root gaps that come from integrality alone (big-M models: minlp.org's k-means clustering).
     Off by default: a raised root bound short of the incumbent prunes no node, so the search is
     the same, minus the MILP's time (docs/ANALYSIS-root-bounds.md section 4).
+
+    ``node_lp``: how the lifted quadratic LP of a node is solved. ``"ipm"`` (the default): the
+    batched interior-point method inside the bound kernel. ``"simplex"`` (experimental; needs
+    ``highspy`` or ``pyscipopt``): a dual simplex on the host (``simplex.py``), each node started
+    from its parent's basis and each Kelley round from the previous round's; the bound is still
+    the weak-duality certificate of its duals, and a failed solve falls back to the IPM. Other
+    node LPs (reduced-space cuts, ``lifted``) always use the IPM. ``Result.simplex`` counts the
+    solves.
 
     ``safe`` rounds every quantity feeding a lower bound outward (interval and
     McCormick values, envelopes, alphaBB, CROWN lines, LP rows and the dual
@@ -1261,6 +1286,13 @@ def minimize(
                 multivariate=multivariate, lifted=lifted, crown=bool(crown), feas_tol=feas_tol, safe=bool(safe),
                 integer=tuple(int(i) for i in np.flatnonzero(imask)), quadratic=bool(quadratic),
                 cut_pool=int(cut_pool) if pmask is not None and pmask.any() else 0, exact=bool(exact))  # fmt: skip
+    if node_lp not in ("ipm", "simplex"):
+        raise ValueError(f"node_lp must be 'ipm' or 'simplex', not {node_lp!r}")
+    if node_lp != "ipm":  # (only then: the default's kernel cache keys stay as they were)
+        from .simplex import require
+
+        require()
+        opts["node_lp"] = node_lp
     K = _cached(("kernels", f, ineq, eq, tuple(sorted(opts.items()))), lambda: _Kernels(f, ineq, eq, **opts))
     # the cut pool: tangents of the root box's relaxation at good points, added to every node LP
     pool = None
@@ -1644,8 +1676,16 @@ def minimize(
                 bound_call[0] = max([bound_call[0]] + [dt for _, dt in res])
         return [np.concatenate([np.asarray(o[i]) for o in outs])[:k] for i in range(len(outs[0]))]
 
-    def evaluate(blo, bhi, with_obbt=False):
-        """Tighten and bound a batch of boxes: (lb, x, f(x), lo', hi', xr)."""
+    lp_store = K.lp_store  # node_lp="simplex": the host simplex's bases (``simplex.Store``)
+    if lp_store is not None:
+        lp_store.clear()
+        stats0 = lp_store.stats.copy()
+    last_bases = [None]  # node_lp="simplex": each box's end basis from the last ``evaluate``
+
+    def evaluate(blo, bhi, with_obbt=False, bases=None):
+        """Tighten and bound a batch of boxes: (lb, x, f(x), lo', hi', xr). ``bases``: with
+        ``node_lp="simplex"``, each box's start basis (its parent's; None: cold); the end bases
+        are left in ``last_bases[0]``."""
         nonlocal evaluations
         k = len(blo)
         evaluations += k
@@ -1659,7 +1699,15 @@ def minimize(
             blo, bhi, empty = np.where(oe[:, None], blo, olo), np.where(oe[:, None], bhi, ohi), oe
         # a pool switched off by the probe: the zero-row variant skips the rows' LP cost
         args = (jnp.zeros((0, lo.size + 2)), pool_args()[1]) if plain_kernel() else pool_args()
+        if lp_store is not None:
+            lp_store.give(blo, bhi, bases)
         lb, x, fx, rlo, rhi, xr = run(bound_kernel, padded(blo, bhi), cutoff, k, args)
+        if lp_store is not None:
+            got = lp_store.take(blo, bhi)
+            if bases is not None:  # a box without a new basis keeps its parent's
+                for i in np.flatnonzero([g is None for g in got]):
+                    got[i] = bases[i]
+            last_bases[0] = got
         # a NaN bound carries no information: -inf, never a bound that could prune the box
         # or claim optimality (and np.maximum / min would otherwise spread it to other bounds)
         lb = np.where(np.isnan(lb), -np.inf, lb)
@@ -2051,6 +2099,12 @@ def minimize(
                 lb = np.maximum(lb, mlb)
     _mark("search")
     open_lo, open_hi, open_lb, open_xr = rlo, rhi, lb, rxr
+    open_bs = None  # node_lp="simplex": each open node's basis (an object array, None: cold)
+    if lp_store is not None:
+        open_bs = np.empty(len(open_lb), dtype=object)
+        root_bs = last_bases[0][0] if last_bases[0] is not None and len(last_bases[0]) else None
+        for i in range(len(open_lb)):
+            open_bs[i] = root_bs
     width0 = _branch_widths(width0, rlo, rhi)
     sumL, sumR, cnt = np.zeros(lo.size), np.zeros(lo.size), np.zeros(lo.size)  # pseudocost sums, observations
 
@@ -2098,10 +2152,12 @@ def minimize(
                 ub, xbest = float(Fp[i]), open_lo[point][i].copy()
             keep_pt = ~point
             open_lo, open_hi, open_lb, open_xr = open_lo[keep_pt], open_hi[keep_pt], open_lb[keep_pt], open_xr[keep_pt]
+            open_bs = open_bs[keep_pt] if open_bs is not None else None
         keep = open_lb < ub - tol()
         if not keep.all():
             pruned_lb = min(pruned_lb, float(open_lb[~keep].min()))
         open_lo, open_hi, open_lb, open_xr = open_lo[keep], open_hi[keep], open_lb[keep], open_xr[keep]
+        open_bs = open_bs[keep] if open_bs is not None else None
         glb = min(float(open_lb.min()) if len(open_lb) else np.inf, pruned_lb, ub)
         history.append((it, nodes, glb, ub, len(open_lb)))
         if verbose and (it == 1 or it % 25 == 0):
@@ -2209,6 +2265,7 @@ def minimize(
                 sel, plo, phi, pxr, plb, relw = sel[:k], plo[:k], phi[:k], pxr[:k], plb[:k], relw[:k]
         rest = np.ones(len(open_lb), bool)
         rest[sel] = False
+        pbs = open_bs[sel] if open_bs is not None else None  # (sel: already cut to k parents)
 
         M = len(pp)
         ar = np.arange(M)
@@ -2234,6 +2291,7 @@ def minimize(
         clo = np.concatenate([plo[pp], right_lo])
         chi = np.concatenate([left_hi, phi[pp]])
 
+        cbs = np.concatenate([pbs[pp], pbs[pp]]) if pbs is not None else None  # children start from the parent's basis
         nlp_do = pool_nlp(clo, chi, np.concatenate([pxr[pp], pxr[pp]]), np.concatenate([ar, ar]))
         dead = lex_prune(clo, chi, sym) if sym is not None else np.zeros(len(clo), bool)
         try:
@@ -2242,12 +2300,18 @@ def minimize(
                 clb, cx, cf = np.full(len(clo), np.inf), 0.5 * (clo + chi), np.full(len(clo), np.inf)
                 cxr = 0.5 * (clo + chi)
                 if live.size:
-                    out = evaluate(clo[live], chi[live], with_obbt=obbt == "tree")
+                    out = evaluate(clo[live], chi[live], with_obbt=obbt == "tree",
+                                   bases=cbs[live] if cbs is not None else None)  # fmt: skip
                     clo, chi = clo.copy(), chi.copy()
                     for dst, src in zip((clb, cx, cf, clo, chi, cxr), out):
                         dst[live] = src
+                    if cbs is not None:
+                        cbs = cbs.copy()
+                        cbs[live] = last_bases[0]
             else:
-                clb, cx, cf, clo, chi, cxr = evaluate(clo, chi, with_obbt=obbt == "tree")
+                clb, cx, cf, clo, chi, cxr = evaluate(clo, chi, with_obbt=obbt == "tree", bases=cbs)
+                if cbs is not None:
+                    cbs = last_bases[0]
         except _CompileTimeout:  # out of time while a kernel compiles; the open boxes are unchanged
             break
         pool_judge(nlp_do, clb, np.concatenate([plb[pp], plb[pp]]))
@@ -2331,16 +2395,20 @@ def minimize(
             nodes += len(ob)
             new_lo, new_hi = np.array(ol).reshape(-1, lo.size), np.array(oh).reshape(-1, lo.size)
             new_lb, new_xr = np.array(ob), np.array(ox).reshape(-1, lo.size)
+            new_bs = np.full(len(ob), None, dtype=object)
         else:
             rows = np.concatenate([chosen, chosen + M])
             nodes += 2 * k
             new_lo, new_hi, new_xr = clo[rows], chi[rows], cxr[rows]
             new_lb = np.maximum(clb[rows], np.concatenate([raised, raised]))
+            new_bs = cbs[rows] if cbs is not None else None
 
         open_lo = np.concatenate([open_lo[rest], new_lo])
         open_hi = np.concatenate([open_hi[rest], new_hi])
         open_lb = np.concatenate([open_lb[rest], new_lb])
         open_xr = np.concatenate([open_xr[rest], new_xr])
+        if open_bs is not None:
+            open_bs = np.concatenate([open_bs[rest], new_bs])
 
     open_lb = np.where(np.isnan(open_lb), -np.inf, open_lb)  # (children added by the last iteration)
     glb = min(float(open_lb.min()) if len(open_lb) else np.inf, pruned_lb, ub)
@@ -2378,4 +2446,6 @@ def minimize(
         message=message,
         max_violation=maxv,
         verified=verified,
+        simplex=None if lp_store is None else dict(zip(("optimal", "infeasible", "skipped", "failed", "iterations", "warm"),
+                                                      (lp_store.stats - stats0).tolist())),  # fmt: skip
     )
