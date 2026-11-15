@@ -57,8 +57,8 @@ EXTRA = {"safe": True} if os.environ.get("JAXGLOBAL_SAFE") == "1" else {}  # che
 EXTRA.update(json.loads(os.environ.get("JAXGLOBAL_OPTS", "{}")))  # extra minimize options, e.g. '{"branch_var": "reliability"}'
 # "load" (1-min load average when the run started) was added for the SCIP-gap re-baseline; CSVs
 # written before it have no such column and are appended to with their own header
-# "threads" (--threads-per-job, 0: no cap) was added the same way
-FIELDS = ["solver", "name", "status", "time", "primal", "dual", "nodes", "message", "load", "threads"]
+# "threads" (--threads-per-job, 0: no cap) was added the same way, and "simplex" (Result.simplex as JSON)
+FIELDS = ["solver", "name", "status", "time", "primal", "dual", "nodes", "message", "load", "threads", "simplex"]
 THREADS = 0  # per-process CPU thread cap set by main() (--threads-per-job); 0: none
 _THREAD_VARS = ("NPROC", "RAYON_NUM_THREADS", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
 TAG = "JAXGLOBAL-RESULT "  # marks the worker's result line among solver log output
@@ -104,7 +104,8 @@ def worker(name, tl):
     p, d = M.sense * r.fun, M.sense * r.lower_bound  # back to the model's objective sense
     status = {"optimal": "optimal", "infeasible": "infeasible", "time_limit": "time_limit"}.get(r.status, "error")
     return dict(status=status, time=time.perf_counter() - t0, primal=_num(p), dual=_num(d),
-                nodes=r.nodes, message=r.status)  # fmt: skip
+                nodes=r.nodes, message=r.status,
+                simplex=json.dumps(r.simplex) if getattr(r, "simplex", None) else "")  # fmt: skip
 
 
 def _drain(tl):

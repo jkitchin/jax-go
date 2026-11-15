@@ -11,6 +11,7 @@ Usage:  python benchmarks/check_wrong.py --sample 12 --time-limit 20 --seed 0
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import pathlib
 import random
@@ -31,9 +32,14 @@ def main():
     ap.add_argument("--max-vars", type=int, default=50)
     ap.add_argument("--jobs", type=int, default=2)
     ap.add_argument("--safe", action="store_true", help="solve with minimize(safe=True)")
+    ap.add_argument("--node-lp", default="", help="minimize(node_lp=...), e.g. simplex")
     a = ap.parse_args()
     if a.safe:
         os.environ["JAXGLOBAL_SAFE"] = "1"  # inherited by the worker processes
+    if a.node_lp:  # (run.py's workers read JAXGLOBAL_OPTS)
+        opts = json.loads(os.environ.get("JAXGLOBAL_OPTS", "{}"))
+        opts["node_lp"] = a.node_lp
+        os.environ["JAXGLOBAL_OPTS"] = json.dumps(opts)
 
     from minlplib.fetch import references
 
@@ -53,7 +59,8 @@ def main():
     for name, r, cls in results:
         unverified = r.get("message") == "unverified"
         print(f"{name:28s} {cls:11s} {r['status']:11s} {float(r['time'] or 0):7.2f}s "
-              f"primal {r['primal']} dual {r['dual']}" + ("  UNVERIFIED" if unverified else ""), flush=True)  # fmt: skip
+              f"primal {r['primal']} dual {r['dual']}" + ("  UNVERIFIED" if unverified else "")
+              + (f"  simplex {r['simplex']}" if r.get("simplex") else ""), flush=True)  # fmt: skip
         if cls == "wrong" or unverified:
             bad.append(name)
     counts = {c: sum(1 for _, _, k in results if k == c) for c in sorted({k for _, _, k in results})}
