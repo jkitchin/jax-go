@@ -79,3 +79,23 @@ def test_bound_same_with_and_without_chunks(monkeypatch):
     for x, y in zip(a, b):
         for u, v in zip(x, y):
             np.testing.assert_allclose(u, v, rtol=1e-9, atol=1e-9)
+
+
+def test_memory_threads(monkeypatch):
+    """Concurrent kernel calls are capped so that their executables' working memory fits the budget."""
+    from jaxglobal import bnb
+
+    class K(bnb._Precompiled):
+        def __init__(self, tb):
+            super().__init__(None, "k")
+            self.tb = tb
+
+        def temp_bytes(self, *args):
+            return self.tb
+
+    monkeypatch.setattr(memory, "BUDGET", 1000)
+    assert bnb._memory_threads(K(None), 4, ()) == 4  # not compiled yet: unchanged
+    assert bnb._memory_threads(K(200), 4, ()) == 4  # 800 <= 1000
+    assert bnb._memory_threads(K(300), 4, ()) == 3
+    assert bnb._memory_threads(K(5000), 4, ()) == 1
+    assert bnb._memory_threads(object(), 4, ()) == 4  # a plain jitted function

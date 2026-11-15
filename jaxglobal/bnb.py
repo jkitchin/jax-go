@@ -38,7 +38,7 @@ import numpy as np
 from .local import make_local, near_zero_options
 from .crown import crown_auto, crown_supported, make_crown
 from .domain import DomainTimeout, bound_domain
-from . import kcache, milpbound
+from . import kcache, memory, milpbound
 from .fbbt import make_fbbt
 from .lifted import make_lifted_bounder
 from .lp import make_constrained_bounder, make_obbt, make_pool_cuts, pool_parts, reduce_ranges
@@ -340,6 +340,21 @@ class _Precompiled:
         """``start``'s default argument shapes: ``(lo, hi, cutoff, *extra)``."""
         return (jax.ShapeDtypeStruct((b, n), jnp.float64),) * 2 + (jax.ShapeDtypeStruct((), jnp.float64),) + \
             tuple(jax.ShapeDtypeStruct(tuple(sh), jnp.float64) for sh in extra)  # fmt: skip
+
+    def temp_bytes(self, *args):
+        """XLA's working memory (``memory_analysis().temp_size_in_bytes``) of the background
+        executable for ``args``' shapes, once it is compiled; else None."""
+        key = self._key(args)
+        temps = self.__dict__.setdefault("_temps", {})
+        if key not in temps:
+            fut = self.ready.get(key)
+            try:
+                if fut is None or not fut.done() or not fut.result().done():
+                    return None
+                temps[key] = int(fut.result().result().memory_analysis().temp_size_in_bytes)
+            except Exception:
+                temps[key] = None
+        return temps[key]
 
     def pending(self, b, n, extra=(), args=None):
         """Whether the background build that ``start(b, n, extra=extra, args=args)`` queues was
@@ -935,11 +950,25 @@ def _dispatch_threads():
 
 
 def _memory_boxes(batch, batch_sizes):
-    """Boxes whose bound-kernel working memory can be live at once (``memory.point_chunk``'s
-    ``boxes``): the largest call (``_Padder``: ``batch_sizes`` capped by ``batch``) times the calls
-    ``run`` dispatches concurrently (``_dispatch_threads``, at most the calls of a full batch)."""
-    top = max({min(int(s), batch) for s in batch_sizes} or {batch})
-    return top * max(1, min(_dispatch_threads(), -(-batch // top)))
+    """Boxes per bound-kernel call (``memory.point_chunk``'s ``boxes``): the largest call
+    (``_Padder``: ``batch_sizes`` capped by ``batch``). Concurrent calls are limited at run time
+    instead (``_memory_threads``), so the kernels do not depend on the dispatch threads."""
+    return max({min(int(s), batch) for s in batch_sizes} or {batch})
+
+
+def _memory_threads(kernel, nt, args):
+    """Dispatch threads for calls of ``kernel`` on ``args``' shapes: ``nt``, fewer when the calls'
+    working memory together would exceed ``memory.BUDGET`` (each call holds its executable's
+    ``temp_bytes``; 0.57 GB per 16-box call on m34_convex2, docs/ANALYSIS-memory.md). At least 1."""
+    tb = kernel.temp_bytes(*args) if isinstance(kernel, _Precompiled) else None
+    if not tb or nt * tb <= memory.BUDGET:
+        return nt
+    k = max(1, int(memory.BUDGET // tb))
+    if k < nt and not getattr(kernel, "_logged_threads", False):
+        kernel._logged_threads = True
+        memory.log.info("%s kernel: %d concurrent calls x %.0f MB > budget %.0f MB: %d at a time",
+                        kernel.name, nt, tb / 2**20, memory.BUDGET / 2**20, k)
+    return min(nt, k)
 
 
 def _dispatch_pool(k):
@@ -1642,6 +1671,8 @@ def minimize(
             # (a call that compiled is no estimate of a call's cost)
         else:
             nt = _dispatch_threads()
+            if nt > 1 and len(calls) > 1:
+                nt = _memory_threads(kernel, nt, (*calls[0], cutoff, *extra))
             if nt > 1 and len(calls) > 1:
                 from concurrent.futures import wait
 
