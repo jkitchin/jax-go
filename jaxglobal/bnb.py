@@ -962,10 +962,16 @@ def _auto_branch_var(imask):
     return "width" if np.asarray(imask).any() else "pseudocost"
 
 
+_TRACE = None  # a callable(stage, ub) told the incumbent value as each stage of ``minimize`` begins (diagnostics)
+_UB = [np.inf]  # the incumbent value of the running ``minimize``, for ``_TRACE``
+
+
 def _mark(stage):
-    """Tell ``_PROFILE`` (off by default) that ``minimize`` enters ``stage``."""
+    """Tell ``_PROFILE`` and ``_TRACE`` (off by default) that ``minimize`` enters ``stage``."""
     if _PROFILE is not None:
         _PROFILE(stage)
+    if _TRACE is not None:
+        _TRACE(stage, _UB[0])
 
 
 @dataclass
@@ -1678,6 +1684,10 @@ def minimize(
     if seed_x is not None:  # feasible point found while bounding the domain
         ub, xbest = float(seed_f), np.asarray(seed_x)
 
+    def _mk(stage):
+        _UB[0] = ub
+        _mark(stage)
+
     backoff = [0, 0]  # local-search back-off: current wait length, iterations left to skip
 
     def update_incumbent(xc, fc, lb, blo=None, bhi=None):
@@ -1964,7 +1974,7 @@ def minimize(
         if obbt == "root" and padded.mesh is None:
             K.obbt.start(1, lo.size, functools.partial(K.fingerprint, lo.size) if kcache.cache_root() else None)
 
-    _mark("root_bound")
+    _mk("root_bound")
     if obbt == "root" and (constrained or np.isfinite(ub)) and any(bound_kernel.pending(b, lo.size, extra) for b in padded.sizes):
         # the main thread is about to wait for the bound kernel's build: trace the OBBT kernel in that
         # idle time (queued behind the bound and dive kernels) rather than after the root bound,
@@ -1980,7 +1990,7 @@ def minimize(
                       evaluations=evaluations, time=time.perf_counter() - t0, status="time_limit",
                       message=f"time_limit reached {why}; no bound computed",
                       max_violation=maxv, verified=verified)  # fmt: skip
-    _mark("root_incumbent")
+    _mk("root_incumbent")
     update_incumbent(xc, fc, lb)
 
     if need_obbt():
@@ -1988,7 +1998,7 @@ def minimize(
         # bound and first incumbent close the gap (most small ones) never traces or compiles it,
         # and the bound kernel's compile does not compete with it for the CPU
         start_root_obbt()
-    _mark("root_dives")
+    _mk("root_dives")
     if imask.any() and np.all(np.isfinite(lb)) and np.all(np.isfinite(rxr)):  # root dives: relaxation point, perturbed
         P = np.clip(rxr + rng.normal(size=(_DIVES, lo.size)) * 0.1 * (rhi - rlo) * (np.arange(_DIVES) > 0)[:, None],
                     rlo, rhi)  # fmt: skip
@@ -1996,7 +2006,7 @@ def minimize(
         # few integer assignments: fix-and-solve every one (rounding and dives try one or two)
         ii = np.flatnonzero(imask)
         sizes = rhi[0, ii] - rlo[0, ii] + 1
-        _mark("root_enum")
+        _mk("root_enum")
         if np.prod(sizes) <= _ENUM and time_for(None):  # incumbent-only, like the dives
             A = np.array(list(itertools.product(*[np.arange(rlo[0, j], rhi[0, j] + 1) for j in ii])))
             A = np.repeat(A, 4, 0)  # each from the relaxation point and 3 random points of the box
@@ -2004,7 +2014,7 @@ def minimize(
             L[:, ii] = H[:, ii] = A
             S = np.where((np.arange(len(A)) % 4 == 0)[:, None], rxr, rng.uniform(L, H))
             fixed_solve(L, H, S)
-    _mark("root_obbt")
+    _mk("root_obbt")
     # The root OBBT kernel solves two LPs per variable in one call, which cannot be interrupted:
     # skip it when the time left is under _ROOT_OBBT_COST times the slowest bound-kernel call (on
     # minlp.org m49, cold under load, it started with 11.6 s left and ran 30.6 s, 4.3 times the root
@@ -2023,15 +2033,15 @@ def minimize(
         else:
             rlo, rhi, rxr = rlo2, rhi2, rxr2
             lb = np.maximum(lb, lb2)
-            _mark("root_obbt_incumbent")
+            _mk("root_obbt_incumbent")
             update_incumbent(xc, fc, lb)
-    _mark("probe")
+    _mk("probe")
     if _PROBE and imask.any() and np.all(np.isfinite(lb)) and not (ub - float(lb.min()) <= tol()):
         try:
             rlo, rhi, lb = probe(rlo, rhi, lb)
         except _CompileTimeout:
             pass
-    _mark("milp_root")
+    _mk("milp_root")
     if milp_root and imask.any() and not safe and np.all(np.isfinite(lb)) and not (ub - float(lb.min()) <= tol()):
         # integer-aware root bound (milpbound.py): a MILP over the relaxation's cuts on the hull of the
         # open root boxes bounds every one of them; it raises the bound where only integrality is missing
@@ -2049,7 +2059,7 @@ def minimize(
                 if verbose:
                     print(f"milp root bound {mlb:.6g} (was {float(lb.min()):.6g})")
                 lb = np.maximum(lb, mlb)
-    _mark("search")
+    _mk("search")
     open_lo, open_hi, open_lb, open_xr = rlo, rhi, lb, rxr
     width0 = _branch_widths(width0, rlo, rhi)
     sumL, sumR, cnt = np.zeros(lo.size), np.zeros(lo.size), np.zeros(lo.size)  # pseudocost sums, observations
@@ -2104,6 +2114,8 @@ def minimize(
         open_lo, open_hi, open_lb, open_xr = open_lo[keep], open_hi[keep], open_lb[keep], open_xr[keep]
         glb = min(float(open_lb.min()) if len(open_lb) else np.inf, pruned_lb, ub)
         history.append((it, nodes, glb, ub, len(open_lb)))
+        if _TRACE is not None:
+            _mk("search")
         if verbose and (it == 1 or it % 25 == 0):
             print(f"it {it:5d} nodes {nodes:8d} open {len(open_lb):7d} LB {glb:.8g} UB {ub:.8g}")
         if not len(open_lb) or ub - glb <= tol():
@@ -2351,7 +2363,8 @@ def minimize(
     else:
         status = "max_iter"
     xbest = np.asarray(xbest)
-    xbest = np.asarray(xbest)
+    if _TRACE is not None:
+        _mk("end")
     if imask.any() and np.isfinite(ub):
         xbest = np.where(imask, np.round(xbest), xbest)
     message = ""
