@@ -626,6 +626,78 @@ def objective_only_bounds(f, ineq, eq, lo, hi):
     return lo, hi
 
 
+_SPLIT_ROUNDS = 3  # rounds of split_bounds (+ LP bounds and caps) in bound_domain
+_SPLIT_MAX_CANDIDATES = 400  # variables split per round, at most
+
+
+def split_bounds(fb, lo, hi, cutoff, integer=None, struct=None, deadline=None):
+    """Finite bounds from FBBT on the two halves of one bounded variable at a time.
+
+    For a bounded variable ``x_c`` split ``[lo_c, hi_c]`` into two halves (integers:
+    ``[lo_c, m]`` and ``[m + 1, hi_c]``) and run FBBT (``fb``, with the objective
+    ``cutoff``) on each. Every point of the box that is feasible with ``f <= cutoff``
+    lies in one half and survives FBBT on it, so it lies in the hull of the two results
+    (an empty half contributes nothing); the hull is intersected into the box. This is
+    a disjunction FBBT cannot see on the whole box: with ``u in [-1, 1]``,
+    ``a = 1 - u``, ``b = 1 + u`` and ``a * p + b * q <= C`` (``p, q >= 0``), neither
+    ``p`` nor ``q`` is bounded (``a`` or ``b`` may be 0), but on ``u <= 0`` ``a >= 1``
+    bounds ``p`` and on ``u >= 0`` ``b >= 1`` bounds ``q``; with ``x = p - q``
+    bounded both are then bounded on each half.
+
+    Candidates (``struct`` from ``_row_structure``): bounded, non-fixed variables that
+    enter nonlinearly a row that also uses a free variable (all bounded variables without
+    ``struct``). Only infinite ends of the result are kept from the hull (finite ends stay
+    as they were; the hull of FBBT would tighten them too, but this runs only to find a box).
+    Returns new ``(lo, hi)``.
+    """
+    lo, hi = np.array(lo, np.float64), np.array(hi, np.float64)
+    n = lo.size
+    free = ~(np.isfinite(lo) & np.isfinite(hi))
+    if not free.any():
+        return lo, hi
+    bnd = ~free & (hi > lo)
+    if struct is not None:
+        dep, nl, _ = struct
+        rows = np.any(dep[:, free], axis=1)
+        cand = bnd & np.any(nl[rows], axis=0)
+    else:
+        cand = bnd
+    ints = np.zeros(n, bool) if integer is None else np.asarray(integer, bool)
+    new_lo, new_hi = lo.copy(), hi.copy()
+    cut = jnp.asarray(cutoff, jnp.float64)
+    for c in np.flatnonzero(cand)[:_SPLIT_MAX_CANDIDATES]:
+        if deadline is not None and time.perf_counter() > deadline:
+            break
+        if ints[c]:
+            m = np.floor(0.5 * (lo[c] + hi[c]))
+            halves = [(lo[c], m), (m + 1.0, hi[c])]
+        else:
+            m = 0.5 * (lo[c] + hi[c])
+            halves = [(lo[c], m), (m, hi[c])]
+        hl, hh = np.full(n, np.inf), np.full(n, -np.inf)
+        for a_, b_ in halves:
+            if a_ > b_:
+                continue
+            L, H = new_lo.copy(), new_hi.copy()
+            L[c], H[c] = a_, b_
+            a, b, empty = fb(jnp.asarray(L), jnp.asarray(H), cut)
+            if bool(empty):
+                continue
+            a, b = np.maximum(L, np.asarray(a)), np.minimum(H, np.asarray(b))
+            hl, hh = np.minimum(hl, a), np.maximum(hh, b)
+        if np.all(hl > hh):
+            continue  # both halves empty: FBBT on the whole box reports the infeasibility
+        upd_lo = ~np.isfinite(new_lo) & np.isfinite(hl)
+        upd_hi = ~np.isfinite(new_hi) & np.isfinite(hh)
+        new_lo = np.where(upd_lo, hl, new_lo)
+        new_hi = np.where(upd_hi, hh, new_hi)
+        if np.all(np.isfinite(new_lo)) and np.all(np.isfinite(new_hi)):
+            break
+    new_lo = np.where(ints & np.isfinite(new_lo), np.floor(new_lo), new_lo)
+    new_hi = np.where(ints & np.isfinite(new_hi), np.ceil(new_hi), new_hi)
+    return new_lo, new_hi
+
+
 def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed=0, deadline=None, integer=None):
     """Derive finite bounds. Returns ``(lo, hi, infeasible, x_feasible, f_feasible)``.
 
@@ -728,6 +800,21 @@ def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed
             settle(cutoff)
         linear(cutoff)
         settle(cutoff)
+        for _ in range(_SPLIT_ROUNDS):
+            if np.all(np.isfinite(lo)) and np.all(np.isfinite(hi)):
+                break
+            if not struct:
+                struct.append(_row_structure(f, ineq, eq, lo.size))
+            nfree = int(np.sum(~np.isfinite(lo)) + np.sum(~np.isfinite(hi)))
+            keep = lo.copy(), hi.copy()
+            lo, hi = split_bounds(fb, lo, hi, cutoff, integer=integer, struct=struct[0], deadline=deadline)
+            if tighten(cutoff):  # the hull keeps every feasible point: be conservative anyway
+                lo, hi = keep
+                break
+            if int(np.sum(~np.isfinite(lo)) + np.sum(~np.isfinite(hi))) == nfree:
+                break
+            linear(cutoff)
+            settle(cutoff)
         if xf is not None:
             lo, hi = np.minimum(lo, xf), np.maximum(hi, xf)  # keep the incumbent inside
     return lo, hi, False, xf, ff

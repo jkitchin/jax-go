@@ -442,3 +442,54 @@ def test_assignment_model_solved():
     C = np.random.default_rng(3).uniform(1, 5, (4, 4))
     best = min(sum(C[i, p[i]] for i in range(4)) for p in permutations(range(4))) + 0.01 * 4
     assert abs(r.fun - best) <= 1e-4 * (1 + abs(best)) and r.lower_bound <= best + 1e-6
+
+
+def test_product_with_zero_and_infinite_ends_is_bounded_below():
+    """0 * inf = 0 in the interval product: [0, 1] * [0, inf] is [0, inf], so the cutoff of
+    ``a p + b q`` reaches ``a p`` (it was lost on the whole line)."""
+    from jaxglobal.fbbt import make_fbbt
+    from jaxglobal.relax import MC, mc_mul
+
+    a, b = jnp.array([0.0, -1.0]), jnp.array([1.0, 0.0])
+    p, q = jnp.array([0.0, 0.0]), jnp.array([INF, INF])
+    r = mc_mul(MC(a, b, a, b), MC(p, q, p, q))
+    assert np.asarray(r.lo).tolist() == [0.0, -INF] and np.asarray(r.hi).tolist() == [INF, 0.0]
+    fb = make_fbbt(lambda x: x[0] * x[2] + x[1] * x[3], interpret=False)
+    lo, hi, empty = fb(jnp.array([1.0, 0, 0, 0]), jnp.array([2.0, 1, INF, INF]), 1.0)
+    assert not bool(empty) and float(hi[2]) <= 1.0 + 1e-6 and not np.isfinite(float(hi[3]))
+
+
+def _complementarity():
+    """u in [-1, 1], a = 1 - u, b = 1 + u (eliminated), x = p - q in [-1, 1], p, q >= 0:
+    min 1000 (a p + b q) + (x - 0.5)^2 + 0.3 (u - 0.2)^2. FBBT on the whole box bounds neither p nor q
+    (a or b may be 0). (With the cutoff of the optimum, 0.192 at u = 1, p = 0.5, the LP bounds already
+    pin u = 1; m6_del_asl_hvar is the case where they do not, docs/ANALYSIS-unbounded.md.)"""
+    f = lambda x: 1000 * ((1 - x[0]) * x[1] + (1 + x[0]) * x[2]) + (x[1] - x[2] - 0.5) ** 2 + 0.3 * (x[0] - 0.2) ** 2  # noqa: E731
+    ineq = lambda x: jnp.stack([x[1] - x[2] - 1, x[2] - x[1] - 1])  # noqa: E731
+    return f, ineq, np.array([-1.0, 0, 0]), np.array([1.0, INF, INF])
+
+
+def test_split_bounds_hull_of_halves():
+    from jaxglobal.domain import split_bounds
+    from jaxglobal.fbbt import make_fbbt
+
+    f, ineq, lo, hi = _complementarity()
+    fb = make_fbbt(f, ineq, None, rounds=10)
+    a, b, empty = fb(jnp.asarray(lo), jnp.asarray(hi), 1.0)
+    assert not np.isfinite(float(b[1])) and not np.isfinite(float(b[2]))  # FBBT alone: nothing
+    L, H = split_bounds(fb, lo, hi, 1.0)
+    assert np.all(np.isfinite(H)) and H[1] <= 1.01 and H[2] <= 1.01
+    # every point with f <= 1 stays inside (sampled)
+    rng = np.random.default_rng(0)
+    for _ in range(2000):
+        x = np.array([rng.uniform(-1, 1), *rng.exponential(0.3, 2)])
+        if float(f(jnp.asarray(x))) <= 1.0 and np.all(np.asarray(ineq(jnp.asarray(x))) <= 0):
+            assert np.all(x >= L - 1e-9) and np.all(x <= H + 1e-9)
+
+
+def test_split_bounds_model_solved():
+    f, ineq, lo, hi = _complementarity()
+    r = minimize(f, lo, hi, ineq=ineq, time_limit=60)
+    assert r.status == "optimal"
+    # u = 1 (a = 0), p = 0.5, q = 0: 0.3 * 0.8^2 = 0.192 (p = q = 0 at u = 0.2 costs 0.25)
+    assert abs(r.fun - 0.192) <= 1e-4 and r.lower_bound <= 0.192 + 1e-6
