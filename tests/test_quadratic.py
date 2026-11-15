@@ -354,3 +354,44 @@ def test_ineq_rlt_small_rows_first():
     assert small in Q.qr_g.tolist()
     Q1 = ineq_rlt(Q._replace(qr_g=np.zeros(0, np.int64)), 10, max_pairs=1)
     assert Q1.qr_g.tolist() == [small]
+
+
+def _qcqp():
+    """A small nonconvex QCQP with squares that need Kelley tangents and a cheap feasibility test."""
+    f = lambda x: x[0] * x[1] - 0.5 * x[2] ** 2 + x[0] * x[2] + x[1] ** 2 + 0.3 * x[3]  # noqa: E731
+    g = lambda x: jnp.stack([x[0] ** 2 + x[1] ** 2 + x[3] ** 2 - 4.0, x[2] * x[0] - 1.0, 1.0 - x[3] ** 2 - x[1]])  # noqa: E731
+    return f, g, np.full(4, -2.0), np.full(4, 2.0)
+
+
+@pytest.mark.parametrize("pc", [False, True])
+@pytest.mark.parametrize("stall", [-1.0, 1e-4, 0.5])
+@pytest.mark.parametrize("safe", [False, True])
+def test_rounds_and_steps_keep_bounds_valid(monkeypatch, pc, stall, safe):
+    """Predictor-corrector steps (``IPM_PC``) and the round stall rule (``ROUND_STALL``) change only
+    which certificates are found: on random boxes no sampled feasible point is below the bound,
+    and with a single LP (no rounds) both step rules reach HiGHS' value."""
+    import jaxglobal.quadratic as qd
+
+    monkeypatch.setattr(qd, "IPM_PC", pc)
+    f, g, lo0, hi0 = _qcqp()
+    Q = quadratic_form(f, g, None, 4)
+    bound = jax.jit(make_quadratic_bounder(Q, n_kelley=4, tol=1e-6, safe=safe, stall=stall))
+    one = jax.jit(make_quadratic_bounder(Q, n_kelley=0, tol=1e-6, safe=safe, stall=stall))
+    rng = np.random.default_rng(7)
+    X = rng.uniform(lo0, hi0, (20000, 4))
+    G = np.stack([np.asarray(jax.vmap(g)(jnp.asarray(X)))[:, i] for i in range(3)], 1)
+    X = X[np.all(G <= 0.0, 1)]
+    F = np.asarray(jax.vmap(f)(jnp.asarray(X)))
+    checked = 0
+    for _ in range(12):
+        c, w = rng.uniform(lo0, hi0), rng.uniform(0.2, 1.0, 4) * (hi0 - lo0) / 2
+        lo, hi = np.clip(c - w, lo0, hi0), np.clip(c + w, lo0, hi0)
+        inside = np.all((X >= lo) & (X <= hi), 1)
+        lb = float(bound(jnp.asarray(lo), jnp.asarray(hi), jnp.inf)[0])
+        l1 = float(one(jnp.asarray(lo), jnp.asarray(hi), jnp.inf)[0])
+        if inside.any():
+            assert lb <= F[inside].min() + 1e-9
+            assert l1 <= F[inside].min() + 1e-9
+            assert l1 == pytest.approx(highs_bound(Q, lo, hi, 1e-6), abs=1e-5 * (1 + abs(l1)))
+            checked += 1
+    assert checked >= 6

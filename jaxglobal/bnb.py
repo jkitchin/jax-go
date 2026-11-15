@@ -292,7 +292,16 @@ class _Precompiled:
 
     def __init__(self, jitted, name):
         self.jitted, self.name, self.ready = jitted, name, {}
-        self.dispatched = 0.0  # perf_counter() of the last dispatch, after any wait for the executable
+        self._local = threading.local()  # per dispatching thread (``_dispatch_pool``): ``dispatched``
+
+    @property
+    def dispatched(self):
+        """perf_counter() of this thread's last dispatch, after any wait for the executable."""
+        return getattr(self._local, "t", 0.0)
+
+    @dispatched.setter
+    def dispatched(self, t):
+        self._local.t = t
 
     @staticmethod
     def _key(args):
@@ -374,7 +383,7 @@ class _Precompiled:
             except TimeoutError:
                 raise _CompileTimeout(self.name) from None
             except Exception:  # let jit raise (or succeed) with its usual traceback
-                del self.ready[key]
+                self.ready.pop(key, None)  # (another dispatching thread may have dropped it)
             else:
                 if _past(deadline):  # ready, but out of time: no new call
                     raise _Deadline(self.name)
@@ -902,6 +911,37 @@ def _ncpu():
 
 
 _NCPU = _ncpu()  # pounce solves batches in parallel on this many threads (polish time caps)
+# Python threads that dispatch the calls of one batch of boxes concurrently (``minimize``'s
+# ``run``): None = ``_ncpu()``, 1 = one call after another. A jitted call releases the GIL and XLA
+# runs concurrent calls on separate cores, while one call of the bound kernel uses about one core
+# (process: m424 node LPs, cpu/wall 1.35); with XLA's pool capped at one thread (NPROC=1) the calls
+# run one at a time anyway and threads give nothing. Overridden by JAXGLOBAL_DISPATCH_THREADS.
+DISPATCH_THREADS = None
+_DISPATCH_POOLS = {}
+_DISPATCH_LOCK = threading.Lock()
+
+
+def _dispatch_threads():
+    """Threads for concurrent kernel calls: ``JAXGLOBAL_DISPATCH_THREADS``, else ``DISPATCH_THREADS``,
+    else ``_ncpu()`` (which honours ``benchmarks/run.py --threads-per-job``); at least 1."""
+    k = os.environ.get("JAXGLOBAL_DISPATCH_THREADS", "")
+    try:
+        k = int(k) if k else DISPATCH_THREADS
+    except ValueError:
+        k = DISPATCH_THREADS
+    return max(1, int(k if k is not None else _ncpu()))
+
+
+def _dispatch_pool(k):
+    """A shared pool of ``k`` dispatch threads (created on first use)."""
+    with _DISPATCH_LOCK:
+        if k not in _DISPATCH_POOLS:
+            from concurrent.futures import ThreadPoolExecutor
+
+            _DISPATCH_POOLS[k] = ThreadPoolExecutor(k, thread_name_prefix="jaxglobal-dispatch")
+        return _DISPATCH_POOLS[k]
+
+
 _POLISH_FIRST = 8  # neighbours in the first batch, before the cost of a solve is known
 _POLISH_MIN, _POLISH_FRAC = 2.0, 0.1  # polish time budget: _POLISH_MIN s plus this fraction of the elapsed time
 _NEAR_ZERO_STARTS = 4  # extra random starts for the scaled local solves of a near-zero objective
@@ -1572,20 +1612,36 @@ def minimize(
         Once the time limit has passed no further call is dispatched: ``_Deadline`` (or
         ``_CompileTimeout`` while the kernel compiles, see ``_Precompiled.__call__``) is
         raised instead (a call already running cannot be interrupted, so a solve overruns
-        its limit by at most one call). Each call is waited for before the next is
-        dispatched; on CPU the calls run one after another anyway, so this costs nothing
-        and makes the check before each call meaningful."""
-        outs = []
-        for c in calls:
-            if padded.mesh is not None:  # sharded calls compile through jit (synchronously)
+        its limit by at most one call). With several calls and ``_dispatch_threads()`` > 1 the
+        calls are dispatched from a thread pool (each still checks the deadline before it
+        starts) and all are waited for before the results, in call order, are returned or the
+        first failure in call order is raised; every call computes what it would one after
+        another, so the result is the same."""
+
+        def one(c):
+            o = jax.block_until_ready(kernel(*c, cutoff, *extra, deadline=deadline))
+            return o, time.perf_counter() - kernel.dispatched  # (not counting the wait for the executable)
+
+        if padded.mesh is not None:  # sharded calls compile through jit (synchronously)
+            outs = []
+            for c in calls:
                 if _past(deadline):
                     raise _Deadline(kernel.name)
                 outs.append(jax.block_until_ready(kernel.jitted(*c, cutoff, *extra)))
-                continue  # (a call that compiled is no estimate of a call's cost)
-            o = kernel(*c, cutoff, *extra, deadline=deadline)
-            outs.append(jax.block_until_ready(o))
-            if kernel is bound_kernel:  # not counting the wait for the executable
-                bound_call[0] = max(bound_call[0], time.perf_counter() - kernel.dispatched)
+            # (a call that compiled is no estimate of a call's cost)
+        else:
+            nt = _dispatch_threads()
+            if nt > 1 and len(calls) > 1:
+                from concurrent.futures import wait
+
+                futs = [_dispatch_pool(nt).submit(one, c) for c in calls]
+                wait(futs)  # no call is left running when this returns or raises
+                res = [fu.result() for fu in futs]  # raises the first failure in call order
+            else:
+                res = [one(c) for c in calls]
+            outs = [o for o, _ in res]
+            if kernel is bound_kernel:
+                bound_call[0] = max([bound_call[0]] + [dt for _, dt in res])
         return [np.concatenate([np.asarray(o[i]) for o in outs])[:k] for i in range(len(outs[0]))]
 
     def evaluate(blo, bhi, with_obbt=False):

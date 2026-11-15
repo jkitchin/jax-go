@@ -114,6 +114,10 @@ def test_deadline_mid_search_keeps_pre_iteration_bound(monkeypatch):
 
     monkeypatch.setattr(bnb._Padder, "__call__", pad)
     monkeypatch.setattr(bnb._Precompiled, "__call__", call)
+    # calls dispatched one after another: with a dispatch pool the calls of an iteration all
+    # start together, and the check before a call refuses only calls queued behind busy threads
+    monkeypatch.setattr(bnb, "DISPATCH_THREADS", 1)
+    monkeypatch.delenv("JAXGLOBAL_DISPATCH_THREADS", raising=False)
     t = time.perf_counter()
     r = minimize(_hard, lo, hi, time_limit=limit, max_iter=10**6, **opts)
     wall = time.perf_counter() - t
