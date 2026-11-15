@@ -22,7 +22,12 @@ finite bounds without changing the problem:
 3. If variables are still unbounded, a few local solves look for a feasible
    point. Its value ``UB`` is a valid cutoff, so FBBT with ``f <= UB`` keeps
    every point that could be optimal; for example ``min x^2 + y^2`` bounds
-   both variables once any feasible point is known.
+   both variables once any feasible point is known. LP bounds over a linear
+   relaxation (``LinearRelaxation``) with that cutoff come next, then, for what
+   is still free, FBBT on the two halves of one bounded variable at a time
+   (``split_bounds``): the hull of the two results keeps every point, and sees
+   disjunctions such as ``(1 - u) p + (1 + u) q <= C`` that bound ``p`` on one
+   half and ``q`` on the other.
 
 What remains infinite after that is reported to the caller. All steps only
 remove points that are infeasible or worse than a known feasible point (or,
@@ -627,6 +632,7 @@ def objective_only_bounds(f, ineq, eq, lo, hi):
 
 
 _SPLIT_ROUNDS = 3  # rounds of split_bounds (+ LP bounds and caps) in bound_domain
+_SPLIT_SECONDS = 20.0  # time for all split_bounds rounds of one bound_domain call, at most
 _SPLIT_MAX_CANDIDATES = 400  # variables split per round, at most
 
 
@@ -800,6 +806,9 @@ def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed
             settle(cutoff)
         linear(cutoff)
         settle(cutoff)
+        split_end = time.perf_counter() + _SPLIT_SECONDS
+        if deadline is not None:
+            split_end = min(split_end, deadline)
         for _ in range(_SPLIT_ROUNDS):
             if np.all(np.isfinite(lo)) and np.all(np.isfinite(hi)):
                 break
@@ -807,7 +816,7 @@ def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed
                 struct.append(_row_structure(f, ineq, eq, lo.size))
             nfree = int(np.sum(~np.isfinite(lo)) + np.sum(~np.isfinite(hi)))
             keep = lo.copy(), hi.copy()
-            lo, hi = split_bounds(fb, lo, hi, cutoff, integer=integer, struct=struct[0], deadline=deadline)
+            lo, hi = split_bounds(fb, lo, hi, cutoff, integer=integer, struct=struct[0], deadline=split_end)
             if tighten(cutoff):  # the hull keeps every feasible point: be conservative anyway
                 lo, hi = keep
                 break
