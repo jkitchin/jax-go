@@ -70,6 +70,12 @@ HESSIAN_VOLUME = 200_000
 TAYLOR_BATCH = 16  # boxes per kernel call the memory budget assumes (minimize's batch_sizes)
 TAYLOR_BYTES = 512 * 2**20  # taylor2_bytes(slots, n, TAYLOR_BATCH) allowed
 TAYLOR_BUDGET = TAYLOR_BYTES  # former name (it was slots * n**2)
+# "auto" with a traced Hessian over the size thresholds and an interpreter over TAYLOR_BYTES: the
+# function gets no alphaBB (prepare returns None; its McCormick relaxation alone, which is valid),
+# instead of the traced Hessian anyway. minlp.org m47_bcp8 (n = 168): its inequalities' traced
+# Hessian has 60k live operations (volume 6e7), the equalities' 29k, and the bound kernel was
+# still being traced and compiled after 100 s (docs/ANALYSIS-root-cost.md).
+SKIP_UNAFFORDABLE = True
 
 
 def taylor2_bytes(slots, d, batch=TAYLOR_BATCH):
@@ -212,6 +218,8 @@ def make_alphabb(fn, eigen=True, safe=False, interpret="auto"):
                     run = None
             if run is None and closed is None and interpret is True:
                 closed = traced(lo)
+            if run is None and big and interpret == "auto" and SKIP_UNAFFORDABLE:
+                closed = None  # neither Hessian is affordable: no alphaBB for this function
         how = ("interpret", run) if run is not None else ("traced", closed) if closed is not None else (None, None)
         if not local and not (closed is not None and _has_tracer_consts(closed)):
             hessians[id(tape)] = (tape, how)

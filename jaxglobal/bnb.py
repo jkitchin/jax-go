@@ -885,7 +885,7 @@ _POLISH_CHUNK = 64  # most neighbours per batch of local solves (the time budget
 _ROOT_OBBT_COST = 10.0  # root OBBT runs only with this many slowest bound-kernel calls of time left
 # root OBBT runs only if its estimated cost (bound call x 2 n obbt_rounds / batch) is at most this
 # share of the time left (None: no such check)
-_ROOT_OBBT_SHARE = None
+_ROOT_OBBT_SHARE = 0.25
 _SCREEN_MIN_BATCH = 8  # batch sizes of the candidate screens (fvals, viol): powers of two from this
 
 

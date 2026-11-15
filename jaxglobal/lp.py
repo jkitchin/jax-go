@@ -119,6 +119,77 @@ def _nonlinear_of(f, ineq, eq):
     return get
 
 
+# cut generation (``_point_cuts``): estimated bytes of one kernel call's forward-mode cut passes
+# (``CUT_BATCH`` boxes) above which the points are run in sequential chunks instead of one vmap
+CUT_BYTES = 2**30
+CUT_BATCH = 16  # boxes per kernel call the estimate assumes (minimize's batch_sizes)
+
+
+def _axis_points(nl, n):
+    """Indices of the points ``[c, c + e_j w_j / 4 (j < n), c - e_j w_j / 4 (j < n)]`` whose cuts
+    ``_cut_rows`` keeps for some part: the center and the axis points of the variables some part
+    is nonlinear in (None: all of them). The cuts at the other axis points repeat the center's for
+    every part, and ``_cut_rows`` drops them, so they need not be computed."""
+    if nl is None:
+        return None
+    j = np.flatnonzero(nl.any(axis=0))
+    if len(j) == n:
+        return None
+    return np.concatenate([[0], 1 + j, 1 + n + j])
+
+
+def _cut_bytes(f, ineq, eq, n):
+    """Estimated bytes of the forward-mode cut pass at one point (``_cuts``): the tape's slots times
+    ``n`` tangents, 8 float64 per slot and tangent (value and relaxation fields); None if the tape
+    does not scalarize. On minlp.org m47_bcp8 (2059 slots, n = 168) XLA's temp is 13.6 MB per point,
+    the estimate 22 MB."""
+    from .fbbt import _has_tracer, joint_tape
+    from .fbbt_interp import scalarize
+
+    with jax.ensure_compile_time_eval():
+        tape = joint_tape(f, ineq, eq, np.zeros(n))
+    if _has_tracer(tape):
+        return None
+    prog = scalarize(tape, n)
+    return None if prog is None else 64 * len(prog.const_val) * n
+
+
+def _point_cuts(cuts_at, pts, keep=None, per_point=None, scatter=True):
+    """``jax.vmap(cuts_at)(pts)`` computed only at the points ``keep`` (with ``scatter`` the others
+    get const -inf, coef 0: dead rows; without, the outputs are those of the points kept, in
+    order; every output but const and coef is that of the points kept, ``keep[0]`` first), and,
+    when ``per_point`` bytes times the points and ``CUT_BATCH`` exceed ``CUT_BYTES``, in
+    sequential chunks of points (``lax.map``): the same values in less memory (m47_bcp8: 4.6 GB
+    per box for its 337 points in one vmap, 84 GB for a call of 16 boxes)."""
+    sel = pts if keep is None else pts[jnp.asarray(keep)]
+    k = sel.shape[0]
+    chunk = None
+    if per_point is not None and per_point * k * CUT_BATCH > CUT_BYTES:
+        chunk = max(1, int(CUT_BYTES // (per_point * CUT_BATCH)))
+    out = jax.vmap(cuts_at)(sel) if chunk is None or chunk >= k else jax.lax.map(cuts_at, sel, batch_size=chunk)
+    if keep is None or not scatter:
+        return out
+    P, idx = pts.shape[0], jnp.asarray(keep)
+    const = jnp.full((P,) + out[0].shape[1:], -jnp.inf, out[0].dtype).at[idx].set(out[0])
+    coef = jnp.zeros((P,) + out[1].shape[1:], out[1].dtype).at[idx].set(out[1])
+    return (const, coef) + tuple(out[2:])
+
+
+def _cut_bytes_of(f, ineq, eq):
+    """``_cut_bytes`` memoized on the number of variables (None on any failure: no chunking)."""
+    cache = {}
+
+    def get(n):
+        if n not in cache:
+            try:
+                cache[n] = _cut_bytes(f, ineq, eq, n)
+            except Exception:  # noqa: BLE001 -- only a memory estimate
+                cache[n] = None
+        return cache[n]
+
+    return get
+
+
 def _cut_rows(shape, nl):
     """Flat indices of the LP rows to keep from cuts of shape ``(P, K)`` (P points, K parts;
     point-major rows), or None for all of them.
@@ -447,6 +518,7 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
     """
     prepare, parts, _ = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate, safe, exact=exact)
     nonlinear = _nonlinear_of(f, ineq, eq)
+    cut_bytes = _cut_bytes_of(f, ineq, eq)
 
     def bound(lo, hi, cutoff=jnp.inf, pool=None, root=None):
         n = lo.size
@@ -462,7 +534,9 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
 
         axis = jnp.concatenate([jnp.eye(n), -jnp.eye(n)]) * (w / 4)
         pts0 = jnp.concatenate([c[None], c + axis])
-        const0, coef0, bounds = jax.vmap(cuts_at)(pts0)  # (P0, 1+m), (P0, 1+m, n)
+        P0 = pts0.shape[0]
+        sel = _axis_points(nl, n)  # the points whose cuts are kept for some part
+        const0, coef0, bounds = _point_cuts(cuts_at, pts0, sel, cut_bytes(n), scatter=False)  # (P, 1+m), (P, 1+m, n)
 
         # --- interval information (constant on the box: any point's) ---------
         (flo, fhi), bg, bh = jax.tree.map(lambda b: b[0], bounds)
@@ -499,21 +573,36 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
             pool_b = jnp.where(pobj, tlo_s, tol) - pconst
             pool_mag = jnp.where(pobj, jnp.abs(tlo_s), abs(tol)) + jnp.abs(pconst)
 
-        def rows(const, coef):
-            """LP rows over z = (u, tau) with t = tlo + T tau.
+        # The cuts are kept as the flat list of LP rows ``_cut_rows`` keeps, point-major: the
+        # (point, part) pairs of the center and axis points, then a fixed-size slot of the
+        # nonlinear parts' rows per Kelley point. On minlp.org m47_bcp8 1881 of 112871 pairs are
+        # kept, and a (points, parts, n) cut buffer is 150 MB per box.
+        K = const0.shape[1]
+        keep = _cut_rows((P0 + n_kelley, K), nl)
+        keep = np.arange((P0 + n_kelley) * K) if keep is None else keep
+        obj = keep % K == 0  # (R,) the objective's rows
+        r0 = int(np.sum(keep < P0 * K))  # rows of the center and axis points
+        kparts = keep[r0:][: len(keep[r0:]) // max(n_kelley, 1)] - P0 * K if n_kelley else np.zeros(0, np.int64)
+        # the kept rows of the first P0 points, as rows of the points computed (``sel``)
+        pos = np.full(P0, -1)
+        pos[np.arange(P0) if sel is None else sel] = np.arange(const0.shape[0])
+        if np.any(pos[keep[:r0] // K] < 0):  # (``nl`` does not match the parts: cuts at every point)
+            const0, coef0, _ = _point_cuts(cuts_at, pts0, None, cut_bytes(n))
+            pos = np.arange(P0)
+        g0 = pos[keep[:r0] // K] * K + keep[:r0] % K
+
+        def rows(cf, cg):
+            """LP rows over z = (u, tau) with t = tlo + T tau, from the kept cuts (``cf`` (R,),
+            ``cg`` (R, n)).
 
             objective cut:  const0 + coef0.u <= t   -> coef0.u - T tau <= tlo - const0
             constraint cut: const_i + coef_i.u <= tol -> coef_i.u        <= tol - const_i
 
             followed by the pool's rows (the same two forms).
             """
-            tcol = jnp.zeros(const.shape + (1,)).at[..., 0, 0].set(-T)
-            A = jnp.concatenate([coef, tcol], axis=-1).reshape(-1, n + 1)
-            bvec = jnp.concatenate([tlo_s - const[..., :1], tol - const[..., 1:]], axis=-1).reshape(-1)
-            mag = jnp.concatenate([jnp.abs(tlo_s) + jnp.abs(const[..., :1]), abs(tol) + jnp.abs(const[..., 1:])], axis=-1).reshape(-1)
-            keep = _cut_rows(const.shape, nl)
-            if keep is not None:
-                A, bvec, mag = A[keep], bvec[keep], mag[keep]
+            A = jnp.concatenate([cg, jnp.where(obj, -T, 0.0)[:, None]], axis=1)
+            bvec = jnp.where(obj, tlo_s - cf, tol - cf)
+            mag = jnp.where(obj, jnp.abs(tlo_s), abs(tol)) + jnp.abs(cf)
             if pool is not None:
                 A, bvec, mag = (jnp.concatenate([A, pool_A]), jnp.concatenate([bvec, pool_b]),
                                 jnp.concatenate([mag, pool_mag]))  # fmt: skip
@@ -550,9 +639,9 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
         # const = -inf, which rows() turns into dead rows (0 <= 1), so every round has the
         # same LP shape. The rounds stop early once a round no longer raises the bound
         # (``KELLEY_STALL``) or the box is pruned (see ``_kelley_go``).
-        P0 = const0.shape[0]
-        const = jnp.concatenate([const0, jnp.full((n_kelley,) + const0.shape[1:], -jnp.inf)])
-        coef = jnp.concatenate([coef0, jnp.zeros((n_kelley,) + coef0.shape[1:])])
+        nk = len(kparts)
+        const = jnp.concatenate([const0.reshape(-1)[g0], jnp.full(n_kelley * nk, -jnp.inf)])
+        coef = jnp.concatenate([coef0.reshape(-1, n)[g0], jnp.zeros((n_kelley * nk, n))])
 
         def solve(const, coef, best, rlo, rhi):
             """One LP over the current cuts: (best', rlo', rhi', u)."""
@@ -575,7 +664,9 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
             # Kelley: cuts at the last LP solution, then the LP again
             k, const, coef, best, rlo, rhi, u, _ = carry
             ck, gk, _ = cuts_at(lo + w * u)
-            const, coef = const.at[P0 + k].set(ck), coef.at[P0 + k].set(gk)
+            at = r0 + k * nk  # this Kelley point's slot
+            const = jax.lax.dynamic_update_slice(const, ck[kparts], (at,))
+            coef = jax.lax.dynamic_update_slice(coef, gk[kparts], (at, 0))
             prev = best
             best, rlo, rhi, u = solve(const, coef, best, rlo, rhi)
             return k + 1, const, coef, best, rlo, rhi, u, _kelley_go(prev, best, cutoff)
@@ -701,6 +792,7 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
     """
     prepare, parts, _ = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate, safe, exact=exact)
     nonlinear = _nonlinear_of(f, ineq, eq)
+    cut_bytes = _cut_bytes_of(f, ineq, eq)
 
     def obbt(lo, hi, cutoff=jnp.inf):
         n = lo.size
@@ -713,17 +805,21 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
             return _cuts(parts, data, p, lo, hi, safe)[:2]
 
         def rows(const, coef):
-            rhs = jnp.concatenate([cutoff - const[:, :1], tol - const[:, 1:]], axis=1).reshape(-1)
-            A = coef.reshape(-1, n)
+            # (rows are computed row by row: pick the kept ones first, as in the node bound)
+            obj = np.tile(np.arange(const.shape[1]) == 0, const.shape[0])
+            cf, A = const.reshape(-1), coef.reshape(-1, n)
+            keep = _cut_rows(const.shape, nl)
+            if keep is not None:
+                obj, cf, A = obj[keep], cf[keep], A[keep]
+            rhs = jnp.where(obj, cutoff - cf, tol - cf)
             nrm = jnp.linalg.norm(A, axis=1)
             live = jnp.isfinite(rhs) & (nrm > 0)
             nrm = jnp.where(live, nrm, 1.0)
-            mag = jnp.concatenate([abs(cutoff) + jnp.abs(const[:, :1]), abs(tol) + jnp.abs(const[:, 1:])], axis=1).reshape(-1)
+            mag = jnp.where(obj, abs(cutoff), abs(tol)) + jnp.abs(cf)
             A = jnp.where(live[:, None], A / nrm[:, None], 0.0)
             b = jnp.where(live, rhs / nrm, 1.0)
             b = _row_margin(A, b, jnp.where(live, mag / nrm, 0.0), live, safe)
-            keep = _cut_rows(const.shape, nl)
-            return (A, b) if keep is None else (A[keep], b[keep])
+            return A, b
 
         C = jnp.concatenate([jnp.eye(n), -jnp.eye(n)])
 
@@ -742,7 +838,7 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
             return jnp.clip(z, 0.0, 1.0), best
 
         axis = jnp.concatenate([jnp.eye(n), -jnp.eye(n)]) * (w / 4)
-        const, coef = jax.vmap(cuts_at)(jnp.concatenate([c[None], c + axis]))
+        const, coef = _point_cuts(cuts_at, jnp.concatenate([c[None], c + axis]), _axis_points(nl, n), cut_bytes(n))
         ulo, uhi = jnp.zeros(n), jnp.ones(n)
         own_c = own_g = None  # per LP (own_cuts): cuts at its own earlier solutions
         for k in range(rounds):
@@ -755,7 +851,7 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
             ulo = jnp.maximum(ulo, jnp.where(jnp.isfinite(B[:n]), B[:n], 0.0))
             uhi = jnp.minimum(uhi, jnp.where(jnp.isfinite(B[n:]), -B[n:], 1.0))
             if k < rounds - 1:  # cuts at this round's 2n LP solutions
-                ck, gk = jax.vmap(cuts_at)(lo + w * Z)
+                ck, gk = _point_cuts(cuts_at, lo + w * Z, per_point=cut_bytes(n))
                 if own_cuts:
                     own_c = ck[:, None] if k == 0 else jnp.concatenate([own_c, ck[:, None]], axis=1)
                     own_g = gk[:, None] if k == 0 else jnp.concatenate([own_g, gk[:, None]], axis=1)
