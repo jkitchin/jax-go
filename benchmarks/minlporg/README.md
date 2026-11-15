@@ -392,3 +392,15 @@ On the six instances that reach the search (`main` against this change, cold, tw
 * Stage 2 follow-ups (see *Stage 2 results*): bounds and incumbents on the mixed-integer models
   (the largest gap), bounds for the `dt` variables of the heat-exchanger-network models from
   their big-M constraints, the time-limit overruns, and run-to-run nondeterminism.
+
+## Excluded instances
+
+`fetch.py` leaves out the heat-exchanger network models m75 (General_Model_Case2) and m76
+(General_Model_Case1) (`EXCLUDE`; listed in the `skipped_*` files). They define
+`lmtd = (dt1 - dt2) / log(dt1 / (dt2 + 1e-6))` with no upper bound on `lmtd` and only lower bounds
+on `dt`, so at the pole `dt1 -> dt2 + 1e-6` the exchanger area and the cost go to 0 and the infimum
+is not attained: no finite box contains every point better than an incumbent. A feasible point of
+m75 at 736602 (violation 9e-13) is below minlp.org's best known 739019.02, which is a local
+solution. They are not useful for global optimization as written. m76 was in `instances_stage2.csv`
+and m75 in `instances_stage2b.csv` (now 31 and 19 instances); their earlier result rows stay in the
+result CSVs.

@@ -2,7 +2,6 @@ name,nvars,ncons,probtype,objsense,primalbound,dualbound,gap,convex,nbinvars,nin
 m6_del_asl_hvar,151,110,NLP,min,1.5364,,,,0,0,6,MINLP & MPCC Strategies for Optimization of a Class of Hybrid Dynamic Systems : 1,https://www.minlp.org/library/problem/index.php?i=27
 m34_convex2,100,217,MINLP,min,2687027,,,,60,0,34,Mixed-Integer Nonlinear Programming Models for the Optimal Design of Multi-product Batch Plant : 8 products and 12 stages,https://www.minlp.org/library/problem/index.php?i=48
 m47_bcp8,168,190,MINLP,max,0.9697,,,,9,0,47,Stabilizing controller design and the Belgian chocolate problem : Controller of degree 8,https://www.minlp.org/library/problem/index.php?i=57
-m75_General_Model_Case2,148,166,MINLP,min,739019.02,,,,16,0,75,Mixed-Integer Nonlinear Programming Models for Optimal Simultaneous Synthesis of Heat Exchangers Network : Example2,https://www.minlp.org/library/problem/index.php?i=93
 m391_CLay0205BM,80,135,MIQCP,min,8092.5000,,,,50,0,391,Constrained Layout: Convex MINLPs Derived from Generalized Disjunctive Programming using Cones : Clay0205BM,https://www.minlp.org/library/problem/index.php?i=306
 m394_CLay0305BM,85,155,MIQCP,min,8092.5000,,,,55,0,394,Constrained Layout: Convex MINLPs Derived from Generalized Disjunctive Programming using Cones : Clay0305BM,https://www.minlp.org/library/problem/index.php?i=306
 m396_CLay0203HRcone,108,150,MIQCP,min,41573.2602,,,,18,0,396,Constrained Layout: Convex MINLPs Derived from Generalized Disjunctive Programming using Cones : Clay0203HRcone,https://www.minlp.org/library/problem/index.php?i=306
