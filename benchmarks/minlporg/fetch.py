@@ -155,12 +155,16 @@ def main():
     ap.add_argument("--max-cons", type=int, default=60)
     ap.add_argument("--above", type=int, default=0, help="only instances with more variables or constraints than this")
     ap.add_argument("--per-problem", type=int, default=0, help="at most this many (the smallest) per minlp.org problem")
+    ap.add_argument("--ids", default="", help="comma-separated minlp.org instance ids to keep (after the other filters)")
     ap.add_argument("--out", default="instances.csv", help="instance list to write (skipped ones to skipped_<out>)")
     a = ap.parse_args()
     (HERE / "src").mkdir(exist_ok=True)
     (HERE / "nl").mkdir(exist_ok=True)
     rows, skipped = [], []
+    ids = {int(i) for i in a.ids.split(",") if i.strip()}
     for r in select(listing(), a.max_vars, a.max_cons, a.above, a.per_problem):
+        if ids and r["id"] not in ids:
+            continue
         models = [(f, loc) for f, loc in r["inputs"] if f.lower().endswith((".gms", ".mps"))]
         if len(models) != 1:
             skipped.append(dict(id=r["id"], title=r["title"], reason=f"inputs {[f for f, _ in r['inputs']]}: not one .gms/.mps model"))
