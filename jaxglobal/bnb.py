@@ -408,7 +408,7 @@ class _Kernels:
 
     def __init__(self, f, ineq, eq, *, n_fw, n_kelley, fbbt, fbbt_rounds, dbbt, obbt, obbt_rounds,
                  univariate, alphabb, multivariate, lifted, crown, feas_tol, safe, integer=(), quadratic=True,
-                 cut_pool=0, exact=False):  # fmt: skip
+                 cut_pool=0, exact=False, boxes=16):  # fmt: skip
         opts = {k: v for k, v in locals().items() if k not in ("self", "f", "ineq", "eq")}
         constrained = ineq is not None or eq is not None
         g, h = _vec(ineq), _vec(eq)
@@ -447,7 +447,8 @@ class _Kernels:
                 return lb, x, fx, rlo, rhi, x
         elif constrained:
             cb = make_constrained_bounder(f, ineq, eq, n_kelley=n_kelley, tol=feas_tol, univariate=univariate,
-                                          alphabb=alphabb, multivariate=multivariate, safe=safe, exact=exact)
+                                          alphabb=alphabb, multivariate=multivariate, safe=safe, exact=exact,
+                                          boxes=boxes)
 
             def raw_bound(blo, bhi, cutoff, pool=None, root=None):
                 Q = lifted_form(blo.size)
@@ -465,7 +466,8 @@ class _Kernels:
                 return unc_bound(blo, bhi, cutoff)
         tighten = make_fbbt(f, ineq, eq, rounds=fbbt_rounds, feas_tol=feas_tol, safe=safe, integer=integer) if fbbt else None
         cut_obbt = make_obbt(f, ineq, eq, rounds=obbt_rounds, tol=feas_tol, univariate=univariate,
-                             alphabb=alphabb, multivariate=multivariate, safe=safe, exact=exact) if obbt else None
+                             alphabb=alphabb, multivariate=multivariate, safe=safe, exact=exact,
+                             boxes=boxes if obbt == "tree" else 1) if obbt else None
 
         def lp_tighten(blo, bhi, cutoff):
             Q = lifted_form(blo.size) if constrained else None
@@ -932,6 +934,14 @@ def _dispatch_threads():
     return max(1, int(k if k is not None else _ncpu()))
 
 
+def _memory_boxes(batch, batch_sizes):
+    """Boxes whose bound-kernel working memory can be live at once (``memory.point_chunk``'s
+    ``boxes``): the largest call (``_Padder``: ``batch_sizes`` capped by ``batch``) times the calls
+    ``run`` dispatches concurrently (``_dispatch_threads``, at most the calls of a full batch)."""
+    top = max({min(int(s), batch) for s in batch_sizes} or {batch})
+    return top * max(1, min(_dispatch_threads(), -(-batch // top)))
+
+
 def _dispatch_pool(k):
     """A shared pool of ``k`` dispatch threads (created on first use)."""
     with _DISPATCH_LOCK:
@@ -1260,7 +1270,8 @@ def minimize(
                 obbt=obbt or False, obbt_rounds=obbt_rounds, univariate=univariate, alphabb=alphabb,
                 multivariate=multivariate, lifted=lifted, crown=bool(crown), feas_tol=feas_tol, safe=bool(safe),
                 integer=tuple(int(i) for i in np.flatnonzero(imask)), quadratic=bool(quadratic),
-                cut_pool=int(cut_pool) if pmask is not None and pmask.any() else 0, exact=bool(exact))  # fmt: skip
+                cut_pool=int(cut_pool) if pmask is not None and pmask.any() else 0, exact=bool(exact),
+                boxes=_memory_boxes(batch, batch_sizes))  # fmt: skip
     K = _cached(("kernels", f, ineq, eq, tuple(sorted(opts.items()))), lambda: _Kernels(f, ineq, eq, **opts))
     # the cut pool: tangents of the root box's relaxation at good points, added to every node LP
     pool = None

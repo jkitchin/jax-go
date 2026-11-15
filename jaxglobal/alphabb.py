@@ -209,6 +209,10 @@ def make_alphabb(fn, eigen=True, safe=False, interpret="auto"):
                 with jax.ensure_compile_time_eval():
                     run = make_taylor2(tape, n, ictx, n)
                 if run is not None and interpret is not True and taylor2_bytes(run.program.const_val.size, n) > TAYLOR_BYTES:
+                    from .memory import log
+
+                    log.info("alphaBB interval Hessian: the interpreter's %.0f MB > TAYLOR_BYTES %.0f MB: traced Hessian",
+                             taylor2_bytes(run.program.const_val.size, n) / 2**20, TAYLOR_BYTES / 2**20)
                     run = None
             if run is None and closed is None and interpret is True:
                 closed = traced(lo)
