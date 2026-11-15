@@ -197,6 +197,23 @@ def monotone_bounds(f, ineq, eq, lo, hi, integer=None, struct=None):
     if J.shape[0] != dep.shape[0]:
         return lo, hi
     ints = np.zeros(n, bool) if integer is None else np.asarray(integer, bool)
+
+    def apply(j, side, cap):
+        if side > 0:
+            v = max(cap, lo[j])
+            if np.isfinite(v):
+                hi[j] = np.ceil(v) if ints[j] else v
+        else:
+            v = min(cap, hi[j])
+            if np.isfinite(v):
+                lo[j] = np.floor(v) if ints[j] else v
+
+    def cap_of(j, side, need, R):
+        if not np.all(np.isfinite(R)):
+            return None
+        return np.max(R / -J[need, j]) if side > 0 else np.min(-R / J[need, j])
+
+    pending = []  # (j, side, rows that need x_j) whose cap needs a row bound
     for j in np.flatnonzero(free_hi | free_lo):
         rows = np.flatnonzero(dep[:, j])
         if np.any(kind[rows] == 2) or np.any(nl[rows, j]) or not np.all(np.isfinite(J[rows, j])):
@@ -209,23 +226,40 @@ def monotone_bounds(f, ineq, eq, lo, hi, integer=None, struct=None):
             if np.any(side * a[rk == 0] < 0) or np.any(side * a[rk == 1] > 0):
                 continue  # the objective or some inequality wants x_j to move the other way
             need = rows[(rk == 1) & (a != 0)]
-            if len(need):
+            if not len(need):
+                apply(j, side, -np.inf if side > 0 else np.inf)  # no row needs x_j: the opposite bound will do
+            elif row_upper.small:  # one compiled sweep per candidate, on the box as capped so far
                 L, H = lo.copy(), hi.copy()
                 L[j] = H[j] = 0.0
-                R = row_upper(L, H)[need]
-                if not np.all(np.isfinite(R)):
-                    continue
-                cap = np.max(R / -J[need, j]) if side > 0 else np.min(-R / J[need, j])
+                cap = cap_of(j, side, need, row_upper(L, H)[need])
+                if cap is not None:
+                    apply(j, side, cap)
             else:
-                cap = -np.inf if side > 0 else np.inf  # no row needs x_j: the opposite bound will do
-            if side > 0:
-                v = max(cap, lo[j])
-                if np.isfinite(v):
-                    hi[j] = np.ceil(v) if ints[j] else v
-            else:
-                v = min(cap, hi[j])
-                if np.isfinite(v):
-                    lo[j] = np.floor(v) if ints[j] else v
+                pending.append((j, side, need))
+    # A large tape is swept eagerly, about 1 s per sweep (minlp.org m400: 12 candidates, 12.7 s).
+    # A row's upper bound depends only on the box of the variables in it, so candidates none of
+    # whose rows holds another one's variable share a sweep, all fixed at 0 at once: each gets
+    # exactly the row bounds of its own sweep on that box. Groups are swept in turn, each on the
+    # box as capped by the groups before it (like the loop above, on fewer, larger steps).
+    groups = []  # [members (j, side, need), their variables]
+    for c in pending:
+        j, _, need = c
+        mine = dep[need].any(axis=0)  # the variables of j's rows
+        for g in groups:
+            if not any(mine[v] for v in g[1] if v != j) and not any(dep[nd, j].any() for v, _, nd in g[0] if v != j):
+                g[0].append(c)
+                g[1].add(j)
+                break
+        else:
+            groups.append([[c], {j}])
+    for members, js in groups:
+        L, H = lo.copy(), hi.copy()
+        L[list(js)] = H[list(js)] = 0.0
+        R = row_upper(L, H)
+        for j, side, need in members:
+            cap = cap_of(j, side, need, R[need])
+            if cap is not None:
+                apply(j, side, cap)
     return lo, hi
 
 
