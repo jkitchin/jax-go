@@ -47,16 +47,39 @@ def _mixed():
     return f, g, h, -np.ones(4), 2.0 * np.ones(4)
 
 
-@pytest.mark.parametrize("model", ["haverly", "mixed"])
+def _affine_eq():
+    """Nonlinear objective and one nonlinear inequality; the other inequalities and every equality
+    affine (the split cut points then relax neither ``h`` nor most of ``g``'s work)."""
+
+    def f(x):
+        return jnp.exp(0.5 * x[0]) + x[1] * x[2] - x[3]
+
+    def g(x):
+        return jnp.stack([x[0] ** 2 + x[1] ** 2 - 3.0, x[0] + x[1] - 2.5, x[2] - x[3] - 1.0, -x[0] - x[2] - 1.5])
+
+    def h(x):
+        return jnp.stack([x[0] + 2.0 * x[1] - x[2] - 0.5, 0.5 * x[3] - x[1] + 0.25])
+
+    return f, g, h, -np.ones(4), 2.0 * np.ones(4)
+
+
+MODELS = {"haverly": haverly1, "mixed": None, "affine_eq": _affine_eq}
+
+
+def _model(name):
+    return _mixed() if name == "mixed" else MODELS[name]()
+
+
+@pytest.mark.parametrize("model", ["haverly", "mixed", "affine_eq"])
 @pytest.mark.parametrize("chunk,shared,split", [(1, True, False), (3, True, False), (32, True, False),
                                                 (3, False, True), (3, True, True)])
 def test_shared_matches_separate(model, chunk, shared, split, monkeypatch):
-    f, g, h, lo, hi = haverly1() if model == "haverly" else _mixed()
+    f, g, h, lo, hi = _model(model)
     L, H = _boxes(lo, hi, 6, 1)
     old = _bounder(f, g, h, False, chunk, monkeypatch, L, H)
     new = _bounder(f, g, h, shared, chunk, monkeypatch, L, H, split=split)
     for cut in (np.inf, -350.0 if model == "haverly" else 2.0):
-        a, b = old(L, H, cut), new(L, H, cut)
+        a, b = old(L, H, cut), new(L, H, cut)  # (affine_eq: the cutoff 2.0 prunes some boxes)
         lb_a, lb_b = np.asarray(a[0]), np.asarray(b[0])
         # pruned boxes (bound past the cutoff, or an LP-infeasible box's huge certificate) agree as such
         cap = min(cut, 1e10)
@@ -107,12 +130,12 @@ def test_split_auto_rule():
     assert (~nl.any(axis=1)).sum() < nl.any(axis=1).sum()
 
 
-@pytest.mark.parametrize("model", ["haverly", "mixed"])
+@pytest.mark.parametrize("model", ["haverly", "mixed", "affine_eq"])
 @pytest.mark.parametrize("own_cuts", [True, False])
 def test_obbt_split_matches_unsplit(model, own_cuts, monkeypatch):
     """OBBT with the affine parts linearized at the center only (``SPLIT_AFFINE``) tightens the
     boxes as the unsplit layout does: the same LP rows, in another order."""
-    f, g, h, lo, hi = haverly1() if model == "haverly" else _mixed()
+    f, g, h, lo, hi = _model(model)
     L, H = _boxes(lo, hi, 4, 2)
     out = {}
     for split in (False, True):
@@ -128,11 +151,11 @@ def test_obbt_split_matches_unsplit(model, own_cuts, monkeypatch):
             assert np.allclose(np.asarray(a[k])[ok], np.asarray(b[k])[ok], rtol=0, atol=1e-4 * (hi - lo).max())
 
 
-@pytest.mark.parametrize("model", ["haverly", "mixed"])
+@pytest.mark.parametrize("model", ["haverly", "mixed", "affine_eq"])
 def test_affine_forms(model):
     """``_affine_forms`` gives each affine part as ``A x + b`` (the function's value everywhere) and
     NaN rows for the nonlinear parts."""
-    f, g, h, lo, hi = haverly1() if model == "haverly" else _mixed()
+    f, g, h, lo, hi = _model(model)
     n = lo.size
     A, b = LP._affine_forms(f, g, h, n)
     nl = LP._nonlinear_vars(f, g, h, n)
@@ -155,13 +178,15 @@ def test_affine_forms(model):
 def test_affine_exact_matches_relaxation_pass(monkeypatch):
     """With ``AFFINE_EXACT`` the split bounder gives the bounds of the split bounder that linearizes
     the affine parts by a forward-mode pass of the relaxation."""
-    f, g, h, lo, hi = haverly1()
+    f, g, h, lo, hi = _affine_eq()
     L, H = _boxes(lo, hi, 6, 3)
     monkeypatch.setattr(LP, "AFFINE_EXACT", False)
     old = _bounder(f, g, h, True, 4, monkeypatch, L, H, split=True)
     new = _bounder(f, g, h, True, 4, monkeypatch, L, H, split=True)  # (monkeypatch.undo restored AFFINE_EXACT)
-    for cut in (np.inf, -350.0):
+    assert LP._SubParts(None, [0, 1], LP._part_sizes(f, g, h, 4)).skip == (None, None, 2)  # h is not relaxed
+    for cut in (np.inf, 2.0):
         a, b = old(L, H, cut), new(L, H, cut)
         lb_a, lb_b = np.asarray(a[0]), np.asarray(b[0])
+        assert np.array_equal(np.asarray(a[2]), np.asarray(b[2]))  # infeasible
         fin = np.isfinite(lb_a) & (lb_a < min(cut, 1e10))
         assert np.allclose(lb_a[fin], lb_b[fin], rtol=1e-7, atol=1e-7), (lb_a, lb_b)

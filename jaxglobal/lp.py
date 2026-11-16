@@ -47,6 +47,8 @@ The same certificate gives bound tightening for free:
 
 from __future__ import annotations
 
+import functools
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -499,20 +501,34 @@ def _parts_fn(f, ineq, eq, univariate, alphabb=False, multivariate=False, safe=F
     def parts(x, lo, hi, data):
         return parts_bounds(x, lo, hi, data)[0]
 
-    def parts_bounds(x, lo, hi, data):
+    def parts_bounds(x, lo, hi, data, skip=None):
         """``(parts, bounds)``: ``bounds`` are the interval bounds ``(f, g, h)`` on the box, each
-        an MC's ``(lo, hi)`` or None; they do not depend on ``x``."""
+        an MC's ``(lo, hi)`` or None; they do not depend on ``x``. ``skip``: per function (f, g, h),
+        None to relax it, or its number of outputs to leave it out (zeros in its parts' places and
+        None bounds: for callers that use none of its parts, see ``_SubParts``)."""
         rf, rg, rh = rs
-        mf = rf(x, lo, hi, data[0])
-        out, bounds = [jnp.atleast_1d(mf.cv)], [(mf.lo, mf.hi), None, None]
+        skip = skip or (None, None, None)
+        out, bounds = [], [None, None, None]
+        if skip[0] is None:
+            mf = rf(x, lo, hi, data[0])
+            out.append(jnp.atleast_1d(mf.cv))
+            bounds[0] = (mf.lo, mf.hi)
+        else:
+            out.append(jnp.zeros(skip[0], x.dtype))
         if rg is not None:
-            mg = rg(x, lo, hi, data[1])
-            out.append(mg.cv)
-            bounds[1] = (mg.lo, mg.hi)
+            if skip[1] is None:
+                mg = rg(x, lo, hi, data[1])
+                out.append(mg.cv)
+                bounds[1] = (mg.lo, mg.hi)
+            else:
+                out.append(jnp.zeros(skip[1], x.dtype))
         if rh is not None:
-            mh = rh(x, lo, hi, data[2])
-            out += [mh.cv, -mh.cc]
-            bounds[2] = (mh.lo, mh.hi)
+            if skip[2] is None:
+                mh = rh(x, lo, hi, data[2])
+                out += [mh.cv, -mh.cc]
+                bounds[2] = (mh.lo, mh.hi)
+            else:
+                out.append(jnp.zeros(2 * skip[2], x.dtype))
         return jnp.concatenate(out), tuple(bounds)
 
     parts.bounds = parts_bounds
@@ -561,6 +577,32 @@ def _exact_affine(affine_of, n, afp, safe):
     return A, b
 
 
+def _part_sizes(f, ineq, eq, n):
+    """Outputs of ``(f, ineq, eq)`` (0 for a missing one): the parts are 1 + m_g + 2 m_h."""
+    x = jax.ShapeDtypeStruct((n,), jnp.float64)
+
+    def size(fn):
+        return 0 if fn is None else int(np.prod(jax.eval_shape(lambda z: jnp.atleast_1d(fn(z)), x).shape))
+
+    return size(f), size(ineq), size(eq)
+
+
+def _affine_bounds(A, b, sizes, skip, lo, hi):
+    """Interval bounds ``(lo, hi)`` over the box of the functions ``skip`` leaves out (their parts
+    all affine, ``A x + b``), in ``parts.bounds``' layout; None for the others."""
+    out, start = [], 0
+    for i, m in enumerate(sizes):
+        rows = slice(start, start + m)
+        start += m if i < 2 else 2 * m
+        if skip[i] is None or m == 0:
+            out.append(None)
+            continue
+        Ar, br = jnp.asarray(A[rows]), jnp.asarray(b[rows])
+        p, q = jnp.where(Ar != 0, Ar * lo, 0.0), jnp.where(Ar != 0, Ar * hi, 0.0)
+        out.append((br + jnp.sum(jnp.minimum(p, q), axis=1), br + jnp.sum(jnp.maximum(p, q), axis=1)))
+    return tuple(out)
+
+
 def _affine_cuts(A, b, lo, w):
     """The cuts of affine parts ``A x + b`` in unit-box coordinates, shaped as one point's:
     ``(1, Ka)`` constants (the value at ``lo``) and ``(1, Ka, n)`` coefficients."""
@@ -571,14 +613,26 @@ def _affine_cuts(A, b, lo, w):
 
 
 class _SubParts:
-    """``parts`` restricted to the parts ``idx`` (``parts.bounds`` interface of ``_cuts``)."""
+    """``parts`` restricted to the parts ``idx`` (``parts.bounds`` interface of ``_cuts``).
 
-    def __init__(self, parts, idx):
+    ``sizes``: the outputs of (f, g, h) (``_part_sizes``); a function none of whose parts is in
+    ``idx`` is then not relaxed at all (its bounds are None). XLA does not drop an unused
+    function's interpreted relaxation from the forward-mode pass by itself: on m34_convex2
+    (nonlinear parts: f and one row of g) the equality rows' relaxation was 5.3k of the node
+    bound kernel's 25.7k HLO lines."""
+
+    def __init__(self, parts, idx, sizes=None):
         self.parts, self.idx = parts, np.asarray(idx)
+        self.skip = None
+        if sizes is not None:
+            ends = np.cumsum([sizes[0], sizes[1], 2 * sizes[2]])
+            starts = ends - np.array([sizes[0], sizes[1], 2 * sizes[2]])
+            self.skip = tuple(None if np.any((self.idx >= a) & (self.idx < b)) else int(m)
+                              for a, b, m in zip(starts, ends, sizes))  # fmt: skip
 
     def bounds(self, x, lo, hi, data):
         # contiguous runs as static slices (not a gather), so XLA drops the other parts' work
-        v, b = self.parts.bounds(x, lo, hi, data)
+        v, b = self.parts.bounds(x, lo, hi, data, self.skip) if self.skip is not None else self.parts.bounds(x, lo, hi, data)
         idx = self.idx
         cuts = np.flatnonzero(np.diff(idx) != 1) + 1
         runs = [(int(r[0]), int(r[-1]) + 1) for r in np.split(idx, cuts)]
@@ -669,6 +723,7 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
     point_bytes = _point_bytes_of(f, ineq, eq)
     shared_of, large_of = _shared_cuts(f, ineq, eq)
     affine_of = _affine_of(f, ineq, eq)
+    sizes_of = functools.lru_cache(maxsize=None)(lambda n: _part_sizes(f, ineq, eq, n))
 
     def bound(lo, hi, cutoff=jnp.inf, pool=None, root=None):
         n = lo.size
@@ -690,19 +745,29 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
             afp = np.flatnonzero(~nl.any(axis=1))
             nl_p = nl[nlp]
             obj_p, obj_a = bool(nlp[0] == 0), bool(afp[0] == 0)
-            sub = _SubParts(parts, nlp)
             exact = _exact_affine(affine_of, n, afp, safe)
-            if exact is not None:  # the affine parts' cuts from their coefficients (``AFFINE_EXACT``)
+            if exact is not None:
+                # the affine parts' cuts from their coefficients (``AFFINE_EXACT``), and the cut points
+                # relax only the functions with a nonlinear part; the others' interval bounds are their
+                # affine forms' ranges on the box
+                sizes = sizes_of(n)
+                sub = _SubParts(parts, nlp, sizes)
                 aff = _affine_cuts(*exact, lo, w)
-                bounds_c = parts.bounds(c, lo, hi, data)[1]  # (the interval bounds only: no forward-mode pass)
+                aff_b = _affine_bounds(*affine_of(n), sizes, sub.skip, lo, hi)
+
+                def cuts_at(p):
+                    """Cuts of the nonlinear parts at p (``_cuts``) and the interval bounds."""
+                    ck, gk, b = _cuts(sub, data, p, lo, hi, safe)
+                    return ck, gk, tuple(a if a is not None else e for a, e in zip(b, aff_b))
             else:
+                sub = _SubParts(parts, nlp)
                 ca, ga, bounds_c = _cuts(parts, data, c, lo, hi, safe)
                 aff = (ca[afp][None], ga[afp][None])  # (1, Ka), (1, Ka, n)
 
-            def cuts_at(p):
-                """Cuts of the nonlinear parts at p (``_cuts``); the bounds are the center's."""
-                ck, gk, _ = _cuts(sub, data, p, lo, hi, safe)
-                return ck, gk, bounds_c
+                def cuts_at(p):
+                    """Cuts of the nonlinear parts at p (``_cuts``); the bounds are the center's."""
+                    ck, gk, _ = _cuts(sub, data, p, lo, hi, safe)
+                    return ck, gk, bounds_c
         else:
             nl_p, obj_p, obj_a, aff = nl, True, False, None
 
@@ -1039,6 +1104,7 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
     point_bytes = _point_bytes_of(f, ineq, eq)
     _, large_of = _shared_cuts(f, ineq, eq)
     affine_of = _affine_of(f, ineq, eq)
+    sizes_of = functools.lru_cache(maxsize=None)(lambda n: _part_sizes(f, ineq, eq, n))
 
     def obbt(lo, hi, cutoff=jnp.inf):
         n = lo.size
@@ -1058,11 +1124,12 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
         if split:
             nlp, afp = np.flatnonzero(nl.any(axis=1)), np.flatnonzero(~nl.any(axis=1))
             nl_p, obj_p, obj_a = nl[nlp], bool(nlp[0] == 0), bool(afp[0] == 0)
-            sub = _SubParts(parts, nlp)
             exact = _exact_affine(affine_of, n, afp, safe)
-            if exact is not None:  # (``AFFINE_EXACT``)
+            if exact is not None:  # (``AFFINE_EXACT``; the cut points relax only the functions they need)
+                sub = _SubParts(parts, nlp, sizes_of(n))
                 aff = _affine_cuts(*exact, lo, w)
             else:
+                sub = _SubParts(parts, nlp)
                 ca, ga, _ = _cuts(parts, data, c, lo, hi, safe)
                 aff = (ca[afp][None], ga[afp][None])  # (1, Ka), (1, Ka, n)
 
