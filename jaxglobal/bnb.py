@@ -43,7 +43,8 @@ from .fbbt import make_fbbt
 from .lifted import make_lifted_bounder
 from .lp import make_constrained_bounder, make_obbt, make_pool_cuts, pool_parts, reduce_ranges
 from .pseudoboolean import EPS, objective_polynomial, solve_binary_polynomial
-from .quadratic import binary_only, make_quadratic_bounder, make_quadratic_obbt, polynomial_form, quadratic_form
+from .quadratic import (binary_only, make_quadratic_bounder, make_quadratic_obbt, polynomial_form, quadratic_form,
+                        with_bigm)
 from .structure import structure
 from .symmetry import SEARCH_SECONDS, lex_prune
 from .relax import SAFE_K
@@ -408,7 +409,7 @@ class _Kernels:
 
     def __init__(self, f, ineq, eq, *, n_fw, n_kelley, fbbt, fbbt_rounds, dbbt, obbt, obbt_rounds,
                  univariate, alphabb, multivariate, lifted, crown, feas_tol, safe, integer=(), quadratic=True,
-                 cut_pool=0, exact=False):  # fmt: skip
+                 cut_pool=0, exact=False, bigm=False):  # fmt: skip
         opts = {k: v for k, v in locals().items() if k not in ("self", "f", "ineq", "eq")}
         constrained = ineq is not None or eq is not None
         g, h = _vec(ineq), _vec(eq)
@@ -430,6 +431,8 @@ class _Kernels:
                         try:  # an optional faster bounder: any failure falls back to the reduced-space path
                             poly_forms[n] = polynomial_form(f, ineq, eq, n, integer=integer,
                                                             sym_seconds=sym_seconds)
+                            if bigm:
+                                poly_forms[n] = with_bigm(poly_forms[n], n, integer)
                         except Exception:
                             poly_forms[n] = None
                     Q = poly_forms[n]
@@ -587,7 +590,8 @@ class _Kernels:
         traced on several threads), or None when the lifted quadratic LP is not used."""
         with self._qlock:
             if n not in self._quadratic:
-                self._quadratic[n] = quadratic_form(*self._problem, n) if self._use_quadratic else None
+                Q = quadratic_form(*self._problem, n) if self._use_quadratic else None
+                self._quadratic[n] = with_bigm(Q, n, self._opts["integer"]) if self._opts.get("bigm") else Q
             return self._quadratic[n]
 
     def structure(self, n):
@@ -958,7 +962,11 @@ def _auto_branch_var(imask):
     """The rule ``branch_var="auto"`` picks (measured, see ``minimize``'s docstring): pseudocost
     without integer variables, width with them. (Pseudocost when every nonlinear variable is a
     general integer helps the hard ones, tln4/5, nvs19/23/24, smallinvDAXr3b010-011, but takes
-    ~1.5x the nodes on small ones: ex1265a 127 -> 701, tloss 31 -> 127, nvs13 107 -> 199.)"""
+    ~1.5x the nodes on small ones: ex1265a 127 -> 701, tloss 31 -> 127, nvs13 107 -> 199.)
+    Re-measured 2026-11 with the fractionality-weighted pseudocost (docs/ANALYSIS-bigm.md): it
+    halves the nodes on the minlp.org big-M layout models and solves tln5 and
+    smallinvDAXr4b150-165 on int50, but loses on ex1252a, smallinvDAXr5b150-165, hadamard_5 and
+    the k-means m421-m423, so integer problems keep width; ``branch_var="pseudocost"`` opts in."""
     return "width" if np.asarray(imask).any() else "pseudocost"
 
 
@@ -1078,6 +1086,7 @@ def minimize(
     cut_pool=128,
     safe=SAFE_DEFAULT,
     milp_root=False,
+    bigm=False,
     time_limit=np.inf,
     verbose=False,
 ):
@@ -1140,6 +1149,12 @@ def minimize(
     Off by default: a raised root bound short of the incumbent prunes no node, so the search is
     the same, minus the MILP's time (docs/ANALYSIS-root-bounds.md section 4).
 
+    ``bigm`` (with integer variables, lifted quadratic / polynomial LP only): tighten, on every node
+    box, the coefficient of the binary in each inequality row that has one to what the box allows
+    (``quadratic.with_bigm``, ``quadratic._bigm``: MIP coefficient tightening, per node). Valid for
+    integral binaries, so the bound stays certified. Off by default: on the minlp.org layout models
+    it changed the nodes to solve by -8% and +2% (docs/ANALYSIS-bigm.md).
+
     ``safe`` rounds every quantity feeding a lower bound outward (interval and
     McCormick values, envelopes, alphaBB, CROWN lines, LP rows and the dual
     certificate) at the primitive-dispatch level; see docs/ROADMAP.md for what
@@ -1157,12 +1172,15 @@ def minimize(
     faces, see ``_LAM`` and ``_BETA``); ``branch_var`` is ``"auto"`` (the default:
     ``"pseudocost"`` without integer variables, ``"width"`` with them; in the 2026-10-20 re-run on
     start50 at 60 s pseudocost solves 40, width and strong 38; on int50 width and pseudocost 43 each
-    and strong 41, see benchmarks/branching_report.py), ``"width"`` (largest
+    and strong 41, see benchmarks/branching_report.py; with integers, pseudocost is the better
+    choice on big-M models with many binaries, see ``_auto_branch_var`` and docs/ANALYSIS-bigm.md),
+    ``"width"`` (largest
     relative width among nonlinear variables; on the lifted quadratic LP, relative width
     times the McCormick gap of the variable's products at the relaxation point), ``"pseudocost"`` (product score
     of per-variable bound gains observed so far, on the lifted quadratic LP times a continuous
     variable's ``"width"`` score; with integer variables, among the integers
-    fractional at the relaxation point when there are any) or ``"reliability"`` (like
+    fractional at the relaxation point when there are any, an integer's score times its
+    fractionality ``min(f, 1 - f)``) or ``"reliability"`` (like
     pseudocost, but variables with fewer than ``_ETA`` observations are
     strong-branched, up to ``_M`` of them per box, within the ``batch`` budget)
     or ``"strong"`` (every parent is split on its best-scored variable, and the
@@ -1260,7 +1278,8 @@ def minimize(
                 obbt=obbt or False, obbt_rounds=obbt_rounds, univariate=univariate, alphabb=alphabb,
                 multivariate=multivariate, lifted=lifted, crown=bool(crown), feas_tol=feas_tol, safe=bool(safe),
                 integer=tuple(int(i) for i in np.flatnonzero(imask)), quadratic=bool(quadratic),
-                cut_pool=int(cut_pool) if pmask is not None and pmask.any() else 0, exact=bool(exact))  # fmt: skip
+                cut_pool=int(cut_pool) if pmask is not None and pmask.any() else 0, exact=bool(exact),
+                bigm=bool(bigm) and bool(imask.any()))  # fmt: skip
     K = _cached(("kernels", f, ineq, eq, tuple(sorted(opts.items()))), lambda: _Kernels(f, ineq, eq, **opts))
     # the cut pool: tangents of the root box's relaxation at good points, added to every node LP
     pool = None
@@ -2075,6 +2094,13 @@ def minimize(
         fr = np.where(fr > INT_TOL, fr, 0.5)
         dn, up = np.where(imask, fr, r2), np.where(imask, 1.0 - fr, r2)
         sc = np.maximum(psiL * dn, eps) * np.maximum(psiR * up, eps) * (1 + 1e-3 * relw)  # width breaks ties
+        # integers: times the fractionality min(f, 1 - f). The relaxation point is an interior-point
+        # solution, so every free binary is fractional at it (on the minlp.org big-M models all of
+        # them, at every node); the weight keeps the predicted gains of variables the LP leaves
+        # nearly integral (often only IPM noise) from outranking the ambiguous ones. On the
+        # k-means models (m423, m424) the plain product rule lost to most-fractional branching by
+        # 2-3x in nodes; with the weight it is close to or better than both (docs/ANALYSIS-bigm.md)
+        sc = sc * np.where(imask, np.minimum(fr, 1.0 - fr), 1.0)
         return np.where(cand & np.isfinite(sc), sc, np.where(cand, 0.0, -1.0)), True
 
     pruned_lb = np.inf  # smallest lower bound among fathomed boxes
