@@ -1064,7 +1064,14 @@ _OA = True
 _OA_SHARE, _OA_SECONDS = 0.15, 30.0  # its time: at most this share of time_limit (in all) and seconds per call
 _OA_EVERY = 0.1  # the search resumes it each time this share of the time limit (at most 600 s) has passed
 _OA_MILP = 0.5  # each MILP of a call gets at most this share of the call's budget
+# the root call waits at most this share of its budget for the heuristic's cut program to compile (it
+# starts compiling just before): cold, the 4.5 s wait (of a 60 s limit) on minlp.org's layout models
+# always ended before the compile did, and the search then ran the heuristic anyway
+_OA_ROOT_WAIT = 0.0
 _PROBE = True  # integer variables: root probing on binaries (``probe`` in ``minimize``)
+# root probing's estimated cost may take at most this share of the time left (None: no limit); minlp.org
+# m400 (36 binaries, 0.5-2 s per bound call cold) spent 10 s of a 60 s limit probing for no gain
+_PROBE_SHARE = 0.1
 _ENUM = 32  # integer variables: at the root, fix-and-solve every assignment when there are at most this many
 _PC_FRAC_POW = 1.0  # branch_var="pseudocost": an integer's score is multiplied by min(f, 1 - f) to this power
 _PC_PROBE = True  # integer variables, branch_var != "width": root probing seeds the pseudocosts (``seed_pseudocosts``)
@@ -1075,6 +1082,7 @@ _DIVE_BACKOFF = 80  # most iterations between periodic dives that do not improve
 # one dive call costs ~9 s, and four of them took 36 s of a 60 s run whose incumbent was already
 # optimal
 _DIVE_FRAC = 0.2
+_ROOT_DIVE_SHARE = 0.1  # the root dives' kernel chunks: at most this share of the time limit (None: no limit)
 _POOL_NLP_FRAC = 0.3  # at most this share of the wall time goes to the cut pool's local solves
 _POOL_CHUNK = 16  # points per call of the cut pool's tangent kernel
 _POOL_ADD = 2  # LP points of the lowest-bound boxes of each batch whose tangents join the cut pool
@@ -1113,6 +1121,9 @@ _ROOT_OBBT_COST = 10.0  # root OBBT runs only with this many slowest bound-kerne
 _ROOT_OBBT_SHARE = 0.25
 _OBBT_FIT_SHARE = 0.5  # the root OBBT kernel compiles after the root bound only if its call fits this share of the time left
 _SCREEN_BATCHES = (8, 64)  # rows per call of the candidate screens (fvals, viol; ``_batched``)
+# obbt="tree": a batch's OBBT calls run only if their estimated cost is at most this share of the time
+# left (None: no such check); otherwise its boxes are bounded without OBBT (``tree_obbt_fits``)
+_TREE_OBBT_SHARE = 0.5
 
 
 def _batched(fn, X):
@@ -1205,6 +1216,10 @@ def _dispatch_pool(k):
 
 _POLISH_FIRST = 8  # neighbours in the first batch, before the cost of a solve is known
 _POLISH_MIN, _POLISH_FRAC = 2.0, 0.1  # polish time budget: _POLISH_MIN s plus this fraction of the elapsed time
+# root stages, under a time limit: polish gets at most _POLISH_ROOT_SHARE of it in all, and the local
+# solves (polish's included) at most _ROOT_LOCAL_SHARE (None: no such limit)
+_POLISH_ROOT_SHARE = 0.05
+_ROOT_LOCAL_SHARE = 0.15
 _NEAR_ZERO_STARTS = 4  # extra random starts for the scaled local solves of a near-zero objective
 _STRICT_FRAC = 1e-3  # repair_incumbent: violation (x feas_tol) above which a reported incumbent is repaired
 _REPAIR_SLACK = 100.0  # repair_incumbent: largest accepted rise of f, in units of feas_tol * (1 + |f|)
@@ -1283,6 +1298,7 @@ def _assignment_bigm(Q, n, imask, lo, hi):
 
 _TRACE = None  # a callable(stage, ub) told the incumbent value as each stage of ``minimize`` begins (diagnostics)
 _UB = [np.inf]  # the incumbent value of the running ``minimize``, for ``_TRACE``
+_LB = [-np.inf]  # its root bound so far (the open boxes' least bound in the search), for ``_TRACE``
 
 
 def _mark(stage):
@@ -1423,7 +1439,10 @@ def _minimize(
     The search stops with status ``"time_limit"`` after ``time_limit`` seconds,
     counted from the call: tracing and compiling the bounding kernels count, and
     if they are not ready in time the result has no bound (``lower_bound=-inf``)
-    and ``message`` says so.
+    and ``message`` says so. Under a time limit the root stages' incumbent-only and tightening
+    extras get shares of it: the root's local solves ``_ROOT_LOCAL_SHARE``, its polish
+    ``_POLISH_ROOT_SHARE``, its dives ``_ROOT_DIVE_SHARE``, probing ``_PROBE_SHARE`` of the time
+    left, and ``obbt="tree"`` runs a batch's OBBT only when it fits ``_TREE_OBBT_SHARE`` of it.
 
     Bounds may be infinite: finite ones are derived first from the constraints,
     unused variables, and FBBT against a feasible point found by local solves
@@ -1757,6 +1776,8 @@ def _minimize(
     solve_local_ = _cached(("local", f, ineq, eq, local_solver, lo.tobytes(), hi.tobytes()),
                            lambda: make_local(f, ineq, eq, lo, hi, local_solver, patterns=K.structure(lo.size)))
 
+    root = dict(on=True, local=0.0, polish=0.0)  # in the root stages; their local solves' and polish's wall s
+
     def solve_local(X0, LO=None, HI=None, options=None):
         """``solve_local_`` with pounce's ``max_wall_time`` set from the time left before ``deadline``.
 
@@ -1765,12 +1786,30 @@ def _minimize(
         50 ms; a caller's own, smaller ``max_wall_time`` is kept. Without this, a batch started
         just before the limit ran to completion: minlp.org m49/m50 returned after 147 s and 130 s
         with a 60 s limit, two solves at a time. Results are screened as before, so a solve cut
-        short only proposes a worse candidate."""
+        short only proposes a worse candidate.
+
+        In the root stages (before the search) the local solves together get at most
+        ``_ROOT_LOCAL_SHARE`` of the time limit; past that a batch returns its starts unsolved
+        (screened like any candidate, so they only propose what they are). On minlp.org m472 and
+        m474, cold, they took 13-28 s of a 60 s limit for incumbents the search's node-box solves
+        then improved on."""
+        timed = root["on"] and deadline is not None and _ROOT_LOCAL_SHARE is not None
         if deadline is not None:
-            cap = max(deadline - time.perf_counter(), 0.05) * min(1.0, _NCPU / max(len(X0), 1))
+            cap = max(deadline - time.perf_counter(), 0.05)
+            if timed:
+                left = _ROOT_LOCAL_SHARE * time_limit - root["local"]
+                if left <= 0.0:
+                    return np.array(X0, dtype=np.float64)
+                cap = min(cap, max(left, 0.05))
+            cap *= min(1.0, _NCPU / max(len(X0), 1))
             options = dict(options or {})
             options["max_wall_time"] = float(min(options.get("max_wall_time", np.inf), cap))
-        return solve_local_(X0, LO, HI, options=options)
+        t = time.perf_counter()
+        try:
+            return solve_local_(X0, LO, HI, options=options)
+        finally:
+            if timed:
+                root["local"] += time.perf_counter() - t
 
     def _warm_screen():  # both screen batch sizes, compiled off the main thread (see _batched)
         for k in _SCREEN_BATCHES:
@@ -2077,6 +2116,26 @@ def _minimize(
                 bound_call[0] = max([bound_call[0]] + [dt for _, dt in res])
         return [np.concatenate([np.asarray(o[i]) for o in outs])[:k] for i in range(len(outs[0]))]
 
+    obbt_call = [0.0]  # wall seconds per call of the OBBT kernel, the most seen (``obbt="tree"``)
+
+    def tree_obbt_fits(calls):
+        """``obbt="tree"``: whether ``calls`` OBBT kernel calls fit in ``_TREE_OBBT_SHARE`` of the time
+        left. A call cannot be interrupted, and one call of 16 boxes solves 2 LPs per tightened
+        variable, box and round: on minlp.org m6 (80 such variables) the first took 131 s, against
+        a 60 s limit. Its cost is the slowest call so far, or before the first, the slowest bound
+        call times 2 n obbt_rounds (as ``_ROOT_OBBT_SHARE`` estimates the root's single-box call,
+        times the boxes per call)."""
+        if deadline is None or _TREE_OBBT_SHARE is None:
+            return True
+        if obbt_call[0]:
+            est = obbt_call[0]
+        elif bound_call[0]:
+            ov = K.obbt_variables(lo.size)
+            est = bound_call[0] * max(1.0, 2.0 * (lo.size if ov is None else len(ov)) * obbt_rounds)
+        else:
+            return True
+        return calls * est <= _TREE_OBBT_SHARE * (deadline - time.perf_counter())
+
     def evaluate(blo, bhi, with_obbt=False):
         """Tighten and bound a batch of boxes: (lb, x, f(x), lo', hi', xr)."""
         nonlocal evaluations
@@ -2088,8 +2147,13 @@ def _minimize(
             # the root OBBT pass runs on one box: do not pad it to a full batch
             # (padding would compile the OBBT kernel at the batch shape as well)
             calls = padded(blo, bhi) if obbt == "tree" else [[jnp.asarray(blo), jnp.asarray(bhi)]]
-            olo, ohi, oe = run(K.obbt, calls, cutoff, k)
-            blo, bhi, empty = np.where(oe[:, None], blo, olo), np.where(oe[:, None], bhi, ohi), oe
+            if obbt == "tree" and not tree_obbt_fits(len(calls)):
+                calls = None  # (OBBT only tightens: the boxes are bounded without it)
+            if calls is not None:
+                t = time.perf_counter()
+                olo, ohi, oe = run(K.obbt, calls, cutoff, k)
+                obbt_call[0] = max(obbt_call[0], (time.perf_counter() - t) / len(calls))
+                blo, bhi, empty = np.where(oe[:, None], blo, olo), np.where(oe[:, None], bhi, ohi), oe
         # a pool switched off by the probe: the zero-row variant skips the rows' LP cost
         args = (jnp.zeros((0, lo.size + 2)), pool_args()[1]) if plain_kernel() else pool_args()
         lb, x, fx, rlo, rhi, xr = run(bound_kernel, padded(blo, bhi), cutoff, k, args)
@@ -2111,8 +2175,18 @@ def _minimize(
     if seed_x is not None:  # feasible point found while bounding the domain
         ub, xbest = float(seed_f), np.asarray(seed_x)
 
+    def _sub(event):  # diagnostics: a sub-stage event (``_TRACE`` only, not ``_PROFILE``)
+        if _TRACE is not None:
+            _UB[0] = ub
+            _TRACE("+" + event, ub)
+
     def _mk(stage):
         _UB[0] = ub
+        if _TRACE is not None:
+            try:
+                _LB[0] = float(np.min(lb))
+            except NameError:  # (no root bound yet)
+                _LB[0] = -np.inf
         _mark(stage)
 
     backoff = [0, 0]  # local-search back-off: current wait length, iterations left to skip
@@ -2204,8 +2278,15 @@ def _minimize(
         nonlocal ub, xbest
         if not local_solve or not np.isfinite(ub) or ub >= polished["ub"]:
             return
+        _sub("polish")
         start = time.perf_counter()
         stop = min(start + _POLISH_MIN + _POLISH_FRAC * (start - t0) - polished["time"], t0 + time_limit)
+        if root["on"] and deadline is not None and _POLISH_ROOT_SHARE is not None:
+            # the root's first incumbents (from its dives, probing, its local solves) get at most
+            # _POLISH_ROOT_SHARE of the time limit of polish in all: the budget above grows with the
+            # elapsed time, which cold is mostly compiling, and on minlp.org m394, m399, m472 and m474
+            # the root's polish took 5-6 s each and improved nothing
+            stop = min(stop, start + _POLISH_ROOT_SHARE * time_limit - root["polish"])
         cont = ~imask
         try:
             for _ in range(_POLISH_ROUNDS):
@@ -2268,6 +2349,9 @@ def _minimize(
         finally:
             polished["ub"] = ub
             polished["time"] += time.perf_counter() - start
+            if root["on"]:
+                root["polish"] += time.perf_counter() - start
+            _sub("polish_end")
 
     def neighbours(x):
         """Integer neighbours of ``x`` in the box: one integer variable +-1, then swaps (one +1,
@@ -2320,7 +2404,7 @@ def _minimize(
         left = deadline - time.perf_counter()
         return left >= (0.25 * time_limit if estimate is None else 1.5 * estimate)
 
-    def dive(blo, bhi, points):
+    def dive(blo, bhi, points, budget=None):
         """Propagation dives (``_Kernels.dive``) from up to ``_DIVES`` points in their boxes,
         then a local solve of the continuous variables in each box that ends with every
         integer fixed; improves the incumbent.
@@ -2336,7 +2420,8 @@ def _minimize(
         reliable; chunking bounds the overrun by one chunk instead. Once there is an incumbent,
         a dive is skipped when the dives' total wall time with its estimated cost (the last
         dive's, else the steps times the per-step estimate) would pass ``_DIVE_FRAC`` of the
-        elapsed time."""
+        elapsed time. ``budget``: wall seconds for the kernel's chunks (the root dives': the next
+        chunk is dispatched only while 1.5 times its estimate fits in what is left of it)."""
         nonlocal ub, xbest
         if K.dive is None or not len(points):
             return
@@ -2360,6 +2445,9 @@ def _minimize(
             c = min(chunk, steps - p)
             if not time_for(None if per_step is None else per_step * c):
                 break
+            if budget is not None and per_step is not None and \
+                    time.perf_counter() - t + 1.5 * per_step * c > budget:  # fmt: skip
+                break
             try:
                 DL, DH, F = _await(K.dive(DL, DH, X, cut, F, step(p), step(p + c), deadline=deadline), deadline, "dive", K.dive)
             except (_CompileTimeout, _Deadline):
@@ -2374,19 +2462,36 @@ def _minimize(
             dive_cost[0] = time.perf_counter() - t
         dive_total[0] += time.perf_counter() - t
 
-    def probe(rlo, rhi, lb):
+    def probe(rlo, rhi, lb, xr=None):
         """Root probing on the binary variables: bound the box with each one at 0 and at 1 (one
         batch). A side that is empty or cannot beat the incumbent fixes the variable to the other
         side; every variable shrinks to the hull of the two sides' tightened boxes (any feasible
-        point lies in one of them); and the root bound rises to the larger side minimum."""
+        point lies in one of them); and the root bound rises to the larger side minimum.
+
+        Under a time limit the batch's estimated cost (its kernel calls times the slowest bound
+        call so far) may take at most ``_PROBE_SHARE`` of the time left: beyond that only the
+        binaries most fractional at the root's LP point ``xr`` are probed, as many as fit (none
+        if not one pair does). Probing fewer binaries only tightens less."""
         j = np.flatnonzero(imask & (rhi[0] - rlo[0] == 1.0))
         if not len(j):
             return rlo, rhi, lb
+        if deadline is not None and bound_call[0] and _PROBE_SHARE is not None:
+            per = padded.sizes[-1]  # boxes per kernel call (the largest size; smaller batches are padded)
+            fit = int((_PROBE_SHARE * (deadline - time.perf_counter())) // bound_call[0]) * per // 2
+            if fit < len(j):
+                if fit < 1:
+                    return rlo, rhi, lb
+                v = np.asarray(xr, np.float64)[j] if xr is not None else np.full(len(j), 0.5)
+                frac = np.where(np.isfinite(v), np.abs(v - np.round(v)), 0.0)
+                j = np.sort(j[np.argsort(-frac, kind="stable")[:fit]])
         P_lo, P_hi = np.repeat(rlo, 2 * len(j), 0), np.repeat(rhi, 2 * len(j), 0)
         r = np.arange(len(j))
         P_hi[2 * r, j] = rlo[0, j]  # side 0: x_j at its lower bound
         P_lo[2 * r + 1, j] = rhi[0, j]  # side 1: x_j at its upper bound
+        if _TRACE is not None:
+            _sub(f"probe_eval {len(j)} binaries, bound call {bound_call[0]:.2f}s")
         plb, px, pf, plo, phi, _ = evaluate(P_lo, P_hi)
+        _sub("probe_incumbent")
         update_incumbent(px, pf, plb)
         plb = np.where(np.isnan(plb), -np.inf, plb).reshape(-1, 2)
         probed.update(j=j, plb=plb.copy(), lb=float(np.min(lb)), ub=ub)  # pseudocost seeds (``seed_pseudocosts``)
@@ -2522,6 +2627,7 @@ def _minimize(
             oa_state["time"] += time.perf_counter() - t
         t = time.perf_counter()
         MB = oa_mb()
+        _sub("oa")
         try:
             pts = ([xbest] if np.isfinite(ub) else []) + S0
             oa_state["mb"] = MB.propose(blo, bhi, imask, complete, extra=pts, cutoff=ub, budget=budget, tol=tol(),
@@ -2532,6 +2638,7 @@ def _minimize(
             oa_state["time"] += time.perf_counter() - t
             oa_state["calls"] += 1
             oa_state["last"], oa_state["ub"] = time.perf_counter(), ub
+            _sub("oa_end")
         polish()
 
     def oa_budget():
@@ -2601,7 +2708,9 @@ def _minimize(
     if imask.any() and np.all(np.isfinite(lb)) and np.all(np.isfinite(rxr)):  # root dives: relaxation point, perturbed
         P = np.clip(rxr + rng.normal(size=(_DIVES, lo.size)) * 0.1 * (rhi - rlo) * (np.arange(_DIVES) > 0)[:, None],
                     rlo, rhi)  # fmt: skip
-        dive(np.repeat(rlo, _DIVES, 0), np.repeat(rhi, _DIVES, 0), P)
+        # (``_ROOT_DIVE_SHARE``: minlp.org m426, 100 binaries, spent 10-16 s of a 60 s limit here)
+        dive(np.repeat(rlo, _DIVES, 0), np.repeat(rhi, _DIVES, 0), P,
+             budget=None if deadline is None or _ROOT_DIVE_SHARE is None else _ROOT_DIVE_SHARE * time_limit)
         # few integer assignments: fix-and-solve every one (rounding and dives try one or two)
         ii = np.flatnonzero(imask)
         sizes = rhi[0, ii] - rlo[0, ii] + 1
@@ -2645,7 +2754,7 @@ def _minimize(
     _mk("probe")
     if _PROBE and imask.any() and np.all(np.isfinite(lb)) and not (ub - float(lb.min()) <= tol()):
         try:
-            rlo, rhi, lb = probe(rlo, rhi, lb)
+            rlo, rhi, lb = probe(rlo, rhi, lb, np.atleast_2d(rxr)[0])
         except _CompileTimeout:
             pass
     _mk("milp_root")
@@ -2670,9 +2779,12 @@ def _minimize(
     if imask.any() and np.all(np.isfinite(lb)) and not (ub - float(lb.min()) <= tol()):
         oa_start()
         b = oa_budget()
-        oa_primal(rlo.min(axis=0), rhi.max(axis=0), list(np.atleast_2d(rxr)[:2]), b, wait=0.5 * b)
+        # (``_OA_ROOT_WAIT``: the search runs the heuristic as soon as its program is ready, at
+        # the first iteration after that, rather than the root waiting for it)
+        oa_primal(rlo.min(axis=0), rhi.max(axis=0), list(np.atleast_2d(rxr)[:2]), b, wait=_OA_ROOT_WAIT * b)
     _mk("search")
     tier_gate.open()  # (the root bound kernel's fully optimized compile, ``_FAST_COMPILE``)
+    root["on"] = False
     open_lo, open_hi, open_lb, open_xr = rlo, rhi, lb, rxr
     width0 = _branch_widths(width0, rlo, rhi)
     sumL, sumR, cnt = np.zeros(lo.size), np.zeros(lo.size), np.zeros(lo.size)  # pseudocost sums, observations
@@ -2737,7 +2849,8 @@ def _minimize(
         glb = min(float(open_lb.min()) if len(open_lb) else np.inf, pruned_lb, ub)
         history.append((it, nodes, glb, ub, len(open_lb)))
         if _TRACE is not None:
-            _mk("search")
+            _UB[0], _LB[0] = ub, glb
+            _mark("search")
         if verbose and (it == 1 or it % 25 == 0):
             print(f"it {it:5d} nodes {nodes:8d} open {len(open_lb):7d} LB {glb:.8g} UB {ub:.8g}")
         if not len(open_lb) or ub - glb <= tol():
