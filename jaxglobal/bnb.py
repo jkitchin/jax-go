@@ -271,12 +271,13 @@ def _pools():
 SWITCH_INTERVAL = 0.001
 _GATE_COMPILES = True  # hold the compiles not needed for the root bound (``_Gate``); False: compile each once traced
 _GATE_TRACE_S = 1.0  # ...but not behind a bound kernel traced (or loaded from the disk cache) in less than this
-# The root bound kernel is first compiled with these XLA options when its trace took at least
-# _TIER_TRACE_S (a large kernel), then again with the defaults in the background (``_Precompiled``'s
-# ``tier``); calls switch to that executable once it is ready. LLVM at -O0 halves the compile
-# (m34_convex2: 12.2 s -> 5.7 s, 21 -> 11 s of CPU) for calls about 30% slower (1.95 -> 2.5 s per
-# 16 boxes). Empty: no tiers.
-_FAST_COMPILE = {"xla_backend_optimization_level": 0}
+# Optional, off by default (mixed evidence): the root bound kernel is first compiled with these XLA
+# options when its trace took at least _TIER_TRACE_S (a large kernel), then again with the defaults
+# once the search starts (``_Precompiled``'s ``tier``); calls switch to that executable once it is
+# ready. LLVM at -O0 ({"xla_backend_optimization_level": 0}) halves the compile (m34_convex2:
+# 12.2 s -> 5.7 s, 21 -> 11 s of CPU) for calls about 30% slower (1.95 -> 2.5 s per 16 boxes):
+# the root bound came earlier, but root probing ran on the slower kernel. Empty: no tiers.
+_FAST_COMPILE = {}
 _TIER_TRACE_S = 3.0
 _LIVE = threading.local()  # ``gates``: the ``_Gate``s of the running ``minimize`` on this thread
 
