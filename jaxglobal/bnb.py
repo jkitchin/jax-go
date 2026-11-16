@@ -1033,26 +1033,33 @@ def _quadratic_form(f, ineq, eq, n):
 
 _ASSIGN_KELLEY = 2  # n_kelley=None: Kelley rounds on disjunctive assignment models (_assignment_bigm), else 4
 _ASSIGN_MIN, _ASSIGN_SHARE = 20, 0.9  # _assignment_bigm: at least this many binaries, this share of them in both kinds of rows
+_ASSIGN_LINEAR = 0.5  # branch_var="auto": pseudocost when at least this share of the binaries switch a linear row
 
 
 def _assignment_bigm(Q, n, imask, lo, hi):
     """Whether the problem is a disjunctive (big-M / hull) assignment model, read from its lifted
-    quadratic form ``Q``: every integer variable binary, at least ``_ASSIGN_MIN`` of them, and at
+    quadratic form ``Q``, and if so the share of its binaries that switch a linear row (0.0 when
+    it is not one).
+
+    An assignment model: every integer variable binary, at least ``_ASSIGN_MIN`` of them, and at
     least ``_ASSIGN_SHARE`` of them both in an assignment row (a linear row on binaries only, all
     coefficients of one magnitude: ``sum b = 1``, ``sum b <= 1``) and in a linking row (an
     inequality that also holds a continuous variable or a product: the big-M or hull row the
-    binary switches). These are the minlp.org constrained-layout (CLay*) and k-means (kClus*)
-    models, where ``branch_var="auto"`` picks pseudocost (docs/ANALYSIS-bigm.md); no int50
-    instance qualifies (those with 20 or more binaries have no assignment rows or no quadratic form)."""
+    binary switches). A linking row is linear when it holds no product column. These are the
+    minlp.org constrained-layout (CLay*: non-overlap and hull rows are linear) and k-means
+    (kClus*_BM: only convex quadratic distance rows) models; ``minimize`` gives them fewer Kelley
+    rounds (``_ASSIGN_KELLEY``), and pseudocost branching where at least ``_ASSIGN_LINEAR`` of the
+    binaries switch linear rows (docs/ANALYSIS-bigm.md). No int50 instance qualifies (those with
+    20 or more binaries have no assignment rows or no quadratic form)."""
     imask = np.asarray(imask, bool)
     if Q is None or imask.sum() < _ASSIGN_MIN:
-        return False
+        return 0.0
     if not (np.all(np.isin(lo[imask], (0.0, 1.0))) and np.all(np.isin(hi[imask], (0.0, 1.0)))):
-        return False
+        return 0.0
     E = np.asarray(Q.E)[1:1 + Q.n_g + Q.n_h]
     isbin = np.zeros(E.shape[1], bool)
     isbin[:n] = imask
-    assign, link = np.zeros(E.shape[1], bool), np.zeros(E.shape[1], bool)
+    assign, link, linear = (np.zeros(E.shape[1], bool) for _ in range(3))
     for r in range(E.shape[0]):
         nz = np.flatnonzero(E[r])
         b = nz[isbin[nz]]
@@ -1063,7 +1070,11 @@ def _assignment_bigm(Q, n, imask, lo, hi):
             assign[b] = True
         elif r < Q.n_g and b.size < nz.size:
             link[b] = True
-    return bool((assign & link).sum() >= _ASSIGN_SHARE * imask.sum())
+            if np.all(nz < n):
+                linear[b] = True
+    if (assign & link).sum() < _ASSIGN_SHARE * imask.sum():
+        return 0.0
+    return max(float((assign & link & linear).sum() / imask.sum()), 1e-300)  # (> 0: an assignment model)
 
 
 _TRACE = None  # a callable(stage, ub) told the incumbent value as each stage of ``minimize`` begins (diagnostics)
@@ -1363,11 +1374,12 @@ def _minimize(
         )
     # disjunctive assignment models (docs/ANALYSIS-bigm.md): read from the lifted quadratic form
     # (only with 20+ binaries: the prefilter keeps every other problem from building it here)
-    assign = bool(constrained and quadratic and not lifted and imask.sum() >= _ASSIGN_MIN
-                  and np.all(np.isin(lo[imask], (0.0, 1.0))) and np.all(np.isin(hi[imask], (0.0, 1.0)))
-                  and _assignment_bigm(_quadratic_form(f, ineq, eq, lo.size), lo.size, imask, lo, hi))  # fmt: skip
+    assign = 0.0  # _assignment_bigm: > 0 on an assignment model, the share of binaries switching linear rows
+    if constrained and quadratic and not lifted and imask.sum() >= _ASSIGN_MIN and \
+            np.all(np.isin(lo[imask], (0.0, 1.0))) and np.all(np.isin(hi[imask], (0.0, 1.0))):  # fmt: skip
+        assign = _assignment_bigm(_quadratic_form(f, ineq, eq, lo.size), lo.size, imask, lo, hi)
     if n_kelley is None:
-        n_kelley = _ASSIGN_KELLEY if assign else 4
+        n_kelley = _ASSIGN_KELLEY if assign > 0 else 4
     branch_auto = branch_var == "auto"
     if branch_auto:
         branch_var = _auto_branch_var(imask)
@@ -1514,8 +1526,10 @@ def _minimize(
         sym = P if len(P) else None
         sym_moved = np.any(P != np.arange(lo.size), axis=0)  # (the support of the elements kept)
     width0 = np.where(branchable, width0, np.inf)  # never split linear variables
-    if branch_auto and branch_var == "width" and assign:
-        branch_var = "pseudocost"  # disjunctive assignment models (docs/ANALYSIS-bigm.md)
+    if branch_auto and branch_var == "width" and assign >= _ASSIGN_LINEAR:
+        # disjunctive assignment models switching linear rows (docs/ANALYSIS-bigm.md); on the
+        # k-means models (quadratic rows only) pseudocost wins on m420 but loses on m421 / m422
+        branch_var = "pseudocost"
 
     _mark("make_local")
     solve_local_ = _cached(("local", f, ineq, eq, local_solver, lo.tobytes(), hi.tobytes()),

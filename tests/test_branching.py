@@ -199,7 +199,7 @@ def test_gap_weights():
     assert np.allclose(w[1], [1.0, 0.5, -1.0])
 
 
-def _assignment_model(items=10, link=True, assign=True):
+def _assignment_model(items=10, link=True, assign=True, quad=False):
     """``items`` points x_i in [0, 10], each placed left (b_i0: x_i <= 4) or right (b_i1: x_i >= 6)
     by big-M rows; minimize sum (x_i - 5 - 0.1 i)^2. Variables: x (items), then b (2 items)."""
     import jax.numpy as jnp
@@ -216,6 +216,9 @@ def _assignment_model(items=10, link=True, assign=True):
     def ineq(v):
         if not link:
             return jnp.stack([v[items + i] - 1.0 for i in range(items)])
+        if quad:  # the same disjunction as convex quadratic rows: (x - 2)^2 <= 4, (x - 8)^2 <= 4
+            return jnp.stack([(v[i] - 2.0) ** 2 - 4.0 - 100.0 * (1 - v[items + i]) for i in range(items)]
+                             + [(v[i] - 8.0) ** 2 - 4.0 - 100.0 * (1 - v[2 * items + i]) for i in range(items)])
         return jnp.stack([v[i] - 4.0 - 10.0 * (1 - v[items + i]) for i in range(items)]
                          + [6.0 - v[i] - 10.0 * (1 - v[2 * items + i]) for i in range(items)])
 
@@ -225,26 +228,27 @@ def _assignment_model(items=10, link=True, assign=True):
     return f, ineq, eq, lo, hi, np.arange(items, n)
 
 
-@pytest.mark.parametrize("items, link, assign, want", [(10, True, True, True), (9, True, True, False),
-                                                       (10, False, True, False), (10, True, False, False)])
-def test_assignment_bigm_rule(items, link, assign, want):
-    """branch_var="auto" picks pseudocost on disjunctive assignment models (_assignment_bigm):
-    at least _ASSIGN_MIN binaries, nearly all of them both in a ``sum b = 1`` row and in a row
-    that switches a continuous variable."""
+@pytest.mark.parametrize("items, link, assign, quad, want", [(10, True, True, False, 1.0), (9, True, True, False, 0.0),
+                                                             (10, False, True, False, 0.0), (10, True, False, False, 0.0),
+                                                             (10, True, True, True, 1e-300)])
+def test_assignment_bigm_rule(items, link, assign, quad, want):
+    """Disjunctive assignment models (_assignment_bigm): at least _ASSIGN_MIN binaries, nearly all
+    of them both in a ``sum b = 1`` row and in a row that switches a continuous variable; the
+    result is the share of binaries switching a linear row (a tiny positive value when none do)."""
     import numpy as np
 
     from jaxglobal import bnb
     from jaxglobal.quadratic import quadratic_form
 
-    f, ineq, eq, lo, hi, ints = _assignment_model(items, link, assign)
+    f, ineq, eq, lo, hi, ints = _assignment_model(items, link, assign, quad)
     Q = quadratic_form(f, ineq, eq if assign else None, lo.size)
     imask = np.zeros(lo.size, bool)
     imask[ints] = True
-    assert bnb._assignment_bigm(Q, lo.size, imask, lo, hi) is want
-    assert not bnb._assignment_bigm(None, lo.size, imask, lo, hi)
+    assert bnb._assignment_bigm(Q, lo.size, imask, lo, hi) == want
+    assert bnb._assignment_bigm(None, lo.size, imask, lo, hi) == 0.0
     lo2 = lo.copy()
     lo2[ints[0]] = -1.0  # a general integer: not a binary model
-    assert not bnb._assignment_bigm(Q, lo.size, imask, lo2, hi)
+    assert bnb._assignment_bigm(Q, lo.size, imask, lo2, hi) == 0.0
 
 
 def test_assignment_bigm_solve():
