@@ -493,3 +493,33 @@ def test_split_bounds_model_solved():
     assert r.status == "optimal"
     # u = 1 (a = 0), p = 0.5, q = 0: 0.3 * 0.8^2 = 0.192 (p = q = 0 at u = 0.2 costs 0.25)
     assert abs(r.fun - 0.192) <= 1e-4 and r.lower_bound <= 0.192 + 1e-6
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_batched_caps_on_large_tapes_match_one_at_a_time(seed, monkeypatch):
+    """A tape above ``_JIT_MAX_NODES`` gets its caps from batched eager sweeps (``_row_upper_fn.many``):
+    the same caps as the one-at-a-time compiled sweeps here (each slack's rows need no other cap)."""
+    from jaxglobal import domain
+
+    rng = np.random.default_rng(10 + seed)
+    ny, ns, m = 4, 3, 6
+    A = rng.normal(size=(m, ny))
+    s = rng.uniform(0.5, 2.0, m)
+    slack = rng.integers(0, ns, m)
+    b = rng.normal(size=m)
+
+    def ineq(x):
+        return jnp.stack([sum(A[r, i] * x[i] for i in range(ny)) - s[r] * x[ny + slack[r]] - b[r] for r in range(m)])
+
+    f = lambda x: sum(x[ny + k] for k in range(ns)) + sum(x[i] ** 2 for i in range(ny))  # noqa: E731
+    lo = np.r_[-np.ones(ny), np.zeros(ns), -INF]
+    hi = np.r_[np.ones(ny), np.full(ns, INF), 0.0]
+    # the last variable: x_last <= 0 and -x_last >= x_0 - 2 (a lower cap through a row)
+    g = lambda x: jnp.concatenate([ineq(x), jnp.atleast_1d(x[0] - 2.0 + x[-1])])  # noqa: E731
+    f2 = lambda x: f(x) - x[-1]  # noqa: E731
+    one = monotone_bounds(f2, g, None, lo, hi)
+    monkeypatch.setattr(domain, "_JIT_MAX_NODES", 0)
+    many = monotone_bounds(f2, g, None, lo, hi)
+    for a, c in zip(one, many):
+        np.testing.assert_allclose(a, c, rtol=1e-12)
+    assert np.all(np.isfinite(many[1][ny:ny + ns][np.isin(np.arange(ns), slack)]))

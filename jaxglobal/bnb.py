@@ -38,7 +38,7 @@ import numpy as np
 from .local import make_local, near_zero_options
 from .crown import crown_auto, crown_supported, make_crown
 from .domain import DomainTimeout, bound_domain
-from . import kcache, memory, milpbound
+from . import blas, kcache, memory, milpbound
 from .fbbt import make_fbbt
 from .lifted import make_lifted_bounder
 from .lp import make_constrained_bounder, make_obbt, make_pool_cuts, pool_parts, reduce_ranges
@@ -913,6 +913,9 @@ _POLISH_ROUNDS = 5  # incumbent polish (``polish`` in ``minimize``): rounds whil
 _POLISH_CANDS = 512  # integer neighbours (one step, swaps) tried per polish round
 _POLISH_CHUNK = 64  # most neighbours per batch of local solves (the time budget is checked between batches)
 _ROOT_OBBT_COST = 10.0  # root OBBT runs only with this many slowest bound-kernel calls of time left
+# root OBBT runs only if its estimated cost (bound call x 2 n obbt_rounds / batch) is at most this
+# share of the time left (None: no such check)
+_ROOT_OBBT_SHARE = 0.25
 _SCREEN_MIN_BATCH = 8  # batch sizes of the candidate screens (fvals, viol): powers of two from this
 
 
@@ -1104,7 +1107,7 @@ def _pseudo_boolean(K, f, ineq, eq, lo, hi, lo_user, hi_user, imask, abs_tol, re
                   message="solved exactly by variable elimination (binary polynomial)")
 
 
-def minimize(
+def _minimize(
     f,
     lo,
     hi,
@@ -2206,6 +2209,13 @@ def minimize(
     # bound's call; 1 to 10 times elsewhere). It only tightens the root box.
     left = None if deadline is None else deadline - time.perf_counter()
     obbt_fits = left is None or not bound_call[0] or left > _ROOT_OBBT_COST * bound_call[0]
+    if obbt_fits and left is not None and bound_call[0] and _ROOT_OBBT_SHARE is not None:
+        # The call's cost grows with n: 2n LPs per round against the bound call's (at least) one LP
+        # per box. Estimated as the slowest bound call times 2 n obbt_rounds / boxes per call (within
+        # 2x of the measured cost on minlp.org m400 / m441, n = 212 / 226: 15 s / 21 s for a 0.17 s /
+        # 0.55 s bound call), it runs only if that is at most _ROOT_OBBT_SHARE of the time left.
+        obbt_est = bound_call[0] * max(1.0, 2.0 * lo.size * obbt_rounds / padded.sizes[0])
+        obbt_fits = obbt_est <= _ROOT_OBBT_SHARE * left
     if need_obbt() and obbt_fits:  # (the search would end at once on a closed gap: OBBT would only cost its compile)
         # the dives may have found the first incumbent (no constraints): start the kernel now if
         # not yet, so that the call below waits for it until the deadline instead of compiling
@@ -2593,3 +2603,12 @@ def minimize(
         max_violation=maxv,
         verified=verified,
     )
+
+
+@functools.wraps(_minimize)
+def minimize(*args, **kwargs):
+    # single-threaded OpenBLAS while the solve runs (``blas.py``): the kernels' LAPACK calls are
+    # small, and OpenBLAS's spinning helper threads oversubscribe the CPU next to the dispatch
+    # threads, the background compiles and the local solves
+    with blas.limited():
+        return _minimize(*args, **kwargs)

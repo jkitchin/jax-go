@@ -93,10 +93,35 @@ def test_auto_path_volume(monkeypatch):
 
 
 def test_auto_path_memory_guard(monkeypatch):
-    """Over the memory budget the traced Hessian is kept, however large."""
+    """Traced Hessian over the size thresholds and interpreter over the memory budget: no alphaBB
+    (``SKIP_UNAFFORDABLE``; prepare returns None), or the traced Hessian anyway with the skip off."""
     monkeypatch.setattr(alphabb, "HESSIAN_OPS", 0)
     monkeypatch.setattr(alphabb, "TAYLOR_BYTES", 1)
+    monkeypatch.setattr(alphabb, "SKIP_UNAFFORDABLE", True)
+    prep, _ = make_alphabb(dense)
+    assert prep.path(jnp.zeros(4)) is None
+    assert prep(jnp.zeros(4), jnp.ones(4)) is None
+    monkeypatch.setattr(alphabb, "SKIP_UNAFFORDABLE", False)
     assert make_alphabb(dense)[0].path(jnp.zeros(4)) == "traced"
+
+
+def test_skipped_alphabb_relaxation_still_underestimates(monkeypatch):
+    """With alphaBB skipped the relaxer falls back to McCormick: still below f on the box."""
+    from jaxglobal.univariate import make_relaxer
+
+    monkeypatch.setattr(alphabb, "HESSIAN_OPS", 0)
+    monkeypatch.setattr(alphabb, "TAYLOR_BYTES", 1)
+    monkeypatch.setattr(alphabb, "SKIP_UNAFFORDABLE", True)
+    n = 4
+    L, H = boxes(n, 6, 7)
+    prepare, call = make_relaxer(dense, alphabb=True, convex=False)
+    rng = np.random.default_rng(0)
+    for lo, hi in zip(L, H):
+        data = prepare(lo, hi)
+        assert data[1] is None  # no alphaBB data
+        for x in lo + (hi - lo) * rng.uniform(size=(20, n)):
+            m, fx = call(x, lo, hi, data), np.asarray(dense(x))
+            assert np.all(np.asarray(m.cv) <= fx + 1e-9) and np.all(np.asarray(m.cc) >= fx - 1e-9)
 
 
 def test_auto_path_independent_of_min_rows(monkeypatch):
