@@ -174,13 +174,14 @@ def test_polish_batches_fit_the_budget(monkeypatch):
         return wrapped
 
     monkeypatch.setattr(bnb, "make_local", recording)
+    monkeypatch.setattr(bnb, "_OA", False)  # (its completions carry their own, larger caps)
     bnb.clear_cache()
     f = lambda v: -(v[0] + v[1]) - v[2]  # noqa: E731
     g = lambda v: jnp.stack([v[0] + v[1] + v[2] - 3.5, v[0] - v[1] - 1.0])  # noqa: E731
     r = minimize(f, [0, 0, 0], [5, 5, 1], ineq=g, integer=[0, 1], max_iter=500)
     assert r.status == "optimal" and abs(r.fun + 3.5) <= 1e-6
     assert calls and calls[0][0] <= bnb._POLISH_FIRST
-    assert all(0 < m <= bnb._POLISH_CHUNK and 0 < cap <= bnb._POLISH_MIN + 1.0 for m, cap in calls)
+    assert all(0 < m <= bnb._POLISH_CHUNK and 0 < cap <= bnb._POLISH_MIN + bnb._POLISH_FRAC * r.time + 1.0 for m, cap in calls), calls
 
 
 def test_integer_rows_read():

@@ -859,6 +859,12 @@ INT_TOL = 1e-6  # integer variables: a value within INT_TOL of an integer counts
 ROUNDINGS = (0.5, INT_TOL, 1.0 - INT_TOL, 0.25, 0.75)  # incumbent candidates: round up fractions above each
 _DIVES = 16  # propagation dives per call (integer variables)
 MILP_ROOT_SHARE, MILP_ROOT_SECONDS = 0.25, 60.0  # integer-aware root bound: at most this share of time_limit and seconds
+# outer-approximation primal heuristic (``oa_primal`` in ``minimize``, ``MilpBound.propose``): integer
+# assignments from MILPs over the relaxation's cuts, completed by fixed-integer local solves
+_OA = True
+_OA_SHARE, _OA_SECONDS = 0.15, 30.0  # its time: at most this share of time_limit (in all) and seconds per call
+_OA_EVERY = 0.1  # the search resumes it each time this share of the time limit (at most 600 s) has passed
+_OA_MILP = 0.5  # each MILP of a call gets at most this share of the call's budget
 _PROBE = True  # integer variables: root probing on binaries (``probe`` in ``minimize``)
 _ENUM = 32  # integer variables: at the root, fix-and-solve every assignment when there are at most this many
 _FLOOR = 0.05  # pseudocosts are floored at this fraction of the mean over observed variables
@@ -879,6 +885,9 @@ _POOL_PROBE_N = 24
 _POOL_GAIN = 0.02
 _POOL_REPROBE = 40
 _LOCAL_BACKOFF = 16  # most iterations skipped between local searches that do not improve the incumbent
+# pounce options of the polish's warm re-solves of a new incumbent (integers fixed) and of the outer-
+# approximation heuristic's retries of failed completions
+_WARM = ({"mu_init": 1e-6, "max_iter": 1000}, {"mu_strategy": "adaptive", "max_iter": 1000})
 _POLISH_ROUNDS = 5  # incumbent polish (``polish`` in ``minimize``): rounds while it keeps improving
 _POLISH_CANDS = 512  # integer neighbours (one step, swaps) tried per polish round
 _POLISH_CHUNK = 64  # most neighbours per batch of local solves (the time budget is checked between batches)
@@ -1811,6 +1820,23 @@ def minimize(
                             ub, xbest = float(F[i]), Y[i]
                 if not ub < before:
                     break
+            if _WARM and cont.any() and imask.any() and constrained:
+                # with what is left of the budget (after the neighbour rounds, which it must not
+                # starve: smallinvDAXr5b150-165 lost its solve when it ran first): the incumbent's
+                # continuous part solved again from itself (integers fixed) with a small initial
+                # barrier and with the adaptive barrier; a default solve can stop at an imprecise
+                # point (minlp.org m474: f 6268.73 at 3.5e-4 violation from the optimum's own
+                # point, 6271.61 with either option)
+                for wo in _WARM:
+                    if time.perf_counter() >= stop:
+                        break
+                    x = np.where(imask, np.round(xbest), xbest)
+                    L, H = np.where(imask, x, lo), np.where(imask, x, hi)
+                    left = max(stop - time.perf_counter(), 0.05)
+                    X = np.clip(np.asarray(solve_local(x[None], L[None], H[None], options=dict(wo, max_wall_time=left))), L, H)
+                    F = screen(X)
+                    if F[0] < ub:
+                        ub, xbest = float(F[0]), X[0]
         finally:
             polished["ub"] = ub
             polished["time"] += time.perf_counter() - start
@@ -1964,6 +1990,105 @@ def minimize(
             ub, xbest = float(F[i]), X[i]
         polish()
 
+    # only problems whose integers are all binary: there the no-good cuts make each MILP propose a
+    # new assignment; on smallinvDAXr4b/r5b150-165 (30 general integers) tracing the cut program
+    # (123k equations, then too large to compile) cost both their solves within 60 s
+    oa_binary = bool(imask.any() and np.all((lo[imask] == 0.0) & (hi[imask] == 1.0)))
+    oa_state = dict(time=0.0, calls=0, mb=None, box=None, last=-np.inf, ub=np.inf)  # ``oa_primal``: wall seconds,
+    # calls, ``MilpBound.propose``'s state, its box, when it last ran, the incumbent value then
+
+    def oa_mb():
+        return _cached(("milp_root", f, ineq, eq, lo.size, feas_tol),
+                       lambda: milpbound.MilpBound(f, ineq, eq, lo.size, feas_tol=feas_tol))  # fmt: skip
+
+    def oa_start():
+        """Build and compile ``oa_primal``'s cut program in a background thread (once): 5-15 s of
+        tracing and XLA compiling on minlp.org's 85-226 variable models, which on the main thread
+        took most of the heuristic's budget. Started after the root stages (dives, OBBT, probing),
+        only when the gap is still open: started with the root bound, its tracing (GIL) and
+        compiling slowed those stages by 10-25 s under load (minlp.org m472, m474). The root call
+        waits for it up to half its budget; the search's later calls run once it is done.
+        ``oa_state["fut"]`` resolves to whether it compiled."""
+        if oa_state.get("fut") is not None or not (_OA and oa_binary and local_solve):
+            return
+        ex = ThreadPoolExecutor(1, thread_name_prefix="jaxglobal-oa")
+        oa_state["fut"] = kcache.track(ex.submit(lambda: oa_mb().ready()))
+        ex.shutdown(wait=False)
+
+    def oa_primal(blo, bhi, extra, budget, wait=0.0):
+        """Outer-approximation primal heuristic (``MilpBound.propose``) on the box ``[blo, bhi]``
+        (the root box; later calls resume on it with their cuts and no-goods): integer assignments
+        from MILPs over the relaxation's cuts (at the ``extra`` points too), each fix-and-solved
+        (continuous variables free in the box, from the MILP point and from up to two ``extra``
+        points) and screened like every candidate; improves the incumbent. It never changes a
+        bound: its MILPs carry an incumbent cutoff and no-good rows, and only screened points
+        come out. Runs only once its cut program has compiled (``oa_start``), waiting up to ``wait``
+        seconds for that."""
+        nonlocal ub, xbest
+        if not (_OA and oa_binary and local_solve) or _past(deadline) or budget < 1.0:
+            return
+        if oa_state["mb"] is not None and oa_state["mb"].get("done"):
+            return
+        if oa_state["box"] is None:
+            if blo is None or not (np.all(np.isfinite(blo)) and np.all(np.isfinite(bhi))):
+                return
+            oa_state["box"] = (np.array(blo, np.float64), np.array(bhi, np.float64))
+        blo, bhi = oa_state["box"]
+        t = time.perf_counter()
+        S0 = [np.clip(np.asarray(x, np.float64), blo, bhi) for x in extra if x is not None and np.all(np.isfinite(x))]
+
+        def oa_left():  # wall seconds left of this call's budget (each local solve is capped at it)
+            return max(t + budget - time.perf_counter(), 0.05)
+
+        def complete(X):
+            nonlocal ub, xbest
+            X = np.atleast_2d(X)
+            starts = np.concatenate([X] + [np.where(imask, X, s[None]) for s in S0[:2]])
+            L, H = np.where(imask, starts, blo), np.where(imask, starts, bhi)
+            Y = np.clip(np.asarray(solve_local(np.clip(starts, L, H), L, H, options={"max_wall_time": oa_left()})), L, H)
+            F = screen(Y)
+            bad = np.flatnonzero(~np.isfinite(F))
+            if len(bad) and _WARM and not _past(deadline):  # a failed solve: again with the adaptive barrier
+                Z = np.clip(np.asarray(solve_local(np.clip(starts[bad], L[bad], H[bad]), L[bad], H[bad],
+                                                   options=dict(_WARM[-1], max_wall_time=oa_left()))), L[bad], H[bad])  # fmt: skip
+                Y[bad], F[bad] = Z, screen(Z)
+            i = int(np.argmin(F))
+            if F[i] < ub:
+                ub, xbest = float(F[i]), Y[i]
+            pool_add(Y[np.isfinite(F)])
+            return Y, F, ub
+
+        fut = oa_state.get("fut")
+        try:
+            if fut is None or not fut.result(timeout=max(wait, 0.0)):
+                return  # not compiled (yet, or too large to compile): nothing spent but the wait
+        except Exception:  # noqa: BLE001 -- a timeout, or a failed build: skipped
+            return
+        finally:
+            oa_state["time"] += time.perf_counter() - t
+        t = time.perf_counter()
+        MB = oa_mb()
+        try:
+            pts = ([xbest] if np.isfinite(ub) else []) + S0
+            oa_state["mb"] = MB.propose(blo, bhi, imask, complete, extra=pts, cutoff=ub, budget=budget, tol=tol(),
+                                        milp_time=_OA_MILP * budget, state=oa_state["mb"])  # fmt: skip
+        except Exception:  # noqa: BLE001 -- an optional heuristic: any failure keeps the incumbent
+            pass
+        finally:
+            oa_state["time"] += time.perf_counter() - t
+            oa_state["calls"] += 1
+            oa_state["last"], oa_state["ub"] = time.perf_counter(), ub
+        polish()
+
+    def oa_budget():
+        """Seconds the next ``oa_primal`` call may take: what is left of ``_OA_SHARE`` of the time
+        limit (or of the elapsed time without one), at most ``_OA_SECONDS`` and half the time left."""
+        total = _OA_SHARE * (time_limit if deadline is not None else max(time.perf_counter() - t0, 10.0))
+        b = min(total - oa_state["time"], _OA_SECONDS)
+        if deadline is not None:
+            b = min(b, 0.5 * (deadline - time.perf_counter()))
+        return b
+
     def need_obbt():
         """Whether the root OBBT pass runs: with an incumbent cutoff known (it is useless without
         one when there are no constraints), and not when the root bound already closes the gap."""
@@ -2059,6 +2184,11 @@ def minimize(
                 if verbose:
                     print(f"milp root bound {mlb:.6g} (was {float(lb.min()):.6g})")
                 lb = np.maximum(lb, mlb)
+    _mk("oa_primal")
+    if imask.any() and np.all(np.isfinite(lb)) and not (ub - float(lb.min()) <= tol()):
+        oa_start()
+        b = oa_budget()
+        oa_primal(rlo.min(axis=0), rhi.max(axis=0), list(np.atleast_2d(rxr)[:2]), b, wait=0.5 * b)
     _mk("search")
     open_lo, open_hi, open_lb, open_xr = rlo, rhi, lb, rxr
     width0 = _branch_widths(width0, rlo, rhi)
@@ -2281,6 +2411,10 @@ def minimize(
             # _DIVE_BACKOFF) after dives that do not improve it
             dive_every = 2 if not np.isfinite(ub) else (10 if ub < before else min(2 * dive_every, _DIVE_BACKOFF))
             next_dive = it + dive_every
+        if imask.any() and oa_state.get("fut") is not None and time.perf_counter() - oa_state["last"] >= _OA_EVERY * min(time_limit, 600.0):
+            # resume the outer-approximation heuristic with cuts at the most promising children's points
+            o = np.argsort(clb)[:2]
+            oa_primal(None, None, list(cxr[o]), oa_budget())
         if branch_var != "width":
             # pseudocost observations: bound gain per squared relative width
             with np.errstate(invalid="ignore"):  # -inf - -inf: NaN, dropped below (``good``)
