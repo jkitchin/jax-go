@@ -118,3 +118,67 @@ check_wrong (`--sample 12 --time-limit 20`, seeds 0 and 1), with the defaults an
 - The node rate is about 150–270 nodes/s, against SCIP's 600–1,000.
 - SCIP's 4–5x node advantage comes from MIP cuts working together (Gomory, zero-half, clique). Gomory cuts need a basic LP solution. The interior-point node LP does not give one; the simplex node LP on `claude/node-simplex` would.
 - m426 is limited by node speed and by its incumbent: 3.23, against SCIP's 0.339. Under `width`, m420's incumbent stayed at 1.87, against the optimum 1.0836.
+
+# Part 2: automatic pseudocost, probe-seeded pseudocosts, fewer Kelley rounds (2026-11-16)
+
+## Cause
+
+- `auto` used `width` (most fractional at the interior-point LP point) on every integer problem, but the big-M layout models (CLay) need pseudocost.
+- Pseudocosts started empty, although root probing already bounds every binary at 0 and at 1.
+- On the k-means models, all 4 Kelley rounds run at almost every node, because the models have 60–100 convex quadratic big-M distance rows.
+- Pre-search work takes 21–29 s of a 60 s run on m391 (domain bounding 4–8 s, root dives 7 s, outer-approximation heuristic 12–14 s), so the search gets about half the time.
+
+## Fix (`jaxglobal/bnb.py`)
+
+- **`_assignment_bigm`** detects disjunctive assignment models from the lifted quadratic form. A model qualifies when all integers are binary, there are at least 20 of them, and at least 90% of them sit both in an assignment row (`sum b = 1` or `<= 1`) and in a linking row. The function returns the share of binaries that switch a *linear* row. The form is computed once and cached (`_quadratic_form`).
+- **`n_kelley=None`** (the new default) resolves to 2 rounds on these models (`_ASSIGN_KELLEY`) and to 4 otherwise. With 2 rounds a node costs about half, and the bound per box is about 7% weaker.
+- **`branch_var="auto"`** picks pseudocost when at least half the binaries switch linear rows (`_ASSIGN_LINEAR`):
+
+  | models | linear share |
+  |---|---|
+  | CLay big-M (m391, m394) | 0.73–0.80 |
+  | hull models | 1.0 |
+  | k-means big-M | ~0 |
+
+  The k-means big-M models therefore keep `width`: pseudocost won on m420 but lost on m421 and m422.
+- **`seed_pseudocosts`** (`_PC_PROBE`): root probing seeds the pseudocosts with each binary's two sides, recorded as a split at the root's LP value. Binaries where neither side raised the bound are left unobserved; seeding them with zero dropped m420 from 1.01 to 0.62.
+- **`_PC_FRAC_POW`** exposes the exponent of the fractionality weight. It stays at 1.
+
+## Measurements
+
+**Fixed 60-iteration screens** (node counts, independent of load):
+
+| model | `width` | pseudocost | pseudocost, probe-seeded |
+|---|---|---|---|
+| m391 | not solved (bound 7695) | 10.3–12.5k nodes | 5.9–7.2k nodes |
+| m394 | not solved (bound 7595) | 9.9k nodes | 8.3k nodes |
+
+**2 vs 4 Kelley rounds, `width`, 60 s, load about 14.** The bounds after 60 s, with 2 rounds processing 1.8x the nodes:
+
+| model | 4 rounds | 2 rounds |
+|---|---|---|
+| m420 | 0.586 | 0.652 |
+| m421 | 1.380 | 1.500 |
+| m422 | 1.836 | 2.023 |
+
+**A/B against `stage2b-merge`, 60 s, `--jobs 1`.** Both arms back to back with a shared warmed compile cache; load 7–9.6. The CSVs are in `benchmarks/results/bigm2_fin{A,B}_{base,cand}.csv`.
+
+| model (opt) | base: status, dual, nodes | new: status, dual, nodes |
+|---|---|---|
+| m391 (8092.5) | limit, 7137, 7,355 | **optimal 49.0 s**, 7,061 |
+| m394 (8092.5) | limit, 7060, 6,567 | **optimal 52.0 s**, 6,379 |
+| m420 (1.0836) | limit, 0.652, 8,437 | limit, 0.723, 14,335 |
+| m421 (2.602) | limit, 1.475, 7,679 | limit, 1.601, 14,335 |
+| m422 (4.734) | limit, 2.012, 4,607 | limit, 2.206, 8,959 |
+| m426 (0.330) | limit, 0.0014, 2,047 | limit, 0.0152, 4,095 |
+| m399 | optimal 51.4 s, 467 | optimal 47.7 s, 465 |
+| m406 | optimal 42.8 s, 465 | optimal 39.4 s, 457 |
+
+**Other sets.** On the 7 int50 instances with at least 20 binaries, results are identical in both arms. The rest of int50, and all of start50, cannot reach the new rules. check_wrong (seeds 0 and 1) found no wrong answers.
+
+## What is left
+
+- m420 needs about 20–30k nodes; SCIP needs 16k, and we reach 14k in 60 s.
+- The pre-search overhead on these models.
+- m391 and m394 finish with a thin margin under load (49–52 s at load 8–10; m394 did not finish at load 13).
+- The k-means branching rule is not understood: most-fractional beats pseudocost for d ≥ 3, but not for d = 2.
