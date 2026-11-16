@@ -724,7 +724,7 @@ def pool_parts(f, ineq, eq, n, safe=False):
 
 
 def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate=False, alphabb=False,
-              multivariate=False, safe=False, own_cuts=True, exact=False, boxes=1):
+              multivariate=False, safe=False, own_cuts=True, exact=False, boxes=1, variables=None):
     """Return ``obbt(lo, hi, cutoff) -> (lo', hi', infeasible)`` for one box.
 
     Optimality-based bound tightening: each variable is minimized and
@@ -740,6 +740,8 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
     node bound, the new variable bounds are weak-duality certificates, so an
     inexact LP solve can only make them looser, never invalid. ``exact``: see ``_parts_fn``.
     ``boxes``: the boxes per call the memory budget assumes (``make_constrained_bounder``).
+    ``variables``: indices of the variables to tighten, or a function of n giving them (None: all;
+    the others keep their bounds).
     """
     prepare, parts, _ = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate, safe, exact=exact)
     nonlinear = _nonlinear_of(f, ineq, eq)
@@ -769,7 +771,11 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
             b = jnp.where(live, rhs / nrm, 1.0)
             return A, _row_margin(A, b, jnp.where(live, mag / nrm, 0.0), live, safe)
 
-        C = jnp.concatenate([jnp.eye(n), -jnp.eye(n)])
+        sel = variables(n) if callable(variables) else variables
+        idx = np.arange(n) if sel is None else np.asarray(sel, dtype=np.int64)
+        m = idx.size
+        E = jnp.eye(n)[idx]
+        C = jnp.concatenate([E, -E])
 
         def solve(cvec, A, bvec):
             nA = A.shape[0]
@@ -788,7 +794,7 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
         pts0 = cut_points(c, w, axis_vars(nl, n))
         const, coef = memory.map_points(cuts_at, pts0, memory.point_chunk(point_bytes(n), pts0.shape[0], boxes,
                                                                           "OBBT cut points"))
-        ulo, uhi = jnp.zeros(n), jnp.ones(n)
+        ulo, uhi = jnp.zeros(m), jnp.ones(m)
         own_c = own_g = None  # per LP (own_cuts): cuts at its own earlier solutions
         for k in range(rounds):
             if not own_cuts or k == 0:
@@ -797,8 +803,8 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
             else:
                 Z, B = jax.vmap(lambda cv, oc, og: solve(cv, *rows(jnp.concatenate([const, oc]),
                                                                     jnp.concatenate([coef, og]))))(C, own_c, own_g)
-            ulo = jnp.maximum(ulo, jnp.where(jnp.isfinite(B[:n]), B[:n], 0.0))
-            uhi = jnp.minimum(uhi, jnp.where(jnp.isfinite(B[n:]), -B[n:], 1.0))
+            ulo = jnp.maximum(ulo, jnp.where(jnp.isfinite(B[:m]), B[:m], 0.0))
+            uhi = jnp.minimum(uhi, jnp.where(jnp.isfinite(B[m:]), -B[m:], 1.0))
             if k < rounds - 1:  # cuts at this round's 2n LP solutions
                 ck, gk = memory.map_points(cuts_at, lo + w * Z, memory.point_chunk(point_bytes(n), Z.shape[0], boxes,
                                                                                    "OBBT round cut points"))
@@ -809,7 +815,7 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
                     const, coef = jnp.concatenate([const, ck]), jnp.concatenate([coef, gk])
 
         infeasible = jnp.any(ulo > uhi + 1e-9)
-        ulo, uhi = ulo - 1e-9, uhi + 1e-9  # floating-point slack
+        ulo, uhi = jnp.zeros(n).at[idx].set(ulo - 1e-9), jnp.ones(n).at[idx].set(uhi + 1e-9)  # floating-point slack
         new_lo = jnp.where(w > 0, jnp.maximum(lo, lo + w * ulo), lo)
         new_hi = jnp.where(w > 0, jnp.minimum(hi, lo + w * uhi), hi)
         return jnp.minimum(new_lo, new_hi), jnp.maximum(new_lo, new_hi), infeasible

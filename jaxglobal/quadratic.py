@@ -1552,10 +1552,12 @@ def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False, n_s
     return bound
 
 
-def make_quadratic_obbt(Q, rounds=2, ipm_iters=40, tol=0.0, safe=False):
+def make_quadratic_obbt(Q, rounds=2, ipm_iters=40, tol=0.0, safe=False, variables=None):
     """Return ``obbt(lo, hi, cutoff) -> (lo', hi', infeasible)``: each variable minimized and
     maximized over the lifted LP with ``f <= cutoff`` (2n LPs, one ``vmap``), the facets
-    rebuilt on the tightened box between rounds. The new bounds are certificates."""
+    rebuilt on the tightened box between rounds. The new bounds are certificates.
+    ``variables``: indices of the variables to tighten, or a function of n giving them (None: all;
+    the others keep their bounds)."""
     layouts = {}
 
     def obbt(lo, hi, cutoff=jnp.inf):
@@ -1564,6 +1566,9 @@ def make_quadratic_obbt(Q, rounds=2, ipm_iters=40, tol=0.0, safe=False):
             layouts[n] = _layout(Q, n, 0, True)
         L = layouts[n]
         pat = L.pattern
+        sel = variables(n) if callable(variables) else variables
+        idx = np.arange(n) if sel is None else np.asarray(sel, dtype=np.int64)
+        m = idx.size
         empty = jnp.array(False)
         for _ in range(rounds):
             vlo, vhi, vals, b, _ = _lp(Q, L, lo, hi, tol, safe, cutoff=cutoff)
@@ -1573,20 +1578,21 @@ def make_quadratic_obbt(Q, rounds=2, ipm_iters=40, tol=0.0, safe=False):
             scale = _scale(vlo, vhi, safe)
             A, bu = _unit(pat, vals, b, vlo, scale, safe)
             N = vlo.size
-            C = jnp.concatenate([jnp.eye(n, N), -jnp.eye(n, N)])
+            E = jnp.eye(n, N)[idx]
+            C = jnp.concatenate([E, -E])
 
             def solve(cvec, A=A, bu=bu):
                 _, _, val = _ipm(cvec, pat, A, bu, ipm_iters, cert=lambda y: _certificate(pat, A, bu, y, cvec, safe)[0])
                 return val
 
             B = jax.vmap(solve)(C)
-            ulo = jnp.where(jnp.isfinite(B[:n]), jnp.maximum(B[:n], 0.0), 0.0)
-            uhi = jnp.where(jnp.isfinite(B[n:]), jnp.minimum(-B[n:], 1.0), 1.0)
+            ulo = jnp.where(jnp.isfinite(B[:m]), jnp.maximum(B[:m], 0.0), 0.0)
+            uhi = jnp.where(jnp.isfinite(B[m:]), jnp.minimum(-B[m:], 1.0), 1.0)
             empty |= finite & jnp.any(ulo > uhi + 1e-9)
-            s = scale[:n]
-            nlo = jnp.where(finite, jnp.maximum(lo, vlo[:n] + s * (ulo - 1e-9)), lo)
-            nhi = jnp.where(finite, jnp.minimum(hi, vlo[:n] + s * (uhi + 1e-9)), hi)
-            lo, hi = jnp.minimum(nlo, nhi), jnp.maximum(nlo, nhi)
+            s, v0 = scale[:n][idx], vlo[:n][idx]
+            nlo = jnp.where(finite, jnp.maximum(lo[idx], v0 + s * (ulo - 1e-9)), lo[idx])
+            nhi = jnp.where(finite, jnp.minimum(hi[idx], v0 + s * (uhi + 1e-9)), hi[idx])
+            lo, hi = lo.at[idx].set(jnp.minimum(nlo, nhi)), hi.at[idx].set(jnp.maximum(nlo, nhi))
         return lo, hi, empty
 
     return obbt

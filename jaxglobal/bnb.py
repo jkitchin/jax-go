@@ -483,15 +483,20 @@ class _Kernels:
             def raw_bound(blo, bhi, cutoff, pool=None, root=None):
                 return unc_bound(blo, bhi, cutoff)
         tighten = make_fbbt(f, ineq, eq, rounds=fbbt_rounds, feas_tol=feas_tol, safe=safe, integer=integer) if fbbt else None
+        def obbt_variables(n):
+            """The variables OBBT tightens (``obbt_variables``): those entering nonlinearly, and integers."""
+            return self.obbt_variables(n)
+
         cut_obbt = make_obbt(f, ineq, eq, rounds=obbt_rounds, tol=feas_tol, univariate=univariate,
                              alphabb=alphabb, multivariate=multivariate, safe=safe, exact=exact,
-                             boxes=boxes if obbt == "tree" else 1) if obbt else None
+                             boxes=boxes if obbt == "tree" else 1, variables=obbt_variables) if obbt else None
 
         def lp_tighten(blo, bhi, cutoff):
             Q = lifted_form(blo.size) if constrained else None
             if Q is None:
                 return cut_obbt(blo, bhi, cutoff)
-            return make_quadratic_obbt(Q, rounds=obbt_rounds, tol=feas_tol, safe=safe)(blo, bhi, cutoff)
+            return make_quadratic_obbt(Q, rounds=obbt_rounds, tol=feas_tol, safe=safe,
+                                       variables=obbt_variables(blo.size))(blo, bhi, cutoff)
 
         crown_lb = make_crown(f, safe=safe) if crown else None
         idx = np.asarray(integer, dtype=np.int64)
@@ -632,6 +637,22 @@ class _Kernels:
                 except Exception:  # an equation the dependency masks cannot follow: sample Hessians
                     self._nonlinear[n] = None
         return self._nonlinear[n]
+
+    def obbt_variables(self, n):
+        """Indices of the variables OBBT tightens: those entering some function nonlinearly
+        (``nonlinear``) and the integers; None (all) when that is unknown or every variable.
+
+        Over the LP relaxation OBBT gives a variable that enters only linearly the range the LP
+        already implies: its relaxation (and so the node bound) does not depend on that range,
+        while its two LPs cost as much as any other's. On minlp.org m6_del_asl_hvar (71 of 151
+        variables nonlinear) the root OBBT call took 18-20 s and was skipped by the cost rule
+        (``_ROOT_OBBT_SHARE``) although it lifts the root bound from 1.432 to 1.512."""
+        nl = self.nonlinear(n)
+        if nl is None:
+            return None
+        sel = np.asarray(nl, bool).copy()
+        sel[list(self._opts["integer"])] = True
+        return None if sel.all() or not sel.any() else np.flatnonzero(sel)
 
     def fingerprint(self, n):
         """Disk-cache key of this problem on ``n`` variables (``kcache.fingerprint``), or None."""
@@ -909,6 +930,21 @@ _LOCAL_BACKOFF = 16  # most iterations skipped between local searches that do no
 # pounce options of the polish's warm re-solves of a new incumbent (integers fixed) and of the outer-
 # approximation heuristic's retries of failed completions
 _WARM = ({"mu_init": 1e-6, "max_iter": 1000}, {"mu_strategy": "adaptive", "max_iter": 1000})
+# local solves that end slightly infeasible (constraint violation in (feas_tol, _RETRY_VIOL]) at an
+# objective value that would improve the incumbent are solved again from where they stopped with the
+# ``_WARM`` options (``retry_warm`` in ``minimize``): the default barrier (mu_init 0.1, max_iter 200)
+# can stop at an imprecise point near a good local optimum (minlp.org m474: 6268.73 at violation
+# 3.5e-4 from the optimum's own point; 6271.6146 with mu_init 1e-6). At most _RETRY_PTS points per
+# batch, and their solves at most _RETRY_MIN s plus _RETRY_FRAC of the elapsed time in all.
+_RETRY_VIOL = 1e-2
+_RETRY_PTS = 2
+_RETRY_MIN, _RETRY_FRAC = 1.0, 0.05
+# with integer variables, the local searches of the search (``update_incumbent``) start from the LP
+# points of the most promising boxes and solve the NLP relaxation in each box, not the root box
+# (rounded, then fix-and-solved as before; the LP point rounded is fix-and-solved too): from the root
+# box the solve slides back to the root's relaxation optimum, whose roundings were tried already.
+# On minlp.org m474 the LP points of the best open boxes carry the optimal assignment; m399 too.
+_NODE_LOCAL = True
 _POLISH_ROUNDS = 5  # incumbent polish (``polish`` in ``minimize``): rounds while it keeps improving
 _POLISH_CANDS = 512  # integer neighbours (one step, swaps) tried per polish round
 _POLISH_CHUNK = 64  # most neighbours per batch of local solves (the time budget is checked between batches)
@@ -1491,17 +1527,23 @@ def _minimize(
         """Local solves from each start; returns (x, f) of the best feasible result.
 
         ``options``: extra local-solver options for these solves (``near_zero_options``).
-        ``boxes``: ``(L, H)``, per-start boxes inside [lo, hi] to solve in (problems without
-        integer variables only); a start's solve stays in its box.
+        ``boxes``: ``(L, H)``, per-start boxes inside [lo, hi] to solve in; a start's solve stays
+        in its box (with integer variables: its continuous relaxation does).
 
         With integer variables a start (an LP point, which can violate the nonlinear
         constraints far more than any rounding can repair) is first solved as the
-        continuous relaxation; that point is rounded at the ``ROUNDINGS`` thresholds and
-        each rounding is fix-and-solved: integers fixed, continuous variables free. A nearest
-        rounding that gets no feasible point is also repaired (``repaired``) and solved again."""
+        continuous relaxation (in its box); that point is rounded at the ``ROUNDINGS`` thresholds and
+        each rounding is fix-and-solved: integers fixed, continuous variables free in the root box.
+        With ``boxes`` the start rounded to nearest is fix-and-solved too. A nearest
+        rounding that gets no feasible point is also repaired (``repaired``) and solved again.
+        Solves that end slightly infeasible at a promising value are retried (``retry_warm``)."""
         S = np.clip(np.asarray(starts, dtype=np.float64), lo, hi)
         if imask.any():
-            R = np.clip(np.asarray(solve_local(S, options=options)), lo, hi)  # NLP relaxation
+            if boxes is not None:  # the NLP relaxation of each start's own box (a node's)
+                BL, BH = (np.asarray(b, dtype=np.float64) for b in boxes)
+                R = np.clip(np.asarray(solve_local(np.clip(S, BL, BH), BL, BH, options=options)), BL, BH)
+            else:
+                R = np.clip(np.asarray(solve_local(S, options=options)), lo, hi)  # NLP relaxation
             pool_add(R)
             fl = np.floor(R)
             fixed = np.concatenate([np.clip(fl + (R - fl > t), lo, hi) for t in ROUNDINGS])
@@ -1510,6 +1552,16 @@ def _minimize(
             L, H = np.where(imask, fixed, lo), np.where(imask, fixed, hi)
             X = np.clip(np.asarray(solve_local(fixed, L, H, options=options)), L, H)
             F = screen(X)
+            X, F = retry_warm(X, F, L, H, options)
+            if boxes is not None and _WARM:
+                # the start itself (a box's LP point) rounded, its continuous part solved from the
+                # LP point with the warm barrier options (``_WARM``): from a point that is near a
+                # good local optimum the default barrier tends to walk away from it (minlp.org m474:
+                # 6271.6146 with mu_init 1e-6 from the best boxes' LP points, poor points without)
+                Y = np.unique(np.where(imask, np.clip(np.round(S), BL, BH), S), axis=0)
+                LY, HY = np.where(imask, Y, lo), np.where(imask, Y, hi)
+                Y = np.clip(np.asarray(solve_local(Y, LY, HY, options={**(options or {}), **_WARM[0]})), LY, HY)
+                X, F = np.concatenate([X, Y]), np.concatenate([F, screen(Y)])
             # a nearest rounding (ROUNDINGS[0]) with no feasible completion: repair its integers
             # against the linear rows on integers only, and fix-and-solve the repaired points too
             near = np.asarray(inv).reshape(-1)[:len(R)]
@@ -1523,9 +1575,11 @@ def _minimize(
             L, H = boxes
             X = np.clip(np.asarray(solve_local(np.clip(S, L, H), L, H, options=options)), L, H)
             F = screen(X)
+            X, F = retry_warm(X, F, L, H, options)
         else:
             X = np.clip(np.asarray(solve_local(S, options=options)), lo, hi)
             F = screen(X)
+            X, F = retry_warm(X, F, np.broadcast_to(lo, X.shape), np.broadcast_to(hi, X.shape), options)
         i = int(np.argmin(F))
         if np.isfinite(F[i]):
             pool_add(X[i])
@@ -1585,6 +1639,45 @@ def _minimize(
         if imask.any():
             bad |= np.any(np.abs(X[:, imask] - np.round(X[:, imask])) > INT_TOL, axis=1)
         return np.where(bad, np.inf, F)
+
+    retry = dict(time=0.0)  # ``retry_warm``: wall seconds spent
+
+    def retry_warm(X, F, L, H, options=None):
+        """Re-solve the local solutions ``X`` (k, n; boxes ``L``, ``H``, objective values ``F`` from
+        ``screen``) that failed the screen only slightly (violation at most ``_RETRY_VIOL``) at an
+        objective better than the incumbent, from themselves, with each ``_WARM`` option set in turn
+        until one passes. Returns ``(X, F)`` with each retried row replaced by its re-solve when that
+        screens. Only proposes candidates (screened like every other)."""
+        if not (_WARM and constrained and local_solve) or _past(deadline):
+            return X, F
+        bad = np.flatnonzero(~np.isfinite(F) & np.all(np.isfinite(X), axis=1))
+        t = time.perf_counter()
+        if not len(bad) or retry["time"] > _RETRY_MIN + _RETRY_FRAC * (t - t0):
+            return X, F
+        fv, vv = _batched(K.fvals, X[bad]), _batched(K.viol, X[bad])
+        ok = np.isfinite(fv) & (vv > feas_tol) & (vv <= _RETRY_VIOL) & (fv < ub - tol())
+        if imask.any():
+            ok &= np.all(np.abs(X[bad][:, imask] - np.round(X[bad][:, imask])) <= INT_TOL, axis=1)
+        rows = bad[ok][np.argsort(fv[ok], kind="stable")][:_RETRY_PTS]
+        X, F = X.copy(), F.copy()
+        try:
+            for wo in _WARM:
+                if not len(rows) or _past(deadline):
+                    break
+                left = max(_RETRY_MIN + _RETRY_FRAC * (time.perf_counter() - t0) - retry["time"]
+                           - (time.perf_counter() - t), 0.05)
+                Lr, Hr = L[rows], H[rows]
+                Z = np.clip(np.asarray(solve_local(np.clip(X[rows], Lr, Hr), Lr, Hr,
+                                                   options={**(options or {}), **wo, "max_wall_time": left})), Lr, Hr)  # fmt: skip
+                Fz = screen(Z)
+                good = np.isfinite(Fz)
+                X[rows[good]], F[rows[good]] = Z[good], Fz[good]
+                rows = rows[~good]
+        except Exception:  # noqa: BLE001 -- an optional improvement: a failed retry keeps the points
+            pass
+        finally:
+            retry["time"] += time.perf_counter() - t
+        return X, F
 
     def repair_incumbent(x, fx):
         """The incumbent to report: ``x`` itself, or a strictly feasible point near it.
@@ -1762,7 +1855,7 @@ def _minimize(
 
     backoff = [0, 0]  # local-search back-off: current wait length, iterations left to skip
 
-    def update_incumbent(xc, fc, lb, blo=None, bhi=None):
+    def update_incumbent(xc, fc, lb, blo=None, bhi=None, xr=None):
         """Improve the incumbent from candidate points and local solves.
 
         ``blo``, ``bhi``: the boxes of the candidates (rows of ``xc``). Without integer
@@ -1772,7 +1865,11 @@ def _minimize(
         optimum after 12467 nodes from root-box solves alone, after ~1400 with box solves),
         while the box alone can hold only a worse local minimum (kall_congruentcircles_c52:
         167 nodes with both, 507 with box solves alone). A solution in a sub-box is a point of
-        the root box, screened like any other."""
+        the root box, screened like any other.
+
+        ``xr``: the LP points of the boxes. With integer variables and ``_NODE_LOCAL`` the most
+        promising boxes' starts are their LP points, solved in their boxes (``local``), instead of
+        their candidate points solved in the root box."""
         nonlocal ub, xbest
         starts = []
         sboxes = []  # the box of each start
@@ -1790,6 +1887,11 @@ def _minimize(
             n_try = n_starts * (4 if not np.isfinite(ub) else 1)
             for i in np.argsort(lb)[:n_try]:
                 if lb[i] < ub - tol():
+                    node_int = imask.any() and _NODE_LOCAL and blo is not None and xr is not None
+                    if node_int:  # (``_NODE_LOCAL``) from the box's LP point, in the box only
+                        starts.append(xr[i])
+                        sboxes.append((blo[i], bhi[i]))
+                        continue
                     starts.append(xc[i])
                     sboxes.append((lo, hi))
                     if blo is not None and not imask.any():
@@ -1801,7 +1903,8 @@ def _minimize(
             if np.isfinite(ub) and backoff[1] > 0:
                 backoff[1] -= 1
                 return
-            boxes = None if imask.any() or blo is None else tuple(np.array(b) for b in zip(*sboxes))
+            node = blo is not None and (not imask.any() or (_NODE_LOCAL and xr is not None))
+            boxes = tuple(np.array(b) for b in zip(*sboxes)) if node else None
             xl, fl = local(starts, boxes=boxes)
             nz = near_zero_options(min(ub, fl), abs_tol)
             if nz is not None and not _past(deadline):
@@ -2048,6 +2151,7 @@ def _minimize(
             return
         X = np.clip(np.asarray(solve_local(np.clip(S, L, H), L, H)), L, H)
         F = screen(X)
+        X, F = retry_warm(X, F, L, H)
         i = int(np.argmin(F))
         if F[i] < ub:
             ub, xbest = float(F[i]), X[i]
@@ -2214,7 +2318,8 @@ def _minimize(
         # per box. Estimated as the slowest bound call times 2 n obbt_rounds / boxes per call (within
         # 2x of the measured cost on minlp.org m400 / m441, n = 212 / 226: 15 s / 21 s for a 0.17 s /
         # 0.55 s bound call), it runs only if that is at most _ROOT_OBBT_SHARE of the time left.
-        obbt_est = bound_call[0] * max(1.0, 2.0 * lo.size * obbt_rounds / padded.sizes[0])
+        ov = K.obbt_variables(lo.size)  # (the variables it tightens: 2 LPs each per round)
+        obbt_est = bound_call[0] * max(1.0, 2.0 * (lo.size if ov is None else len(ov)) * obbt_rounds / padded.sizes[0])
         obbt_fits = obbt_est <= _ROOT_OBBT_SHARE * left
     if need_obbt() and obbt_fits:  # (the search would end at once on a closed gap: OBBT would only cost its compile)
         # the dives may have found the first incumbent (no constraints): start the kernel now if
@@ -2479,7 +2584,7 @@ def _minimize(
             ok = np.isfinite(X).all(axis=1)  # a failed solve keeps its LP point
             cxr = cxr.copy()
             cxr[rows[ok]] = np.clip(X[ok], clo[rows[ok]], chi[rows[ok]])
-        update_incumbent(cx, cf, clb, clo, chi)
+        update_incumbent(cx, cf, clb, clo, chi, cxr)
         if imask.any() and it >= next_dive:  # dives from the most promising children
             o = np.argsort(clb)[:_DIVES]
             before = ub
