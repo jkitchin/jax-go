@@ -258,6 +258,11 @@ def test_assignment_bigm_solve():
     c = 5.0 + 0.1 * np.arange(10)
     want = np.sum(np.minimum((4 - c) ** 2, (6 - c) ** 2))
     assert abs(r.fun - want) < 1e-4
+    # n_kelley=None resolved to _ASSIGN_KELLEY for this model (the kernels' options say so)
+    from jaxglobal import bnb
+
+    ks = [dict(k[4]) for k in bnb._CACHE if isinstance(k, tuple) and k[0] == "kernels" and k[1] is f]
+    assert ks and all(o["n_kelley"] == bnb._ASSIGN_KELLEY for o in ks)
 
 
 @pytest.mark.parametrize("seed", [True, False])

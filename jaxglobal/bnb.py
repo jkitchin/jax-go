@@ -607,7 +607,7 @@ class _Kernels:
         traced on several threads), or None when the lifted quadratic LP is not used."""
         with self._qlock:
             if n not in self._quadratic:
-                Q = quadratic_form(*self._problem, n) if self._use_quadratic else None
+                Q = _quadratic_form(*self._problem, n) if self._use_quadratic else None
                 self._quadratic[n] = with_bigm(Q, n, self._opts["integer"]) if self._opts.get("bigm") else Q
             return self._quadratic[n]
 
@@ -1025,6 +1025,13 @@ def _auto_branch_var(imask):
     return "width" if np.asarray(imask).any() else "pseudocost"
 
 
+def _quadratic_form(f, ineq, eq, n):
+    """``quadratic.quadratic_form`` of the problem (kept in the kernel cache: ``minimize`` reads
+    it before it builds the kernels, see ``_assignment_bigm``, and the kernels reuse it)."""
+    return _cached(("quadratic_form", f, ineq, eq, n), lambda: quadratic_form(f, ineq, eq, n))
+
+
+_ASSIGN_KELLEY = 2  # n_kelley=None: Kelley rounds on disjunctive assignment models (_assignment_bigm), else 4
 _ASSIGN_MIN, _ASSIGN_SHARE = 20, 0.9  # _assignment_bigm: at least this many binaries, this share of them in both kinds of rows
 
 
@@ -1161,7 +1168,7 @@ def _minimize(
     devices=None,
     max_iter=5000,
     n_fw=20,
-    n_kelley=4,
+    n_kelley=None,
     local_solve=True,
     local_solver="auto",
     n_starts=1,
@@ -1213,6 +1220,11 @@ def _minimize(
     (duality-based range reduction from each node's bound certificate), and
     ``obbt`` (LP-based tightening of every variable: ``"root"``, ``"tree"`` for
     every node, or ``False``).
+
+    ``n_kelley``: rounds of tangent (Kelley) cuts at the node LP's point after its first solve;
+    ``None`` (the default) is 4, or ``_ASSIGN_KELLEY`` (2) on disjunctive assignment models
+    (``_assignment_bigm``: the minlp.org big-M layout and k-means models, where 2 rounds nearly
+    halve the cost of a node for a slightly weaker bound, docs/ANALYSIS-bigm.md).
 
     Relaxations: ``univariate`` replaces the relaxation of every smooth
     sub-expression of a single variable by a grid-hull envelope
@@ -1349,6 +1361,13 @@ def _minimize(
         raise ValueError(
             f"branch_var must be 'auto', 'width', 'pseudocost', 'reliability' or 'strong', not {branch_var!r}"
         )
+    # disjunctive assignment models (docs/ANALYSIS-bigm.md): read from the lifted quadratic form
+    # (only with 20+ binaries: the prefilter keeps every other problem from building it here)
+    assign = bool(constrained and quadratic and not lifted and imask.sum() >= _ASSIGN_MIN
+                  and np.all(np.isin(lo[imask], (0.0, 1.0))) and np.all(np.isin(hi[imask], (0.0, 1.0)))
+                  and _assignment_bigm(_quadratic_form(f, ineq, eq, lo.size), lo.size, imask, lo, hi))  # fmt: skip
+    if n_kelley is None:
+        n_kelley = _ASSIGN_KELLEY if assign else 4
     branch_auto = branch_var == "auto"
     if branch_auto:
         branch_var = _auto_branch_var(imask)
@@ -1495,7 +1514,7 @@ def _minimize(
         sym = P if len(P) else None
         sym_moved = np.any(P != np.arange(lo.size), axis=0)  # (the support of the elements kept)
     width0 = np.where(branchable, width0, np.inf)  # never split linear variables
-    if branch_auto and branch_var == "width" and _assignment_bigm(quad, lo.size, imask, lo, hi):
+    if branch_auto and branch_var == "width" and assign:
         branch_var = "pseudocost"  # disjunctive assignment models (docs/ANALYSIS-bigm.md)
 
     _mark("make_local")
