@@ -447,6 +447,82 @@ def _parts_fn(f, ineq, eq, univariate, alphabb=False, multivariate=False, safe=F
     return prepare, parts, rs
 
 
+# One cut pass for the first LP and the Kelley rounds in the reduced-space bound
+# (``make_constrained_bounder``): the relaxation's forward-mode pass and the LP appear once in the
+# kernel instead of twice, which halves XLA's compile time on large tapes (m410_CLay0203HRS,
+# m34_convex2: 41k -> 15k HLO lines, 24 s -> 12 s). Round 0 takes ceil(P0 / SHARED_CHUNK) passes of
+# SHARED_CHUNK points; each Kelley round one pass, whose first point is the LP point (the rest are
+# discarded: the price of the shared pass). "auto": on tapes of at least SHARED_MIN_EQNS equations
+# (``fbbt_interp.tape_size``), where compile time is what matters; True / False: always / never.
+SHARED_CUTS = "auto"
+SHARED_CHUNK = 32
+SHARED_MIN_EQNS = 700
+
+
+# Affine parts linearized once per box, at the center, instead of at every cut point
+# (``make_constrained_bounder``; the LP is the same). "auto": when at least half of the parts are
+# affine (the extra center pass costs about one point's work; m34_convex2: 240 of 242 parts affine,
+# node bound 3.9 s -> 0.9 s per 16 boxes) on tapes of at least SHARED_MIN_EQNS equations (where it
+# was measured); True / False: whenever there are both kinds / never.
+SPLIT_AFFINE = "auto"
+
+
+class _SubParts:
+    """``parts`` restricted to the parts ``idx`` (``parts.bounds`` interface of ``_cuts``)."""
+
+    def __init__(self, parts, idx):
+        self.parts, self.idx = parts, np.asarray(idx)
+
+    def bounds(self, x, lo, hi, data):
+        # contiguous runs as static slices (not a gather), so XLA drops the other parts' work
+        v, b = self.parts.bounds(x, lo, hi, data)
+        idx = self.idx
+        cuts = np.flatnonzero(np.diff(idx) != 1) + 1
+        runs = [(int(r[0]), int(r[-1]) + 1) for r in np.split(idx, cuts)]
+        return jnp.concatenate([v[a:b_] for a, b_ in runs]), b
+
+
+def _tape_eqns(f, ineq, eq, n):
+    """Equations of the joint tape of ``f``, ``ineq``, ``eq`` (0 if it cannot be built)."""
+    from .fbbt import _has_tracer, joint_tape
+    from .fbbt_interp import tape_size
+
+    try:
+        with jax.ensure_compile_time_eval():
+            tape = joint_tape(f, ineq, eq, np.zeros(n))
+        if _has_tracer(tape):
+            return 0
+        return int(tape_size(tape)[1])
+    except Exception:  # noqa: BLE001 -- only a layout choice depends on it
+        return 0
+
+
+def _shared_cuts(f, ineq, eq):
+    """``(shared(n), large(n))``: ``SHARED_CUTS`` resolved for a problem, and whether its tape has
+    at least ``SHARED_MIN_EQNS`` equations (memoized on ``n``)."""
+    cache = {}
+
+    def get(n):
+        if n not in cache:
+            cache[n] = _tape_eqns(f, ineq, eq, n) >= SHARED_MIN_EQNS
+        return cache[n]
+
+    def shared(n):
+        return bool(SHARED_CUTS) if SHARED_CUTS != "auto" else get(n)
+
+    return shared, get
+
+
+def _n_parts(f, ineq, eq, n):
+    """Number of convex parts [cv_f, cv_g..., cv_h..., -cc_h...] (``_parts_fn``)."""
+    x = jax.ShapeDtypeStruct((n,), jnp.float64)
+
+    def size(fn):
+        return int(np.prod(jax.eval_shape(lambda z: jnp.atleast_1d(fn(z)), x).shape))
+
+    return size(f) + (size(ineq) if ineq is not None else 0) + (2 * size(eq) if eq is not None else 0)
+
+
 KELLEY_STALL = 1e-4  # Kelley rounds stop once a round raises the bound by at most this share of the gap
 
 
@@ -488,6 +564,7 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
     prepare, parts, _ = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate, safe, exact=exact)
     nonlinear = _nonlinear_of(f, ineq, eq)
     point_bytes = _point_bytes_of(f, ineq, eq)
+    shared_of, large_of = _shared_cuts(f, ineq, eq)
 
     def bound(lo, hi, cutoff=jnp.inf, pool=None, root=None):
         n = lo.size
@@ -496,36 +573,77 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
         c = 0.5 * (lo + hi)
         data = prepare(lo, hi)
 
-        def cuts_at(p):
-            """Affine minorants of each convex part at p, in unit-box coords u, and the interval
-            bounds of f, g, h (``_cuts``)."""
-            return _cuts(parts, data, p, lo, hi, safe)
+        # Affine parts (``_nonlinear_vars``: no nonlinear variable) have the same cut everywhere, and
+        # ``_cut_rows`` keeps only their cut at the center. With ``SPLIT_AFFINE`` they are linearized
+        # once, at the center, and the cut points (axis and Kelley points) linearize the nonlinear
+        # parts only: the same LP, without the forward-mode pass of every linear row at every point
+        # (m34_convex2: 2 of 242 parts are nonlinear).
+        split = bool(SPLIT_AFFINE) and nl is not None and nl.shape[1] == n and nl.any() and not nl.any(axis=1).all()
+        if split and SPLIT_AFFINE == "auto":
+            split = int((~nl.any(axis=1)).sum()) >= int(nl.any(axis=1).sum()) and large_of(n)
+        if split:
+            nlp = np.flatnonzero(nl.any(axis=1))
+            afp = np.flatnonzero(~nl.any(axis=1))
+            nl_p = nl[nlp]
+            obj_p, obj_a = bool(nlp[0] == 0), bool(afp[0] == 0)
+            sub = _SubParts(parts, nlp)
+            ca, ga, bounds_c = _cuts(parts, data, c, lo, hi, safe)
+            aff = (ca[afp][None], ga[afp][None])  # (1, Ka), (1, Ka, n)
+
+            def cuts_at(p):
+                """Cuts of the nonlinear parts at p (``_cuts``); the bounds are the center's."""
+                ck, gk, _ = _cuts(sub, data, p, lo, hi, safe)
+                return ck, gk, bounds_c
+        else:
+            nl_p, obj_p, obj_a, aff = nl, True, False, None
+
+            def cuts_at(p):
+                """Affine minorants of each convex part at p, in unit-box coordinates u, and the interval
+                bounds of f, g, h (``_cuts``)."""
+                return _cuts(parts, data, p, lo, hi, safe)
 
         pts0 = cut_points(c, w, axis_vars(nl, n))
-        chunk = memory.point_chunk(point_bytes(n), pts0.shape[0], boxes, "node bound cut points")
-        const0, coef0, bounds = memory.map_points(cuts_at, pts0, chunk)  # (P0, 1+m), (P0, 1+m, n)
+        P0 = pts0.shape[0]
+        chunk = memory.point_chunk(point_bytes(n), P0, boxes, "node bound cut points")
 
-        # --- interval information (constant on the box: any point's) ---------
-        (flo, fhi), bg, bh = jax.tree.map(lambda b: b[0], bounds)
-        flo, fhi = flo[0], fhi[0]
-        infeasible = jnp.array(False)
-        if bg is not None:
-            infeasible |= jnp.any(bg[0] > tol)
-        if bh is not None:
-            infeasible |= jnp.any(bh[0] > tol) | jnp.any(bh[1] < -tol)
+        def obj_range(oc, og):
+            """Largest finite lower / upper bound over the box of the objective cuts ``oc + og . u``."""
+            cmin = oc + jnp.sum(jnp.minimum(og, 0), axis=-1)
+            cmax = oc + jnp.sum(jnp.maximum(og, 0), axis=-1)
+            if safe:  # rounding of the sums over coef
+                cmin = cmin - SAFE_K * n * EPS * jnp.sum(jnp.abs(og), axis=-1)
+                cmax = cmax + SAFE_K * n * EPS * jnp.sum(jnp.abs(og), axis=-1)
+            return (jnp.max(jnp.where(jnp.isfinite(cmin), cmin, -jnp.inf)),
+                    jnp.max(jnp.where(jnp.isfinite(cmax), cmax, -jnp.inf)))  # fmt: skip
 
-        # objective-variable range [tlo, thi] from intervals and the cuts
-        cmin = const0[:, 0] + jnp.sum(jnp.minimum(coef0[:, 0], 0), axis=1)
-        cmax = const0[:, 0] + jnp.sum(jnp.maximum(coef0[:, 0], 0), axis=1)
-        if safe:  # rounding of the sums over coef
-            cmin = cmin - SAFE_K * n * EPS * jnp.sum(jnp.abs(coef0[:, 0]), axis=1)
-            cmax = cmax + SAFE_K * n * EPS * jnp.sum(jnp.abs(coef0[:, 0]), axis=1)
-        tlo = jnp.maximum(flo, jnp.max(jnp.where(jnp.isfinite(cmin), cmin, -jnp.inf)))
-        thi = jnp.minimum(fhi, jnp.max(jnp.where(jnp.isfinite(cmax), cmax, -jnp.inf)))
-        thi = jnp.where(jnp.isfinite(thi) & (thi > tlo), thi, tlo + 1.0)
-        T = thi - tlo
-        bad_t = ~jnp.isfinite(tlo)
-        tlo_s = jnp.where(bad_t, 0.0, tlo)
+        ninf = jnp.array(-jnp.inf)
+        a_cmin, a_cmax = obj_range(aff[0][0, 0], aff[1][0, 0]) if obj_a else (ninf, ninf)
+
+        def point_info(const0, coef0, bounds):
+            """``(infeasible, flo, fhi, cmin, cmax)`` of a set of cut points: the interval bounds (the
+            same at every point) and the largest finite lower / upper bound of the objective's cuts
+            over the box (-inf if none)."""
+            (flo, fhi), bg, bh = jax.tree.map(lambda b: b[0], bounds)
+            flo, fhi = flo[0], fhi[0]
+            infeasible = jnp.array(False)
+            if bg is not None:
+                infeasible |= jnp.any(bg[0] > tol)
+            if bh is not None:
+                infeasible |= jnp.any(bh[0] > tol) | jnp.any(bh[1] < -tol)
+            cmin, cmax = obj_range(const0[:, 0], coef0[:, 0]) if obj_p else (ninf, ninf)
+            return infeasible, flo, fhi, jnp.maximum(cmin, a_cmin), jnp.maximum(cmax, a_cmax)
+
+        def t_range(flo, fhi, cmin, cmax):
+            """``(tlo, T, bad_t)``: the objective-variable range [tlo, tlo + T] from intervals and cuts."""
+            tlo = jnp.maximum(flo, cmin)
+            thi = jnp.minimum(fhi, cmax)
+            thi = jnp.where(jnp.isfinite(thi) & (thi > tlo), thi, tlo + 1.0)
+            return tlo, thi - tlo, ~jnp.isfinite(tlo)
+
+        def interval_info(const0, coef0, bounds):
+            """``(infeasible, tlo, T, bad_t)`` from the interval bounds and the initial cuts."""
+            infeasible, *rest = point_info(const0, coef0, bounds)
+            return (infeasible, *t_range(*rest))
 
         if pool is not None:
             # pool cuts in unit-box coordinates; valid only where the box lies in their root box
@@ -536,26 +654,39 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
             pok = inside & jnp.isfinite(pconst) & jnp.all(jnp.isfinite(pcoef), axis=1)
             pconst = jnp.where(pok, pconst, -jnp.inf)
             pcoef = jnp.where(pok[:, None], pcoef, 0.0)
-            pool_A = jnp.concatenate([pcoef, jnp.where(pobj, -T, 0.0)[:, None]], axis=1)
-            pool_b = jnp.where(pobj, tlo_s, tol) - pconst
-            pool_mag = jnp.where(pobj, jnp.abs(tlo_s), abs(tol)) + jnp.abs(pconst)
 
-        def rows(const, coef):
+        def block(const, coef, obj, T, tlo_s):
+            """Rows of cuts ``(P, K)`` / ``(P, K, n)`` (point-major); part 0 is the objective if ``obj``."""
+            tcol = jnp.zeros(const.shape + (1,))
+            if obj:
+                tcol = tcol.at[..., 0, 0].set(-T)
+                bvec = jnp.concatenate([tlo_s - const[..., :1], tol - const[..., 1:]], axis=-1)
+                mag = jnp.concatenate([jnp.abs(tlo_s) + jnp.abs(const[..., :1]), abs(tol) + jnp.abs(const[..., 1:])], axis=-1)
+            else:
+                bvec, mag = tol - const, abs(tol) + jnp.abs(const)
+            A = jnp.concatenate([coef, tcol], axis=-1).reshape(-1, n + 1)
+            return A, bvec.reshape(-1), mag.reshape(-1)
+
+        def rows(const, coef, T, tlo_s):
             """LP rows over z = (u, tau) with t = tlo + T tau.
 
             objective cut:  const0 + coef0.u <= t   -> coef0.u - T tau <= tlo - const0
             constraint cut: const_i + coef_i.u <= tol -> coef_i.u        <= tol - const_i
 
-            followed by the pool's rows (the same two forms).
+            the affine parts' center cuts (``split``), then the cut points' rows, then the pool's
+            rows (the same two forms).
             """
-            tcol = jnp.zeros(const.shape + (1,)).at[..., 0, 0].set(-T)
-            A = jnp.concatenate([coef, tcol], axis=-1).reshape(-1, n + 1)
-            bvec = jnp.concatenate([tlo_s - const[..., :1], tol - const[..., 1:]], axis=-1).reshape(-1)
-            mag = jnp.concatenate([jnp.abs(tlo_s) + jnp.abs(const[..., :1]), abs(tol) + jnp.abs(const[..., 1:])], axis=-1).reshape(-1)
-            keep = _cut_rows(const.shape, nl)
+            A, bvec, mag = block(const, coef, obj_p, T, tlo_s)
+            keep = _cut_rows(const.shape, nl_p)
             if keep is not None:
                 A, bvec, mag = A[keep], bvec[keep], mag[keep]
+            if aff is not None:
+                Aa, ba, ma = block(aff[0], aff[1], obj_a, T, tlo_s)
+                A, bvec, mag = jnp.concatenate([Aa, A]), jnp.concatenate([ba, bvec]), jnp.concatenate([ma, mag])
             if pool is not None:
+                pool_A = jnp.concatenate([pcoef, jnp.where(pobj, -T, 0.0)[:, None]], axis=1)
+                pool_b = jnp.where(pobj, tlo_s, tol) - pconst
+                pool_mag = jnp.where(pobj, jnp.abs(tlo_s), abs(tol)) + jnp.abs(pconst)
                 A, bvec, mag = (jnp.concatenate([A, pool_A]), jnp.concatenate([bvec, pool_b]),
                                 jnp.concatenate([mag, pool_mag]))  # fmt: skip
             live = jnp.isfinite(bvec)
@@ -569,7 +700,7 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
 
         cobj = jnp.zeros(n + 1).at[n].set(1.0)
 
-        def dual(A, bvec, y):
+        def dual(A, bvec, y, T, tlo_s):
             # Certificate over u in [0,1]^n, tau in [0, inf): the cap tau <= 1
             # used inside the LP is NOT relied on (later Kelley cuts may exceed
             # thi). Objective-row duals are rescaled so the tau coefficient
@@ -587,42 +718,93 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
                 return tlo_s + T * (val - err) - SAFE_K * EPS * (jnp.abs(tlo_s) + T * (jnp.abs(val) + err)), _safe_costs(coef[:n], A[:, :n], y)
             return tlo_s + T * (val - err), _safe_costs(coef[:n], A[:, :n], y)
 
-        # Kelley rounds over a fixed-size cut buffer: slots for cuts not generated yet hold
-        # const = -inf, which rows() turns into dead rows (0 <= 1), so every round has the
-        # same LP shape. The rounds stop early once a round no longer raises the bound
-        # (``KELLEY_STALL``) or the box is pruned (see ``_kelley_go``).
-        P0 = const0.shape[0]
-        const = jnp.concatenate([const0, jnp.full((n_kelley,) + const0.shape[1:], -jnp.inf)])
-        coef = jnp.concatenate([coef0, jnp.zeros((n_kelley,) + coef0.shape[1:])])
-
-        def solve(const, coef, best, rlo, rhi):
+        def solve(const, coef, best, rlo, rhi, T, tlo_s, bad_t):
             """One LP over the current cuts: (best', rlo', rhi', u)."""
-            A, bvec = rows(const, coef)
+            A, bvec = rows(const, coef, T, tlo_s)
             nA = A.shape[0]
-            z, y, lb = ipm(cobj, A, bvec, ipm_iters, cert=lambda y: dual(A, bvec, y[:nA])[0], box=True,
+            z, y, lb = ipm(cobj, A, bvec, ipm_iters, cert=lambda y: dual(A, bvec, y[:nA], T, tlo_s)[0], box=True,
                            target=cutoff)  # fmt: skip
             lb = jnp.where(jnp.isnan(lb) | bad_t, -jnp.inf, lb)
             best = jnp.maximum(best, lb)
             # range reduction from this round's certificate (r is per unit of u)
-            _, r = dual(A, bvec, y[:nA])
+            _, r = dual(A, bvec, y[:nA], T, tlo_s)
             klo, khi = reduce_ranges(lo, hi, lb, T * r / jnp.where(w > 0, w, 1.0), cutoff)
             rlo, rhi = jnp.maximum(rlo, klo), jnp.minimum(rhi, khi)
             return best, rlo, rhi, jnp.clip(z[:n], 0.0, 1.0)
 
-        best0 = jnp.where(bad_t, -jnp.inf, tlo)
-        best, rlo, rhi, u = solve(const, coef, best0, lo, hi)
+        # Kelley rounds over a fixed-size cut buffer: slots for cuts not generated yet hold
+        # const = -inf, which rows() turns into dead rows (0 <= 1), so every round has the
+        # same LP shape. The rounds stop early once a round no longer raises the bound
+        # (``KELLEY_STALL``) or the box is pruned (see ``_kelley_go``).
+        if not shared_of(n):
+            const0, coef0, bounds = memory.map_points(cuts_at, pts0, chunk)  # (P0, Kp), (P0, Kp, n)
+            infeasible, tlo, T, bad_t = interval_info(const0, coef0, bounds)
+            tlo_s = jnp.where(bad_t, 0.0, tlo)
+            const = jnp.concatenate([const0, jnp.full((n_kelley,) + const0.shape[1:], -jnp.inf)])
+            coef = jnp.concatenate([coef0, jnp.zeros((n_kelley,) + coef0.shape[1:])])
+            best0 = jnp.where(bad_t, -jnp.inf, tlo)
+            best, rlo, rhi, u = solve(const, coef, best0, lo, hi, T, tlo_s, bad_t)
 
-        def kelley(carry):
-            # Kelley: cuts at the last LP solution, then the LP again
-            k, const, coef, best, rlo, rhi, u, _ = carry
-            ck, gk, _ = cuts_at(lo + w * u)
-            const, coef = const.at[P0 + k].set(ck), coef.at[P0 + k].set(gk)
-            prev = best
-            best, rlo, rhi, u = solve(const, coef, best, rlo, rhi)
-            return k + 1, const, coef, best, rlo, rhi, u, _kelley_go(prev, best, cutoff)
+            def kelley(carry):
+                # Kelley: cuts at the last LP solution, then the LP again
+                k, const, coef, best, rlo, rhi, u, _ = carry
+                ck, gk, _ = cuts_at(lo + w * u)
+                const, coef = const.at[P0 + k].set(ck), coef.at[P0 + k].set(gk)
+                prev = best
+                best, rlo, rhi, u = solve(const, coef, best, rlo, rhi, T, tlo_s, bad_t)
+                return k + 1, const, coef, best, rlo, rhi, u, _kelley_go(prev, best, cutoff)
 
-        init = (0, const, coef, best, rlo, rhi, u, _kelley_go(best0, best, cutoff, first=True))
-        _, _, _, best, rlo, rhi, u, _ = jax.lax.while_loop(lambda c: (c[0] < n_kelley) & c[7], kelley, init)
+            init = (0, const, coef, best, rlo, rhi, u, _kelley_go(best0, best, cutoff, first=True))
+            _, _, _, best, rlo, rhi, u, _ = jax.lax.while_loop(lambda c: (c[0] < n_kelley) & c[7], kelley, init)
+        else:
+            # One loop for the first LP and the Kelley rounds, so the relaxation's forward-mode
+            # pass and the LP appear once in the kernel instead of twice (see ``SHARED_CUTS``).
+            Kp = len(nlp) if split else _n_parts(f, ineq, eq, n)
+            C = P0 if SHARED_CHUNK is None else min(P0, SHARED_CHUNK)
+            if chunk is not None:
+                C = min(C, chunk)
+            nC = -(-P0 // C)
+            pts0p = jnp.concatenate([pts0, jnp.broadcast_to(c, (nC * C - P0, n))])  # padding: the center again
+            const = jnp.full((P0 + n_kelley, Kp), -jnp.inf)
+            coef = jnp.zeros((P0 + n_kelley, Kp, n))
+            slot = jnp.arange(C)
+            drop = P0 + n_kelley  # out of range: dropped by the scatter
+
+            def round_(carry):
+                k, const, coef, info, best, rlo, rhi, u, _ = carry
+                first = k == 0
+                p_kelley = jnp.broadcast_to(lo + w * u, (C, n))
+
+                def chunk_(cc):
+                    j, const, coef, pinfo = cc
+                    pts = jnp.where(first, jax.lax.dynamic_slice(pts0p, (j * C, 0), (C, n)), p_kelley)
+                    ck, gk, bounds = jax.vmap(cuts_at)(pts)
+                    # round 0 fills slots 0..P0-1 chunk by chunk, round k >= 1 slot P0 + k - 1
+                    s0 = j * C + slot
+                    idx = jnp.where(first, jnp.where(s0 < P0, s0, drop), jnp.where(slot == 0, P0 + k - 1, drop))
+                    const = const.at[idx].set(ck, mode="drop")
+                    coef = coef.at[idx].set(gk, mode="drop")
+                    e, flo, fhi, cmn, cmx = point_info(ck, gk, bounds)
+                    pinfo = (pinfo[0] | e, flo, fhi, jnp.maximum(pinfo[3], cmn), jnp.maximum(pinfo[4], cmx))
+                    return j + 1, const, coef, pinfo
+
+                pinfo0 = (jnp.array(False), ninf, ninf, ninf, ninf)
+                trips = jnp.where(first, nC, 1)
+                _, const, coef, pinfo = jax.lax.while_loop(lambda cc: cc[0] < trips, chunk_,
+                                                           (0, const, coef, pinfo0))
+                new = (pinfo[0], *t_range(*pinfo[1:]))
+                info = jax.tree.map(lambda a, b: jnp.where(first, a, b), new, info)
+                _, tlo, T, bad_t = info
+                tlo_s = jnp.where(bad_t, 0.0, tlo)
+                prev = jnp.where(first, jnp.where(bad_t, -jnp.inf, tlo), best)
+                best, rlo, rhi, u = solve(const, coef, prev, rlo, rhi, T, tlo_s, bad_t)
+                go = jnp.where(first, _kelley_go(prev, best, cutoff, first=True), _kelley_go(prev, best, cutoff))
+                return k + 1, const, coef, info, best, rlo, rhi, u, go
+
+            info0 = (jnp.array(False), jnp.array(0.0), jnp.array(1.0), jnp.array(False))
+            init = (0, const, coef, info0, jnp.array(-jnp.inf), lo, hi, jnp.full(n, 0.5), jnp.array(True))
+            out = jax.lax.while_loop(lambda c: (c[0] <= n_kelley) & c[8], round_, init)
+            _, _, _, (infeasible, _, _, _), best, rlo, rhi, u, _ = out
 
         lb = jnp.where(infeasible, jnp.inf, best)
         return lb, lo + w * u, infeasible, rlo, rhi
