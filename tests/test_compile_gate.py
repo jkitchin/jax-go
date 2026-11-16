@@ -90,3 +90,21 @@ def test_batched_one_shape():
         X = rng.normal(size=(k, 3))
         assert np.allclose(bnb._batched(fn, X), np.sum(X**2, axis=1))
     assert fn._cache_size() == 1
+
+
+def test_tiered_compile(monkeypatch):
+    """With ``_FAST_COMPILE``, a started kernel first runs a fast-compiled executable, then the fully
+    optimized one once its gate has opened and it is compiled; both give the same values."""
+    monkeypatch.setattr(bnb, "_FAST_COMPILE", {"xla_backend_optimization_level": 0})
+    monkeypatch.setattr(bnb, "_TIER_TRACE_S", 0.0)
+    k = bnb._Precompiled(jax.jit(jax.vmap(lambda lo, hi, c: jnp.sum(jnp.sin(lo) * hi) + c, in_axes=(0, 0, None))), "t")
+    tier = bnb._Gate()
+    k.start(4, 3, tier=tier).result(timeout=60).result(timeout=60)
+    lo, hi, c = jnp.arange(12.0).reshape(4, 3), jnp.ones((4, 3)), jnp.asarray(1.0, dtype=jnp.float64)
+    a = np.asarray(k(lo, hi, c))
+    key = k._key((lo, hi, c))
+    assert key in k.better and not k.better[key].done()  # held behind the gate
+    tier.open()
+    k.better[key].result(timeout=60)
+    b = np.asarray(k(lo, hi, c))
+    assert np.allclose(a, b, rtol=1e-12)
