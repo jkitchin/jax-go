@@ -258,3 +258,22 @@ def test_assignment_bigm_solve():
     c = 5.0 + 0.1 * np.arange(10)
     want = np.sum(np.minimum((4 - c) ** 2, (6 - c) ** 2))
     assert abs(r.fun - want) < 1e-4
+
+
+@pytest.mark.parametrize("seed", [True, False])
+def test_probe_seeded_pseudocosts(monkeypatch, seed):
+    """Root probing's side bounds seed the pseudocosts (``_PC_PROBE``); either way the big-M
+    assignment model and an integer test problem solve to optimality."""
+    import numpy as np
+
+    from jaxglobal import bnb
+
+    monkeypatch.setattr(bnb, "_PC_PROBE", seed)
+    f, ineq, eq, lo, hi, ints = _assignment_model(10)
+    r = minimize(f, lo, hi, ineq=ineq, eq=eq, integer=ints, branch_var="pseudocost", time_limit=120)
+    c = 5.0 + 0.1 * np.arange(10)
+    assert r.status == "optimal" and r.verified
+    assert abs(r.fun - np.sum(np.minimum((4 - c) ** 2, (6 - c) ** 2))) < 1e-4
+    sh = next(p for p in PROBLEMS if p.name == "shubert")
+    r = solve(sh, integer=[0, 1], branch_var="pseudocost")
+    assert r.status == "optimal" and r.verified

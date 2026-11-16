@@ -888,6 +888,8 @@ _OA_EVERY = 0.1  # the search resumes it each time this share of the time limit 
 _OA_MILP = 0.5  # each MILP of a call gets at most this share of the call's budget
 _PROBE = True  # integer variables: root probing on binaries (``probe`` in ``minimize``)
 _ENUM = 32  # integer variables: at the root, fix-and-solve every assignment when there are at most this many
+_PC_FRAC_POW = 1.0  # branch_var="pseudocost": an integer's score is multiplied by min(f, 1 - f) to this power
+_PC_PROBE = True  # integer variables, branch_var != "width": root probing seeds the pseudocosts (``seed_pseudocosts``)
 _FLOOR = 0.05  # pseudocosts are floored at this fraction of the mean over observed variables
 _DIVE_BACKOFF = 80  # most iterations between periodic dives that do not improve the incumbent
 # once there is an incumbent, a dive is skipped when the dives' total wall time (with its estimated
@@ -2064,6 +2066,7 @@ def _minimize(
         plb, px, pf, plo, phi, _ = evaluate(P_lo, P_hi)
         update_incumbent(px, pf, plb)
         plb = np.where(np.isnan(plb), -np.inf, plb).reshape(-1, 2)
+        probed.update(j=j, plb=plb.copy(), lb=float(np.min(lb)), ub=ub)  # pseudocost seeds (``seed_pseudocosts``)
         dead = plb >= ub - tol()
         plo, phi = plo.reshape(-1, 2, lo.size), phi.reshape(-1, 2, lo.size)
         # a side's tightened box; one with non-finite bounds tightens nothing (its probe box)
@@ -2079,6 +2082,30 @@ def _minimize(
         if np.any(new_lo > new_hi) or dead.all(axis=1).any():  # every side of some binary is dead
             return rlo, rhi, np.maximum(new_lb, ub)
         return new_lo[None], new_hi[None], new_lb
+
+    probed = {}  # ``probe``'s binaries and their side bounds
+
+    def seed_pseudocosts(xr):
+        """Pseudocost observations from root probing (``probe``): each probed binary's two sides
+        are the children of a split of the root at its relaxation value ``xr`` (strong branching
+        on every binary, as SCIP's reliability branching starts), recorded as the search records
+        a split (gains per unit moved, capped at the gap to the incumbent of the probe)."""
+        if not probed or branch_var == "width":
+            return
+        j, plb, lb0, ub0 = probed["j"], probed["plb"], probed["lb"], probed["ub"]
+        with np.errstate(invalid="ignore"):
+            g = np.maximum(plb - lb0, 0.0)
+        if np.isfinite(ub0):
+            g = np.minimum(g, max(ub0 - lb0, 0.0))
+        v = np.asarray(xr, np.float64)[j] - np.floor(np.asarray(xr, np.float64)[j])
+        fr = (v > INT_TOL) & (v < 1.0 - INT_TOL)
+        dl, dr = np.where(fr, v, 0.5), np.where(fr, 1.0 - v, 0.5)
+        # a binary neither side of which raised the root bound is left unobserved: on the k-means
+        # models (root bound 0 whatever single binary is fixed) zero seeds held the bounds back
+        good = np.isfinite(g).all(axis=1) & (g.max(axis=1) > 1e-6 * (1.0 + abs(lb0)))
+        np.add.at(sumL, j[good], g[good, 0] / dl[good])
+        np.add.at(sumR, j[good], g[good, 1] / dr[good])
+        np.add.at(cnt, j[good], 1)
 
     def fixed_solve(L, H, S):
         """Local solves of the continuous variables in boxes whose integers are fixed (``L``,
@@ -2303,6 +2330,8 @@ def _minimize(
     open_lo, open_hi, open_lb, open_xr = rlo, rhi, lb, rxr
     width0 = _branch_widths(width0, rlo, rhi)
     sumL, sumR, cnt = np.zeros(lo.size), np.zeros(lo.size), np.zeros(lo.size)  # pseudocost sums, observations
+    if _PC_PROBE:
+        seed_pseudocosts(np.atleast_2d(rxr)[0])
 
     def pseudo_scores(relw, free, xr):
         """Product-rule scores per (box, variable), -1 for non-candidates; and whether any pseudocost is known.
@@ -2331,7 +2360,7 @@ def _minimize(
         # nearly integral (often only IPM noise) from outranking the ambiguous ones. On the
         # k-means models (m423, m424) the plain product rule lost to most-fractional branching by
         # 2-3x in nodes; with the weight it is close to or better than both (docs/ANALYSIS-bigm.md)
-        sc = sc * np.where(imask, np.minimum(fr, 1.0 - fr), 1.0)
+        sc = sc * np.where(imask, np.minimum(fr, 1.0 - fr) ** _PC_FRAC_POW, 1.0)
         return np.where(cand & np.isfinite(sc), sc, np.where(cand, 0.0, -1.0)), True
 
     pruned_lb = np.inf  # smallest lower bound among fathomed boxes
