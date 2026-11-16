@@ -38,7 +38,7 @@ import numpy as np
 from .local import make_local, near_zero_options
 from .crown import crown_auto, crown_supported, make_crown
 from .domain import DomainTimeout, bound_domain
-from . import kcache, milpbound
+from . import kcache, memory, milpbound
 from .fbbt import make_fbbt
 from .lifted import make_lifted_bounder
 from .lp import make_constrained_bounder, make_obbt, make_pool_cuts, pool_parts, reduce_ranges
@@ -342,6 +342,21 @@ class _Precompiled:
         return (jax.ShapeDtypeStruct((b, n), jnp.float64),) * 2 + (jax.ShapeDtypeStruct((), jnp.float64),) + \
             tuple(jax.ShapeDtypeStruct(tuple(sh), jnp.float64) for sh in extra)  # fmt: skip
 
+    def temp_bytes(self, *args):
+        """XLA's working memory (``memory_analysis().temp_size_in_bytes``) of the background
+        executable for ``args``' shapes, once it is compiled; else None."""
+        key = self._key(args)
+        temps = self.__dict__.setdefault("_temps", {})
+        if key not in temps:
+            fut = self.ready.get(key)
+            try:
+                if fut is None or not fut.done() or not fut.result().done():
+                    return None
+                temps[key] = int(fut.result().result().memory_analysis().temp_size_in_bytes)
+            except Exception:
+                temps[key] = None
+        return temps[key]
+
     def pending(self, b, n, extra=(), args=None):
         """Whether the background build that ``start(b, n, extra=extra, args=args)`` queues was
         started and has not finished."""
@@ -409,7 +424,7 @@ class _Kernels:
 
     def __init__(self, f, ineq, eq, *, n_fw, n_kelley, fbbt, fbbt_rounds, dbbt, obbt, obbt_rounds,
                  univariate, alphabb, multivariate, lifted, crown, feas_tol, safe, integer=(), quadratic=True,
-                 cut_pool=0, exact=False, bigm=False):  # fmt: skip
+                 cut_pool=0, exact=False, bigm=False, boxes=16):  # fmt: skip
         opts = {k: v for k, v in locals().items() if k not in ("self", "f", "ineq", "eq")}
         constrained = ineq is not None or eq is not None
         g, h = _vec(ineq), _vec(eq)
@@ -450,7 +465,8 @@ class _Kernels:
                 return lb, x, fx, rlo, rhi, x
         elif constrained:
             cb = make_constrained_bounder(f, ineq, eq, n_kelley=n_kelley, tol=feas_tol, univariate=univariate,
-                                          alphabb=alphabb, multivariate=multivariate, safe=safe, exact=exact)
+                                          alphabb=alphabb, multivariate=multivariate, safe=safe, exact=exact,
+                                          boxes=boxes)
 
             def raw_bound(blo, bhi, cutoff, pool=None, root=None):
                 Q = lifted_form(blo.size)
@@ -468,7 +484,8 @@ class _Kernels:
                 return unc_bound(blo, bhi, cutoff)
         tighten = make_fbbt(f, ineq, eq, rounds=fbbt_rounds, feas_tol=feas_tol, safe=safe, integer=integer) if fbbt else None
         cut_obbt = make_obbt(f, ineq, eq, rounds=obbt_rounds, tol=feas_tol, univariate=univariate,
-                             alphabb=alphabb, multivariate=multivariate, safe=safe, exact=exact) if obbt else None
+                             alphabb=alphabb, multivariate=multivariate, safe=safe, exact=exact,
+                             boxes=boxes if obbt == "tree" else 1) if obbt else None
 
         def lp_tighten(blo, bhi, cutoff):
             Q = lifted_form(blo.size) if constrained else None
@@ -945,6 +962,28 @@ def _dispatch_threads():
     return max(1, int(k if k is not None else _ncpu()))
 
 
+def _memory_boxes(batch, batch_sizes):
+    """Boxes per bound-kernel call (``memory.point_chunk``'s ``boxes``): the largest call
+    (``_Padder``: ``batch_sizes`` capped by ``batch``). Concurrent calls are limited at run time
+    instead (``_memory_threads``), so the kernels do not depend on the dispatch threads."""
+    return max({min(int(s), batch) for s in batch_sizes} or {batch})
+
+
+def _memory_threads(kernel, nt, args):
+    """Dispatch threads for calls of ``kernel`` on ``args``' shapes: ``nt``, fewer when the calls'
+    working memory together would exceed ``memory.BUDGET`` (each call holds its executable's
+    ``temp_bytes``; 0.57 GB per 16-box call on m34_convex2, docs/ANALYSIS-memory.md). At least 1."""
+    tb = kernel.temp_bytes(*args) if isinstance(kernel, _Precompiled) else None
+    if not tb or nt * tb <= memory.BUDGET:
+        return nt
+    k = max(1, int(memory.BUDGET // tb))
+    if k < nt and not getattr(kernel, "_logged_threads", False):
+        kernel._logged_threads = True
+        memory.log.info("%s kernel: %d concurrent calls x %.0f MB > budget %.0f MB: %d at a time",
+                        kernel.name, nt, tb / 2**20, memory.BUDGET / 2**20, k)
+    return min(nt, k)
+
+
 def _dispatch_pool(k):
     """A shared pool of ``k`` dispatch threads (created on first use)."""
     with _DISPATCH_LOCK:
@@ -1294,7 +1333,7 @@ def minimize(
                 multivariate=multivariate, lifted=lifted, crown=bool(crown), feas_tol=feas_tol, safe=bool(safe),
                 integer=tuple(int(i) for i in np.flatnonzero(imask)), quadratic=bool(quadratic),
                 cut_pool=int(cut_pool) if pmask is not None and pmask.any() else 0, exact=bool(exact),
-                bigm=bool(bigm) and bool(imask.any()))  # fmt: skip
+                bigm=bool(bigm) and bool(imask.any()), boxes=_memory_boxes(batch, batch_sizes))  # fmt: skip
     K = _cached(("kernels", f, ineq, eq, tuple(sorted(opts.items()))), lambda: _Kernels(f, ineq, eq, **opts))
     # the cut pool: tangents of the root box's relaxation at good points, added to every node LP
     pool = None
@@ -1665,6 +1704,8 @@ def minimize(
             # (a call that compiled is no estimate of a call's cost)
         else:
             nt = _dispatch_threads()
+            if nt > 1 and len(calls) > 1:
+                nt = _memory_threads(kernel, nt, (*calls[0], cutoff, *extra))
             if nt > 1 and len(calls) > 1:
                 from concurrent.futures import wait
 

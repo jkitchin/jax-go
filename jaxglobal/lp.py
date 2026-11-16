@@ -51,6 +51,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from . import memory
 from .relax import SAFE_K
 from .univariate import make_relaxer
 
@@ -119,12 +120,47 @@ def _nonlinear_of(f, ineq, eq):
     return get
 
 
+def axis_vars(nl, n):
+    """Indices of the variables that get axis points (``cut_points``): those some convex part is
+    nonlinear in (``_nonlinear_vars`` ``nl``), all ``n`` when ``nl`` is unknown (None).
+
+    Along a variable every part is linear in, each part's cut at the axis point is its cut at
+    the center (see ``_cut_rows``), so ``_cut_rows`` dropped every row of such a point: it is
+    not evaluated at all. That matters for memory as much as for time: the forward-mode cuts
+    hold ``(points, slots, n)`` tangents per box (m34_convex2, 100 variables of which 40 enter
+    nonlinearly: 81 points instead of 201; docs/ANALYSIS-memory.md)."""
+    if nl is None or nl.shape[1] != n:
+        return np.arange(n)
+    return np.flatnonzero(nl.any(axis=0))
+
+
+def cut_points(c, w, ax):
+    """The initial cut points of a box with center ``c`` and widths ``w``: the center, then
+    ``c + e_j w_j / 4`` and then ``c - e_j w_j / 4`` for the variables ``j`` in ``ax``
+    (``axis_vars``)."""
+    E = jnp.eye(c.size, dtype=c.dtype)[np.asarray(ax, dtype=np.int64)]
+    return jnp.concatenate([c[None], c + jnp.concatenate([E, -E]) * (w / 4)])
+
+
+def _point_bytes_of(f, ineq, eq):
+    """``memory.cut_point_bytes`` of the relaxations of ``f``, ``ineq``, ``eq``, memoized on ``n``."""
+    cache = {}
+
+    def get(n):
+        if n not in cache:
+            cache[n] = memory.cut_point_bytes((f, ineq, eq), n)
+        return cache[n]
+
+    return get
+
+
 def _cut_rows(shape, nl):
     """Flat indices of the LP rows to keep from cuts of shape ``(P, K)`` (P points, K parts;
     point-major rows), or None for all of them.
 
-    The points are the center, the 2n axis points ``c + e_j w_j / 4`` then
-    ``c - e_j w_j / 4``, then Kelley points. Part k keeps its cut at the center,
+    The points are the center, the axis points ``c + e_j w_j / 4`` then
+    ``c - e_j w_j / 4`` of the variables ``j`` of ``axis_vars(nl)`` (``cut_points``), then
+    Kelley points. Part k keeps its cut at the center,
     at the axis points of the variables it is nonlinear in (``nl[k]``) and at
     every Kelley point unless it is affine. Moving along a variable a part is
     linear in leaves its subgradient and its cut unchanged (McCormick, the
@@ -134,11 +170,11 @@ def _cut_rows(shape, nl):
     P, K = shape
     if nl is None or nl.shape[0] != K:
         return None
-    n = nl.shape[1]
+    ax = axis_vars(nl, nl.shape[1])
     keep = np.ones((P, K), bool)
-    axes = np.concatenate([nl.T, nl.T])[: max(P - 1, 0)]  # (2n, K) for the axis points
+    axes = np.concatenate([nl.T[ax], nl.T[ax]])[: max(P - 1, 0)]  # (2 |ax|, K) for the axis points
     keep[1 : 1 + len(axes)] = axes
-    keep[1 + 2 * n :] = nl.any(axis=1)
+    keep[1 + 2 * len(ax) :] = nl.any(axis=1)
     if keep.all():
         return None
     return np.flatnonzero(keep.reshape(-1))
@@ -432,7 +468,7 @@ def _kelley_go(prev, best, cutoff, first=False):
 
 
 def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, tol=0.0, univariate=False,
-                             alphabb=False, multivariate=False, safe=False, exact=False):
+                             alphabb=False, multivariate=False, safe=False, exact=False, boxes=memory.BATCH):
     """Return ``bound(lo, hi, cutoff, pool=None, root=None) -> (lb, x_lp, infeasible, lo', hi')`` for one box.
 
     ``[lo', hi']`` is the box after duality-based range reduction against
@@ -444,9 +480,14 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
     valid on the box ``root`` ``(2, n)`` (``make_pool_cuts``: tangents of the
     root box's relaxation). They are added to every LP when ``[lo, hi]`` lies in
     ``root``; ``b = -inf`` marks an empty slot. ``exact``: see ``_parts_fn``.
+
+    ``boxes``: the boxes per kernel call (the ``vmap`` around ``bound``) that the memory budget
+    of the initial cut points assumes (``memory.point_chunk``: over the budget, the points are
+    linearized a chunk at a time).
     """
     prepare, parts, _ = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate, safe, exact=exact)
     nonlinear = _nonlinear_of(f, ineq, eq)
+    point_bytes = _point_bytes_of(f, ineq, eq)
 
     def bound(lo, hi, cutoff=jnp.inf, pool=None, root=None):
         n = lo.size
@@ -460,9 +501,9 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
             bounds of f, g, h (``_cuts``)."""
             return _cuts(parts, data, p, lo, hi, safe)
 
-        axis = jnp.concatenate([jnp.eye(n), -jnp.eye(n)]) * (w / 4)
-        pts0 = jnp.concatenate([c[None], c + axis])
-        const0, coef0, bounds = jax.vmap(cuts_at)(pts0)  # (P0, 1+m), (P0, 1+m, n)
+        pts0 = cut_points(c, w, axis_vars(nl, n))
+        chunk = memory.point_chunk(point_bytes(n), pts0.shape[0], boxes, "node bound cut points")
+        const0, coef0, bounds = memory.map_points(cuts_at, pts0, chunk)  # (P0, 1+m), (P0, 1+m, n)
 
         # --- interval information (constant on the box: any point's) ---------
         (flo, fhi), bg, bh = jax.tree.map(lambda b: b[0], bounds)
@@ -683,7 +724,7 @@ def pool_parts(f, ineq, eq, n, safe=False):
 
 
 def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate=False, alphabb=False,
-              multivariate=False, safe=False, own_cuts=True, exact=False):
+              multivariate=False, safe=False, own_cuts=True, exact=False, boxes=1):
     """Return ``obbt(lo, hi, cutoff) -> (lo', hi', infeasible)`` for one box.
 
     Optimality-based bound tightening: each variable is minimized and
@@ -698,9 +739,11 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
     same tightening). The 2n LPs are one ``vmap``. As in the
     node bound, the new variable bounds are weak-duality certificates, so an
     inexact LP solve can only make them looser, never invalid. ``exact``: see ``_parts_fn``.
+    ``boxes``: the boxes per call the memory budget assumes (``make_constrained_bounder``).
     """
     prepare, parts, _ = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate, safe, exact=exact)
     nonlinear = _nonlinear_of(f, ineq, eq)
+    point_bytes = _point_bytes_of(f, ineq, eq)
 
     def obbt(lo, hi, cutoff=jnp.inf):
         n = lo.size
@@ -715,15 +758,16 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
         def rows(const, coef):
             rhs = jnp.concatenate([cutoff - const[:, :1], tol - const[:, 1:]], axis=1).reshape(-1)
             A = coef.reshape(-1, n)
+            mag = jnp.concatenate([abs(cutoff) + jnp.abs(const[:, :1]), abs(tol) + jnp.abs(const[:, 1:])], axis=1).reshape(-1)
+            keep = _cut_rows(const.shape, nl)
+            if keep is not None:  # first: the rows are normalized one by one, so this changes no kept row
+                A, rhs, mag = A[keep], rhs[keep], mag[keep]
             nrm = jnp.linalg.norm(A, axis=1)
             live = jnp.isfinite(rhs) & (nrm > 0)
             nrm = jnp.where(live, nrm, 1.0)
-            mag = jnp.concatenate([abs(cutoff) + jnp.abs(const[:, :1]), abs(tol) + jnp.abs(const[:, 1:])], axis=1).reshape(-1)
             A = jnp.where(live[:, None], A / nrm[:, None], 0.0)
             b = jnp.where(live, rhs / nrm, 1.0)
-            b = _row_margin(A, b, jnp.where(live, mag / nrm, 0.0), live, safe)
-            keep = _cut_rows(const.shape, nl)
-            return (A, b) if keep is None else (A[keep], b[keep])
+            return A, _row_margin(A, b, jnp.where(live, mag / nrm, 0.0), live, safe)
 
         C = jnp.concatenate([jnp.eye(n), -jnp.eye(n)])
 
@@ -741,8 +785,9 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
             z, _, best = ipm(cvec, A, bvec, ipm_iters, cert=cert, box=True)
             return jnp.clip(z, 0.0, 1.0), best
 
-        axis = jnp.concatenate([jnp.eye(n), -jnp.eye(n)]) * (w / 4)
-        const, coef = jax.vmap(cuts_at)(jnp.concatenate([c[None], c + axis]))
+        pts0 = cut_points(c, w, axis_vars(nl, n))
+        const, coef = memory.map_points(cuts_at, pts0, memory.point_chunk(point_bytes(n), pts0.shape[0], boxes,
+                                                                          "OBBT cut points"))
         ulo, uhi = jnp.zeros(n), jnp.ones(n)
         own_c = own_g = None  # per LP (own_cuts): cuts at its own earlier solutions
         for k in range(rounds):
@@ -755,7 +800,8 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
             ulo = jnp.maximum(ulo, jnp.where(jnp.isfinite(B[:n]), B[:n], 0.0))
             uhi = jnp.minimum(uhi, jnp.where(jnp.isfinite(B[n:]), -B[n:], 1.0))
             if k < rounds - 1:  # cuts at this round's 2n LP solutions
-                ck, gk = jax.vmap(cuts_at)(lo + w * Z)
+                ck, gk = memory.map_points(cuts_at, lo + w * Z, memory.point_chunk(point_bytes(n), Z.shape[0], boxes,
+                                                                                   "OBBT round cut points"))
                 if own_cuts:
                     own_c = ck[:, None] if k == 0 else jnp.concatenate([own_c, ck[:, None]], axis=1)
                     own_g = gk[:, None] if k == 0 else jnp.concatenate([own_g, gk[:, None]], axis=1)
