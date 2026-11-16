@@ -29,6 +29,7 @@ import os
 import threading
 import time
 from collections import OrderedDict
+from concurrent.futures import Future
 from dataclasses import dataclass, field
 
 import jax
@@ -259,6 +260,87 @@ def _pools():
     return _POOLS
 
 
+_GATE_COMPILES = True  # hold the compiles not needed for the root bound (``_Gate``); False: compile each once traced
+_GATE_TRACE_S = 1.0  # ...but not behind a bound kernel traced (or loaded from the disk cache) in less than this
+_LIVE = threading.local()  # ``gates``: the ``_Gate``s of the running ``minimize`` on this thread
+
+
+def _live_gates():
+    """The running ``minimize``'s gates (opened when it returns); a scratch list outside one."""
+    g = getattr(_LIVE, "gates", None)
+    return g if g is not None else []
+
+
+class _Gate:
+    """Holds background XLA compiles until it is opened.
+
+    An XLA compile of a large kernel keeps about three cores busy (m34_convex2's bound kernel:
+    30 s of CPU in 11 s), so kernels compiled at the same time slow each other down: cold, the
+    bound kernel took 22 s instead of 15 s next to the dive, cut-pool and OBBT compiles, and
+    the root bound waited for it. ``minimize`` queues the compiles that are not needed for the
+    root bound behind gates (``_Precompiled.start``'s ``gate``): they are traced as before, and
+    compiled once the gate opens (after the bound kernel's compile, or once root OBBT is
+    decided), or as soon as a caller waits for one (``release``)."""
+
+    def __init__(self):
+        self._lock, self._open, self._held = threading.Lock(), False, []
+
+    def submit(self, fn):
+        """A future of ``fn()`` run on the compiler pool now if open, else once opened."""
+        fut = Future()
+        fut._gate = self
+        with self._lock:
+            if not self._open:
+                self._held.append((fn, fut))
+                return fut
+        self._launch(fn, fut)
+        return fut
+
+    @staticmethod
+    def _launch(fn, fut):
+        def done(c):
+            try:
+                fut.set_result(c.result())
+            except BaseException as e:  # noqa: BLE001 -- handed to the waiter, as the pool's future would
+                fut.set_exception(e)
+
+        _pools()[1].submit(fn).add_done_callback(done)
+
+    def open(self, *_):
+        """Start the held compiles (idempotent; usable as a done callback)."""
+        with self._lock:
+            held, self._held, self._open = self._held, [], True
+        for fn, fut in held:
+            self._launch(fn, fut)
+
+    @staticmethod
+    def release(fut):
+        """Open the gate that holds ``fut`` (a compile future), if any: its caller waits for it."""
+        g = getattr(fut, "_gate", None)
+        if g is not None:
+            g.open()
+
+    def after(self, fut, small=lambda: False):
+        """Open once ``fut`` (a tracer future whose result is the compile future) has finished, or
+        as soon as it is traced if ``small()`` then says its compile is short anyway."""
+        if fut is None:
+            self.open()
+            return
+
+        def traced(f):
+            try:
+                inner = f.result()
+            except BaseException:  # noqa: BLE001 -- a failed build: nothing to wait for
+                self.open()
+                return
+            if small() or not hasattr(inner, "add_done_callback"):
+                self.open()
+            else:
+                inner.add_done_callback(self.open)
+
+        fut.add_done_callback(traced)
+
+
 class _CompileTimeout(Exception):
     """A kernel was still being traced or compiled when ``minimize``'s time limit ran out."""
 
@@ -273,6 +355,29 @@ class _Deadline(_CompileTimeout):
 def _past(deadline):
     """Whether ``deadline`` (a ``time.perf_counter()`` value, or None) has passed."""
     return deadline is not None and time.perf_counter() > deadline
+
+
+_POLL = (5e-5, 1e-2, 0.05)  # ``_await``: shortest and longest poll interval (s), and the interval as a share of the wait so far
+
+
+def _await(out, deadline, name):
+    """``jax.block_until_ready(out)`` (a kernel call's outputs), but ``_Deadline`` once ``deadline``
+    passes with the call still running: the call cannot be interrupted, so it is left to finish
+    in the background and its result is dropped, as if it had not been dispatched (every handler
+    of ``_Deadline`` leaves the caller's state as it was before the call). Before this a call
+    dispatched just before the limit ran to the end: minlp.org m47_bcp8's first bound call takes
+    about 67 s, and the solve returned after 122 s with a 60 s limit. Polls ``is_ready`` at
+    intervals of 5% of the wait so far (within ``_POLL``), so a call ends at most ~5% late."""
+    if deadline is None or not np.isfinite(deadline):
+        return jax.block_until_ready(out)
+    leaves = [x for x in jax.tree.leaves(out) if hasattr(x, "is_ready")]
+    t = time.perf_counter()
+    while not all(x.is_ready() for x in leaves):
+        now = time.perf_counter()
+        if now > deadline:
+            raise _Deadline(name)
+        time.sleep(min(_POLL[1], max(_POLL[0], _POLL[2] * (now - t)), deadline - now + _POLL[0]))
+    return out
 
 
 class _Precompiled:
@@ -308,18 +413,28 @@ class _Precompiled:
     def _key(args):
         return tuple((a.shape, a.dtype, getattr(a, "weak_type", False)) for a in args)
 
-    def start(self, b, n, fingerprint=None, extra=(), args=None):
+    def start(self, b, n, fingerprint=None, extra=(), args=None, gate=None):
         """Compile in the background for ``b`` boxes of dimension ``n`` (single device).
 
         ``fingerprint()``, called on the tracer thread, names the problem for
         the disk cache (None: do not cache). ``extra``: shapes of further
         (unbatched) float64 arguments after the cutoff. ``args``: all the argument
-        shapes instead, when they are not ``(lo, hi, cutoff, *extra)``."""
+        shapes instead, when they are not ``(lo, hi, cutoff, *extra)``. ``gate``: a
+        ``_Gate`` that holds the XLA compile (the trace is not held). Returns the build's future."""
         args = self._args(b, n, extra) if args is None else args
         key = self._key(args)
         if key not in self.ready:
             tracer, compiler = _pools()
-            self.ready[key] = kcache.track(tracer.submit(lambda: compiler.submit(self._lower(args, fingerprint).compile)))
+            submit = compiler.submit if gate is None else gate.submit
+
+            def build():
+                t = time.perf_counter()
+                lowered = self._lower(args, fingerprint)
+                self.traced_seconds = time.perf_counter() - t
+                return submit(lowered.compile)
+
+            self.ready[key] = kcache.track(tracer.submit(build))
+        return self.ready[key]
 
     def wait(self, *args, deadline=None):
         """Wait until ``deadline`` for the background executable of ``args``' shapes, if one was
@@ -330,7 +445,9 @@ class _Precompiled:
             return
         left = lambda: None if deadline is None or not np.isfinite(deadline) else max(deadline - time.perf_counter(), 0.0)  # noqa: E731
         try:
-            fut.result(timeout=left()).result(timeout=left())
+            inner = fut.result(timeout=left())
+            _Gate.release(inner)  # (a held compile: needed now)
+            inner.result(timeout=left())
         except TimeoutError:
             raise _CompileTimeout(self.name) from None
         except Exception:
@@ -395,6 +512,7 @@ class _Precompiled:
             wait = None if deadline is None or not np.isfinite(deadline) else max(deadline - time.perf_counter(), 0.0)
             try:
                 compiled = fut.result(timeout=wait)
+                _Gate.release(compiled)  # (a held compile: needed now)
                 compiled = compiled.result(timeout=None if wait is None else max(deadline - time.perf_counter(), 0.0))
             except TimeoutError:
                 raise _CompileTimeout(self.name) from None
@@ -954,21 +1072,24 @@ _ROOT_OBBT_COST = 10.0  # root OBBT runs only with this many slowest bound-kerne
 # root OBBT runs only if its estimated cost (bound call x 2 n obbt_rounds / batch) is at most this
 # share of the time left (None: no such check)
 _ROOT_OBBT_SHARE = 0.25
-_SCREEN_MIN_BATCH = 8  # batch sizes of the candidate screens (fvals, viol): powers of two from this
+_SCREEN_MIN_BATCH = 8  # rows per call of the candidate screens (fvals, viol; ``_batched``)
 
 
 def _batched(fn, X):
-    """``fn`` (a ``jit(vmap(...))``) on the points ``X`` (k, n), padded to a power-of-two batch of at
-    least ``_SCREEN_MIN_BATCH`` rows (copies of the first), rows ``:k`` returned. A jitted function
-    compiles once per input shape, and the candidates screened per call vary from 1 to hundreds:
-    each new count was a new compile of the model's constraint violation (4.6 s on minlp.org m31,
-    cold, inside the deadline's last seconds); with buckets a solve compiles a few of them."""
+    """``fn`` (a ``jit(vmap(...))``) on the points ``X`` (k, n), in calls of ``_SCREEN_MIN_BATCH`` rows
+    (the last padded with copies of the first row), rows ``:k`` returned. A jitted function compiles
+    once per input shape, and the candidates screened per call vary from 1 to hundreds: each new
+    count was a new compile of the model's constraint violation (4.6 s on minlp.org m31, cold,
+    inside the deadline's last seconds). Power-of-two buckets still compiled a few of them (2.7 s
+    each on m34_convex2, on the main thread during the root dives); one size compiles once, off the
+    main thread (``minimize``'s ``_warm_screen``), and the calls cost about the same per point."""
     X = np.atleast_2d(np.asarray(X, dtype=np.float64))
-    k = X.shape[0]
-    kb = max(_SCREEN_MIN_BATCH, 1 << max(k - 1, 0).bit_length())
+    k, c = X.shape[0], _SCREEN_MIN_BATCH
+    kb = max(c, -(-k // c) * c)
     if kb > k:
         X = np.concatenate([X, np.repeat(X[:1], kb - k, axis=0)])
-    return np.asarray(fn(jnp.asarray(X, dtype=jnp.float64)))[:k]
+    outs = [fn(jnp.asarray(X[i:i + c], dtype=jnp.float64)) for i in range(0, kb, c)]  # (all dispatched first)
+    return np.concatenate([np.asarray(o) for o in outs])[:k]
 
 
 def _ncpu():
@@ -1519,22 +1640,32 @@ def _minimize(
     _mark("start_compile")
     extra = () if pool is None else (pool["rows"].shape, pool["root"].shape)  # the bound kernel's pool arguments
     padded = _Padder(batch, batch_sizes, jax.devices() if devices is None else list(devices))
+    # the other kernels' XLA compiles wait for the root bound kernel's (``_Gate``): traced now, compiled
+    # once it is compiled (or as soon as one is needed); root OBBT's once the root decides it will run
+    later, obbt_gate = _Gate(), _Gate()
+    if not _GATE_COMPILES:
+        obbt_gate.open()
+    _live_gates().extend([later, obbt_gate])  # (opened when ``minimize`` returns: the disk caches still fill)
     if padded.mesh is None:  # compile the kernels in the background while the setup below runs
         fp = functools.partial(K.fingerprint, lo.size) if kcache.cache_root() else None
-        for b in padded.sizes:
-            bound_kernel.start(b, lo.size, fp, extra)
+        first = [bound_kernel.start(b, lo.size, fp, extra, gate=None if i == 0 else later) for i, b in enumerate(padded.sizes)]
+        # (a kernel traced in under _GATE_TRACE_S compiles in a few seconds: then the others start with it)
+        later.after(first[0] if _GATE_COMPILES else None,
+                    lambda: getattr(bound_kernel, "traced_seconds", np.inf) < _GATE_TRACE_S)  # fmt: skip
         if obbt == "tree":  # obbt="root": started once the root shows OBBT will run (``need_obbt``)
             for b in padded.sizes:
-                K.obbt.start(b, lo.size, fp)
+                K.obbt.start(b, lo.size, fp, gate=later)
+    else:
+        later.open()
     if pool is not None:  # the pool's tangent kernel, traced after the bound kernels
         tracer, compiler = _pools()
         pts, vec = jax.ShapeDtypeStruct((_POOL_CHUNK, lo.size), jnp.float64), jax.ShapeDtypeStruct((lo.size,), jnp.float64)
-        pool["exe"] = kcache.track(tracer.submit(lambda: compiler.submit(K.pool_cuts.trace(pts, vec, vec).lower().compile)))
+        pool["exe"] = kcache.track(tracer.submit(lambda: later.submit(K.pool_cuts.trace(pts, vec, vec).lower().compile)))
     _mark("start_dive_compile")
     if K.dive is not None and padded.mesh is None:  # the dive kernel too, traced after the others
         box, cut = jax.ShapeDtypeStruct((_DIVES, lo.size), jnp.float64), jax.ShapeDtypeStruct((), jnp.float64)
         flag, step = jax.ShapeDtypeStruct((_DIVES,), jnp.bool_), jax.ShapeDtypeStruct((), jnp.int32)
-        K.dive.start(_DIVES, lo.size, fp, args=(box, box, box, cut, flag, step, step))
+        K.dive.start(_DIVES, lo.size, fp, args=(box, box, box, cut, flag, step, step), gate=later)
     if pool is not None and padded.mesh is None:  # for the pool kernel without rows (pool_judge)
         pool["fp"] = fp
     # integer variables are split even where they enter linearly: that is what makes them integral
@@ -1863,7 +1994,7 @@ def _minimize(
         another, so the result is the same."""
 
         def one(c):
-            o = jax.block_until_ready(kernel(*c, cutoff, *extra, deadline=deadline))
+            o = _await(kernel(*c, cutoff, *extra, deadline=deadline), deadline, kernel.name)
             return o, time.perf_counter() - kernel.dispatched  # (not counting the wait for the executable)
 
         if padded.mesh is not None:  # sharded calls compile through jit (synchronously)
@@ -2174,7 +2305,7 @@ def _minimize(
             if not time_for(None if per_step is None else per_step * c):
                 break
             try:
-                DL, DH, F = jax.block_until_ready(K.dive(DL, DH, X, cut, F, step(p), step(p + c), deadline=deadline))
+                DL, DH, F = _await(K.dive(DL, DH, X, cut, F, step(p), step(p + c), deadline=deadline), deadline, "dive")
             except (_CompileTimeout, _Deadline):
                 break
             p, chunk = p + c, 2 * chunk
@@ -2362,9 +2493,26 @@ def _minimize(
         return bool(obbt) and (constrained or np.isfinite(ub)) and not (ub - float(lb.min()) <= tol())
 
     def start_root_obbt():
-        """Compile the root OBBT kernel in the background (once; ``start`` skips a started shape)."""
+        """Trace the root OBBT kernel in the background (once; ``start`` skips a started shape); its
+        compile waits for ``obbt_gate`` (``obbt_may_fit``, or the OBBT call itself)."""
         if obbt == "root" and padded.mesh is None:
-            K.obbt.start(1, lo.size, functools.partial(K.fingerprint, lo.size) if kcache.cache_root() else None)
+            K.obbt.start(1, lo.size, functools.partial(K.fingerprint, lo.size) if kcache.cache_root() else None,
+                         gate=obbt_gate if _GATE_COMPILES else None)  # fmt: skip
+
+    def obbt_may_fit():
+        """Whether the root OBBT call could pass its cost rules (stage ``root_obbt``) with the time
+        left now (it only shrinks): if not, its kernel is not compiled (on m34_convex2, cold, a
+        ~12 s compile at three cores next to the root dives, for a call that never ran)."""
+        left = None if deadline is None else deadline - time.perf_counter()
+        if left is None or not bound_call[0]:
+            return True
+        if left <= _ROOT_OBBT_COST * bound_call[0]:
+            return False
+        if _ROOT_OBBT_SHARE is None:
+            return True
+        ov = K.obbt_variables(lo.size)
+        est = bound_call[0] * max(1.0, 2.0 * (lo.size if ov is None else len(ov)) * obbt_rounds / padded.sizes[0])
+        return est <= _ROOT_OBBT_SHARE * left
 
     _mk("root_bound")
     if obbt == "root" and (constrained or np.isfinite(ub)) and any(bound_kernel.pending(b, lo.size, extra) for b in padded.sizes):
@@ -2390,6 +2538,8 @@ def _minimize(
         # bound and first incumbent close the gap (most small ones) never traces or compiles it,
         # and the bound kernel's compile does not compete with it for the CPU
         start_root_obbt()
+        if obbt_may_fit():
+            obbt_gate.open()
     _mk("root_dives")
     if imask.any() and np.all(np.isfinite(lb)) and np.all(np.isfinite(rxr)):  # root dives: relaxation point, perturbed
         P = np.clip(rxr + rng.normal(size=(_DIVES, lo.size)) * 0.1 * (rhi - rlo) * (np.arange(_DIVES) > 0)[:, None],
@@ -2817,5 +2967,11 @@ def minimize(*args, **kwargs):
     # single-threaded OpenBLAS while the solve runs (``blas.py``): the kernels' LAPACK calls are
     # small, and OpenBLAS's spinning helper threads oversubscribe the CPU next to the dispatch
     # threads, the background compiles and the local solves
-    with blas.limited():
-        return _minimize(*args, **kwargs)
+    gates, _LIVE.gates = getattr(_LIVE, "gates", None), []
+    try:
+        with blas.limited():
+            return _minimize(*args, **kwargs)
+    finally:  # compiles still held: run them now (a later solve of the problem, or the disk cache, uses them)
+        for g in _LIVE.gates:
+            g.open()
+        _LIVE.gates = gates

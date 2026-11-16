@@ -102,6 +102,78 @@ def _nonlinear_vars(f, ineq, eq, n):
     return np.concatenate(out)
 
 
+AFFINE_MAX_ENTRIES = 2e7  # ``_affine_forms``: largest (scalar slots x n) coefficient table it builds
+
+
+def _affine_forms(f, ineq, eq, n):
+    """``(A, b)``: each convex part [cv_f, cv_g..., cv_h..., -cc_h...] that ``_nonlinear_vars`` calls
+    affine is ``A[k] . x + b[k]`` (``(K, n)``, ``(K,)``; NaN rows for the other parts), or None.
+
+    The coefficients are propagated through the scalarized tape (the operations
+    ``_nonlinear_vars`` keeps affine: sums, differences, negations, products with and quotients by
+    constants), in float64 as the tape would compute them. An affine part's relaxation is the
+    function itself, so these give the cut every point gives it (``make_constrained_bounder`` and
+    ``make_obbt`` with ``SPLIT_AFFINE``), without its forward-mode pass. None when the tape is not
+    scalarized or the table would exceed ``AFFINE_MAX_ENTRIES``."""
+    from .fbbt import _has_tracer, joint_tape
+    from .fbbt_interp import scalarize, use_interpreter
+
+    with jax.ensure_compile_time_eval():
+        tape = joint_tape(f, ineq, eq, np.zeros(n))
+    if _has_tracer(tape) or not use_interpreter(tape, n, min_rows=0):
+        return None
+    prog = scalarize(tape, n)
+    if prog is None:
+        return None
+    S = len(prog.const_val)
+    if S * (n + 1) > AFFINE_MAX_ENTRIES:
+        return None
+    L = np.zeros((S, n))  # coefficients of each slot's affine form
+    L[np.arange(n), np.arange(n)] = 1.0
+    c0 = np.where(np.isnan(prog.const_val), 0.0, prog.const_val)  # constant terms (constants: their value)
+    ok = np.ones(S, bool)  # the slot is affine (its form is exact)
+    const = ~np.isnan(prog.const_val)
+    const[:n] = False
+    for o, a, b, out in zip(prog.op.tolist(), prog.a.tolist(), prog.b.tolist(), prog.out.tolist()):
+        name = prog.opcodes[o][0]
+        if name in ("add", "add_any"):
+            L[out], c0[out] = L[a] + L[b], c0[a] + c0[b]
+        elif name == "sub":
+            L[out], c0[out] = L[a] - L[b], c0[a] - c0[b]
+        elif name == "neg":
+            L[out], c0[out] = -L[a], -c0[a]
+        elif name == "mul" and const[a]:
+            L[out], c0[out] = prog.const_val[a] * L[b], prog.const_val[a] * c0[b]
+        elif name == "mul" and const[b]:
+            L[out], c0[out] = L[a] * prog.const_val[b], c0[a] * prog.const_val[b]
+        elif name == "div" and const[b]:
+            L[out], c0[out] = L[a] / prog.const_val[b], c0[a] / prog.const_val[b]
+        else:
+            ok[out] = False
+            continue
+        ok[out] = ok[a] and ok[b]
+    outs = [np.asarray(s) for s in prog.outs]
+    if eq is not None:
+        outs.append(outs[-1])
+    sign = np.concatenate([np.ones(sum(len(s) for s in prog.outs))] + ([-np.ones(len(outs[-1]))] if eq is not None else []))
+    s = np.concatenate(outs)
+    A, b = sign[:, None] * L[s], sign * c0[s]
+    good = ok[s] & np.all(np.isfinite(A), axis=1) & np.isfinite(b)
+    return np.where(good[:, None], A, np.nan), np.where(good, b, np.nan)
+
+
+def _affine_of(f, ineq, eq):
+    """``_affine_forms`` memoized on the number of variables."""
+    cache = {}
+
+    def get(n):
+        if n not in cache:
+            cache[n] = _affine_forms(f, ineq, eq, n)
+        return cache[n]
+
+    return get
+
+
 def _affine_parts(f, ineq, eq, n):
     """Which of the convex parts are affine in x (``_nonlinear_vars``), or None if unknown."""
     nl = _nonlinear_vars(f, ineq, eq, n)
@@ -467,6 +539,37 @@ SHARED_MIN_EQNS = 700
 SPLIT_AFFINE = "auto"
 
 
+# With ``SPLIT_AFFINE``, the affine parts' cuts are taken from their coefficients (``_affine_forms``)
+# instead of a forward-mode pass of the whole relaxation at the box center: an affine part's
+# relaxation is the function itself, so its cut is the same row (up to float rounding, which the
+# relaxation's pass has too). On m34_convex2 that pass was 9.4k of the node bound kernel's 35k HLO
+# lines. Not with ``safe`` (the relaxation's pass rounds outward; this does not).
+AFFINE_EXACT = True
+
+
+def _exact_affine(affine_of, n, afp, safe):
+    """``(A, b)`` of the affine parts ``afp`` (``_affine_forms``), or None (``AFFINE_EXACT`` off,
+    ``safe``, or a form unknown)."""
+    if not AFFINE_EXACT or safe:
+        return None
+    forms = affine_of(n)
+    if forms is None:
+        return None
+    A, b = forms[0][afp], forms[1][afp]
+    if not (np.all(np.isfinite(A)) and np.all(np.isfinite(b))):
+        return None
+    return A, b
+
+
+def _affine_cuts(A, b, lo, w):
+    """The cuts of affine parts ``A x + b`` in unit-box coordinates, shaped as one point's:
+    ``(1, Ka)`` constants (the value at ``lo``) and ``(1, Ka, n)`` coefficients."""
+    A = jnp.asarray(A)
+    const, coef = jnp.asarray(b) + A @ lo, A * w
+    ok = jnp.isfinite(const) & jnp.all(jnp.isfinite(coef), axis=1)  # (as ``_cuts``: an infinite box edge)
+    return jnp.where(ok, const, -jnp.inf)[None], jnp.where(ok[:, None], coef, 0.0)[None]
+
+
 class _SubParts:
     """``parts`` restricted to the parts ``idx`` (``parts.bounds`` interface of ``_cuts``)."""
 
@@ -565,6 +668,7 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
     nonlinear = _nonlinear_of(f, ineq, eq)
     point_bytes = _point_bytes_of(f, ineq, eq)
     shared_of, large_of = _shared_cuts(f, ineq, eq)
+    affine_of = _affine_of(f, ineq, eq)
 
     def bound(lo, hi, cutoff=jnp.inf, pool=None, root=None):
         n = lo.size
@@ -587,8 +691,13 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
             nl_p = nl[nlp]
             obj_p, obj_a = bool(nlp[0] == 0), bool(afp[0] == 0)
             sub = _SubParts(parts, nlp)
-            ca, ga, bounds_c = _cuts(parts, data, c, lo, hi, safe)
-            aff = (ca[afp][None], ga[afp][None])  # (1, Ka), (1, Ka, n)
+            exact = _exact_affine(affine_of, n, afp, safe)
+            if exact is not None:  # the affine parts' cuts from their coefficients (``AFFINE_EXACT``)
+                aff = _affine_cuts(*exact, lo, w)
+                bounds_c = parts.bounds(c, lo, hi, data)[1]  # (the interval bounds only: no forward-mode pass)
+            else:
+                ca, ga, bounds_c = _cuts(parts, data, c, lo, hi, safe)
+                aff = (ca[afp][None], ga[afp][None])  # (1, Ka), (1, Ka, n)
 
             def cuts_at(p):
                 """Cuts of the nonlinear parts at p (``_cuts``); the bounds are the center's."""
@@ -928,6 +1037,8 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
     prepare, parts, _ = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate, safe, exact=exact)
     nonlinear = _nonlinear_of(f, ineq, eq)
     point_bytes = _point_bytes_of(f, ineq, eq)
+    _, large_of = _shared_cuts(f, ineq, eq)
+    affine_of = _affine_of(f, ineq, eq)
 
     def obbt(lo, hi, cutoff=jnp.inf):
         n = lo.size
@@ -936,16 +1047,52 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
         c = 0.5 * (lo + hi)
         data = prepare(lo, hi)
 
-        def cuts_at(p):
-            return _cuts(parts, data, p, lo, hi, safe)[:2]
+        # ``SPLIT_AFFINE`` as in the node bound: the affine parts are linearized once, at the center
+        # (``_cut_rows`` keeps only that cut of theirs), and the cut points of both rounds linearize
+        # the nonlinear parts only. The same LP rows (affine ones first), without the forward-mode
+        # pass of every affine part at every point: on m34_convex2 (240 of 242 parts affine) the
+        # kernel compiled in about half the time.
+        split = bool(SPLIT_AFFINE) and nl is not None and nl.shape[1] == n and nl.any() and not nl.any(axis=1).all()
+        if split and SPLIT_AFFINE == "auto":
+            split = int((~nl.any(axis=1)).sum()) >= int(nl.any(axis=1).sum()) and large_of(n)
+        if split:
+            nlp, afp = np.flatnonzero(nl.any(axis=1)), np.flatnonzero(~nl.any(axis=1))
+            nl_p, obj_p, obj_a = nl[nlp], bool(nlp[0] == 0), bool(afp[0] == 0)
+            sub = _SubParts(parts, nlp)
+            exact = _exact_affine(affine_of, n, afp, safe)
+            if exact is not None:  # (``AFFINE_EXACT``)
+                aff = _affine_cuts(*exact, lo, w)
+            else:
+                ca, ga, _ = _cuts(parts, data, c, lo, hi, safe)
+                aff = (ca[afp][None], ga[afp][None])  # (1, Ka), (1, Ka, n)
 
-        def rows(const, coef):
-            rhs = jnp.concatenate([cutoff - const[:, :1], tol - const[:, 1:]], axis=1).reshape(-1)
+            def cuts_at(p):
+                return _cuts(sub, data, p, lo, hi, safe)[:2]
+        else:
+            nl_p, obj_p, aff = nl, True, None
+
+            def cuts_at(p):
+                return _cuts(parts, data, p, lo, hi, safe)[:2]
+
+        def block(const, coef, obj, nlk):
+            """Rows ``A u <= rhs`` (and their magnitudes) of cuts ``(P, K)`` / ``(P, K, n)``; part 0 is
+            the objective (``f <= cutoff``) if ``obj``; the rows ``_cut_rows`` keeps for ``nlk``."""
+            if obj:
+                rhs = jnp.concatenate([cutoff - const[:, :1], tol - const[:, 1:]], axis=1).reshape(-1)
+                mag = jnp.concatenate([abs(cutoff) + jnp.abs(const[:, :1]), abs(tol) + jnp.abs(const[:, 1:])], axis=1).reshape(-1)
+            else:
+                rhs, mag = (tol - const).reshape(-1), (abs(tol) + jnp.abs(const)).reshape(-1)
             A = coef.reshape(-1, n)
-            mag = jnp.concatenate([abs(cutoff) + jnp.abs(const[:, :1]), abs(tol) + jnp.abs(const[:, 1:])], axis=1).reshape(-1)
-            keep = _cut_rows(const.shape, nl)
+            keep = _cut_rows(const.shape, nlk) if nlk is not None else None
             if keep is not None:  # first: the rows are normalized one by one, so this changes no kept row
                 A, rhs, mag = A[keep], rhs[keep], mag[keep]
+            return A, rhs, mag
+
+        def rows(const, coef):
+            A, rhs, mag = block(const, coef, obj_p, nl_p)
+            if aff is not None:
+                Aa, ra, ma = block(aff[0], aff[1], obj_a, None)
+                A, rhs, mag = jnp.concatenate([Aa, A]), jnp.concatenate([ra, rhs]), jnp.concatenate([ma, mag])
             nrm = jnp.linalg.norm(A, axis=1)
             live = jnp.isfinite(rhs) & (nrm > 0)
             nrm = jnp.where(live, nrm, 1.0)

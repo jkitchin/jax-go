@@ -105,3 +105,63 @@ def test_split_auto_rule():
     f, g, h, _, _ = _mixed()
     nl = _nonlinear_vars(f, g, h, 4)
     assert (~nl.any(axis=1)).sum() < nl.any(axis=1).sum()
+
+
+@pytest.mark.parametrize("model", ["haverly", "mixed"])
+@pytest.mark.parametrize("own_cuts", [True, False])
+def test_obbt_split_matches_unsplit(model, own_cuts, monkeypatch):
+    """OBBT with the affine parts linearized at the center only (``SPLIT_AFFINE``) tightens the
+    boxes as the unsplit layout does: the same LP rows, in another order."""
+    f, g, h, lo, hi = haverly1() if model == "haverly" else _mixed()
+    L, H = _boxes(lo, hi, 4, 2)
+    out = {}
+    for split in (False, True):
+        monkeypatch.setattr(LP, "SPLIT_AFFINE", split)
+        ob = LP.make_obbt(f, g, h, tol=1e-6, univariate=True, alphabb=True, own_cuts=own_cuts)
+        fn = jax.jit(jax.vmap(ob, in_axes=(0, 0, None))).lower(jnp.asarray(L), jnp.asarray(H), 0.0).compile()
+        out[split] = [fn(jnp.asarray(L), jnp.asarray(H), float(cut)) for cut in (np.inf, -350.0 if model == "haverly" else 2.0)]
+    monkeypatch.undo()
+    for a, b in zip(out[False], out[True]):
+        assert np.array_equal(np.asarray(a[2]), np.asarray(b[2]))  # infeasible
+        ok = ~np.asarray(a[2])
+        for k in (0, 1):
+            assert np.allclose(np.asarray(a[k])[ok], np.asarray(b[k])[ok], rtol=0, atol=1e-4 * (hi - lo).max())
+
+
+@pytest.mark.parametrize("model", ["haverly", "mixed"])
+def test_affine_forms(model):
+    """``_affine_forms`` gives each affine part as ``A x + b`` (the function's value everywhere) and
+    NaN rows for the nonlinear parts."""
+    f, g, h, lo, hi = haverly1() if model == "haverly" else _mixed()
+    n = lo.size
+    A, b = LP._affine_forms(f, g, h, n)
+    nl = LP._nonlinear_vars(f, g, h, n)
+    aff = ~nl.any(axis=1)
+    assert aff.any()
+    assert np.all(np.isnan(b[~aff])) and np.all(np.isfinite(A[aff]))
+
+    def parts(x):
+        out = [jnp.atleast_1d(f(x)), jnp.atleast_1d(g(x))]
+        if h is not None:
+            out += [jnp.atleast_1d(h(x)), -jnp.atleast_1d(h(x))]
+        return np.concatenate([np.asarray(o) for o in out])
+
+    rng = np.random.default_rng(0)
+    for x in rng.uniform(lo, hi, (5, n)):
+        v = parts(jnp.asarray(x))
+        assert np.allclose(A[aff] @ x + b[aff], v[aff], rtol=1e-12, atol=1e-9)
+
+
+def test_affine_exact_matches_relaxation_pass(monkeypatch):
+    """With ``AFFINE_EXACT`` the split bounder gives the bounds of the split bounder that linearizes
+    the affine parts by a forward-mode pass of the relaxation."""
+    f, g, h, lo, hi = haverly1()
+    L, H = _boxes(lo, hi, 6, 3)
+    monkeypatch.setattr(LP, "AFFINE_EXACT", False)
+    old = _bounder(f, g, h, True, 4, monkeypatch, L, H, split=True)
+    new = _bounder(f, g, h, True, 4, monkeypatch, L, H, split=True)  # (monkeypatch.undo restored AFFINE_EXACT)
+    for cut in (np.inf, -350.0):
+        a, b = old(L, H, cut), new(L, H, cut)
+        lb_a, lb_b = np.asarray(a[0]), np.asarray(b[0])
+        fin = np.isfinite(lb_a) & (lb_a < min(cut, 1e10))
+        assert np.allclose(lb_a[fin], lb_b[fin], rtol=1e-7, atol=1e-7), (lb_a, lb_b)
