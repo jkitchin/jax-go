@@ -1017,8 +1017,44 @@ def _auto_branch_var(imask):
     Re-measured 2026-11 with the fractionality-weighted pseudocost (docs/ANALYSIS-bigm.md): it
     halves the nodes on the minlp.org big-M layout models and solves tln5 and
     smallinvDAXr4b150-165 on int50, but loses on ex1252a, smallinvDAXr5b150-165, hadamard_5 and
-    the k-means m421-m423, so integer problems keep width; ``branch_var="pseudocost"`` opts in."""
+    the k-means m421-m423, so integer problems keep width; ``branch_var="pseudocost"`` opts in.
+    ``minimize`` overrides width with pseudocost on disjunctive assignment models
+    (``_assignment_bigm``), once their lifted quadratic form is known."""
     return "width" if np.asarray(imask).any() else "pseudocost"
+
+
+_ASSIGN_MIN, _ASSIGN_SHARE = 20, 0.9  # _assignment_bigm: at least this many binaries, this share of them in both kinds of rows
+
+
+def _assignment_bigm(Q, n, imask, lo, hi):
+    """Whether the problem is a disjunctive (big-M / hull) assignment model, read from its lifted
+    quadratic form ``Q``: every integer variable binary, at least ``_ASSIGN_MIN`` of them, and at
+    least ``_ASSIGN_SHARE`` of them both in an assignment row (a linear row on binaries only, all
+    coefficients of one magnitude: ``sum b = 1``, ``sum b <= 1``) and in a linking row (an
+    inequality that also holds a continuous variable or a product: the big-M or hull row the
+    binary switches). These are the minlp.org constrained-layout (CLay*) and k-means (kClus*)
+    models, where ``branch_var="auto"`` picks pseudocost (docs/ANALYSIS-bigm.md); no int50
+    instance qualifies (those with 20 or more binaries have no assignment rows or no quadratic form)."""
+    imask = np.asarray(imask, bool)
+    if Q is None or imask.sum() < _ASSIGN_MIN:
+        return False
+    if not (np.all(np.isin(lo[imask], (0.0, 1.0))) and np.all(np.isin(hi[imask], (0.0, 1.0)))):
+        return False
+    E = np.asarray(Q.E)[1:1 + Q.n_g + Q.n_h]
+    isbin = np.zeros(E.shape[1], bool)
+    isbin[:n] = imask
+    assign, link = np.zeros(E.shape[1], bool), np.zeros(E.shape[1], bool)
+    for r in range(E.shape[0]):
+        nz = np.flatnonzero(E[r])
+        b = nz[isbin[nz]]
+        if not b.size:
+            continue
+        a = np.abs(E[r, nz])
+        if b.size == nz.size and b.size >= 2 and np.all(a == a[0]):
+            assign[b] = True
+        elif r < Q.n_g and b.size < nz.size:
+            link[b] = True
+    return bool((assign & link).sum() >= _ASSIGN_SHARE * imask.sum())
 
 
 _TRACE = None  # a callable(stage, ub) told the incumbent value as each stage of ``minimize`` begins (diagnostics)
@@ -1230,7 +1266,8 @@ def _minimize(
     ``"pseudocost"`` without integer variables, ``"width"`` with them; in the 2026-10-20 re-run on
     start50 at 60 s pseudocost solves 40, width and strong 38; on int50 width and pseudocost 43 each
     and strong 41, see benchmarks/branching_report.py; with integers, pseudocost is the better
-    choice on big-M models with many binaries, see ``_auto_branch_var`` and docs/ANALYSIS-bigm.md),
+    choice on big-M models with many binaries, and ``"auto"`` picks it on disjunctive assignment
+    models, see ``_auto_branch_var``, ``_assignment_bigm`` and docs/ANALYSIS-bigm.md),
     ``"width"`` (largest
     relative width among nonlinear variables; on the lifted quadratic LP, relative width
     times the McCormick gap of the variable's products at the relaxation point), ``"pseudocost"`` (product score
@@ -1310,7 +1347,8 @@ def _minimize(
         raise ValueError(
             f"branch_var must be 'auto', 'width', 'pseudocost', 'reliability' or 'strong', not {branch_var!r}"
         )
-    if branch_var == "auto":
+    branch_auto = branch_var == "auto"
+    if branch_auto:
         branch_var = _auto_branch_var(imask)
     if obbt not in (False, None, "root", "tree"):
         raise ValueError(f"obbt must be False, 'root' or 'tree', not {obbt!r}")
@@ -1455,6 +1493,8 @@ def _minimize(
         sym = P if len(P) else None
         sym_moved = np.any(P != np.arange(lo.size), axis=0)  # (the support of the elements kept)
     width0 = np.where(branchable, width0, np.inf)  # never split linear variables
+    if branch_auto and branch_var == "width" and _assignment_bigm(quad, lo.size, imask, lo, hi):
+        branch_var = "pseudocost"  # disjunctive assignment models (docs/ANALYSIS-bigm.md)
 
     _mark("make_local")
     solve_local_ = _cached(("local", f, ineq, eq, local_solver, lo.tobytes(), hi.tobytes()),

@@ -197,3 +197,64 @@ def test_gap_weights():
     # box 0: gaps x0^2 -> 1, x0*x1 -> 2; per variable 3, 2, 0
     assert np.allclose(w[0], [1.0, 0.5 * 2 / 3, 0.0])
     assert np.allclose(w[1], [1.0, 0.5, -1.0])
+
+
+def _assignment_model(items=10, link=True, assign=True):
+    """``items`` points x_i in [0, 10], each placed left (b_i0: x_i <= 4) or right (b_i1: x_i >= 6)
+    by big-M rows; minimize sum (x_i - 5 - 0.1 i)^2. Variables: x (items), then b (2 items)."""
+    import jax.numpy as jnp
+    import numpy as np
+
+    n = 3 * items
+    lo, hi = np.zeros(n), np.r_[np.full(items, 10.0), np.ones(2 * items)]
+    c = 5.0 + 0.1 * np.arange(items)
+
+    # (written one scalar at a time: the lifted quadratic form reads scalar tapes)
+    def f(v):
+        return sum((v[i] - c[i]) ** 2 for i in range(items))
+
+    def ineq(v):
+        if not link:
+            return jnp.stack([v[items + i] - 1.0 for i in range(items)])
+        return jnp.stack([v[i] - 4.0 - 10.0 * (1 - v[items + i]) for i in range(items)]
+                         + [6.0 - v[i] - 10.0 * (1 - v[2 * items + i]) for i in range(items)])
+
+    def eq(v):
+        return jnp.stack([v[items + i] + v[2 * items + i] - 1.0 for i in range(items)])
+
+    return f, ineq, eq, lo, hi, np.arange(items, n)
+
+
+@pytest.mark.parametrize("items, link, assign, want", [(10, True, True, True), (9, True, True, False),
+                                                       (10, False, True, False), (10, True, False, False)])
+def test_assignment_bigm_rule(items, link, assign, want):
+    """branch_var="auto" picks pseudocost on disjunctive assignment models (_assignment_bigm):
+    at least _ASSIGN_MIN binaries, nearly all of them both in a ``sum b = 1`` row and in a row
+    that switches a continuous variable."""
+    import numpy as np
+
+    from jaxglobal import bnb
+    from jaxglobal.quadratic import quadratic_form
+
+    f, ineq, eq, lo, hi, ints = _assignment_model(items, link, assign)
+    Q = quadratic_form(f, ineq, eq if assign else None, lo.size)
+    imask = np.zeros(lo.size, bool)
+    imask[ints] = True
+    assert bnb._assignment_bigm(Q, lo.size, imask, lo, hi) is want
+    assert not bnb._assignment_bigm(None, lo.size, imask, lo, hi)
+    lo2 = lo.copy()
+    lo2[ints[0]] = -1.0  # a general integer: not a binary model
+    assert not bnb._assignment_bigm(Q, lo.size, imask, lo2, hi)
+
+
+def test_assignment_bigm_solve():
+    """The default rule (pseudocost here) solves a small big-M assignment model."""
+    import numpy as np
+
+    f, ineq, eq, lo, hi, ints = _assignment_model(10)
+    r = minimize(f, lo, hi, ineq=ineq, eq=eq, integer=ints, time_limit=120)
+    assert r.status == "optimal" and r.verified
+    # x_i = 4 (i < 5: c_i <= 5.4 is nearer 4) or 6
+    c = 5.0 + 0.1 * np.arange(10)
+    want = np.sum(np.minimum((4 - c) ** 2, (6 - c) ** 2))
+    assert abs(r.fun - want) < 1e-4
