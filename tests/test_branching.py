@@ -52,7 +52,7 @@ def test_default_evaluations_match_nodes():
 
 
 def test_auto_branching_rule(monkeypatch):
-    """branch_var="auto" (the default) is pseudocost, with or without integer variables.
+    """branch_var="auto" (the default) is pseudocost without integer variables, width with them.
 
     The decision is checked directly: node counts are not compared across solves, since the
     first solve with new kernels can take a different path while they compile."""
@@ -61,7 +61,7 @@ def test_auto_branching_rule(monkeypatch):
     from jaxglobal import bnb
 
     assert bnb._auto_branch_var(np.zeros(2, bool)) == "pseudocost"
-    assert bnb._auto_branch_var(np.array([True, False])) == "pseudocost"
+    assert bnb._auto_branch_var(np.array([True, False])) == "width"
     picked = []
     rule = bnb._auto_branch_var
     monkeypatch.setattr(
@@ -72,7 +72,7 @@ def test_auto_branching_rule(monkeypatch):
     assert (
         solve(sh, branch_var="width").status == "optimal"
     )  # an explicit rule is not replaced
-    assert picked == ["pseudocost", "pseudocost"]
+    assert picked == ["pseudocost", "width"]
 
 
 def test_pseudocost_with_integers():

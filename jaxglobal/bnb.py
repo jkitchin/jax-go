@@ -959,14 +959,15 @@ _PROFILE = None  # benchmarks/profile_root.py: a callable(stage) told when each 
 
 
 def _auto_branch_var(imask):
-    """The rule ``branch_var="auto"`` picks: pseudocost (with integer variables, among those
-    fractional at the relaxation point, weighted by their fractionality; see ``pseudo_scores``).
-    Up to 2026-11 integer problems got width (most fractional first): measured then on int50 the
-    two solved as many, and pseudocost took ~1.5x the nodes on small ones (ex1265a 127 -> 701,
-    nvs13 107 -> 199). On the minlp.org big-M models most-fractional branching at the
-    interior-point relaxation point is close to arbitrary (every free binary is fractional
-    there), and pseudocost needs 1.5-2x fewer nodes (docs/ANALYSIS-bigm.md)."""
-    return "pseudocost"
+    """The rule ``branch_var="auto"`` picks (measured, see ``minimize``'s docstring): pseudocost
+    without integer variables, width with them. (Pseudocost when every nonlinear variable is a
+    general integer helps the hard ones, tln4/5, nvs19/23/24, smallinvDAXr3b010-011, but takes
+    ~1.5x the nodes on small ones: ex1265a 127 -> 701, tloss 31 -> 127, nvs13 107 -> 199.)
+    Re-measured 2026-11 with the fractionality-weighted pseudocost (docs/ANALYSIS-bigm.md): it
+    halves the nodes on the minlp.org big-M layout models and solves tln5 and
+    smallinvDAXr4b150-165 on int50, but loses on ex1252a, smallinvDAXr5b150-165, hadamard_5 and
+    the k-means m421-m423, so integer problems keep width; ``branch_var="pseudocost"`` opts in."""
+    return "width" if np.asarray(imask).any() else "pseudocost"
 
 
 def _mark(stage):
@@ -1169,9 +1170,11 @@ def minimize(
     Branching: ``branch_point`` is ``"mid"`` (bisect) or ``"relax"`` (split at
     the relaxation minimizer, pulled toward the midpoint and kept away from the
     faces, see ``_LAM`` and ``_BETA``); ``branch_var`` is ``"auto"`` (the default:
-    ``"pseudocost"``; integer problems got ``"width"`` until 2026-11, see ``_auto_branch_var`` and
-    docs/ANALYSIS-bigm.md; in the 2026-10-20 re-run on start50 at 60 s pseudocost solves 40, width
-    and strong 38), ``"width"`` (largest
+    ``"pseudocost"`` without integer variables, ``"width"`` with them; in the 2026-10-20 re-run on
+    start50 at 60 s pseudocost solves 40, width and strong 38; on int50 width and pseudocost 43 each
+    and strong 41, see benchmarks/branching_report.py; with integers, pseudocost is the better
+    choice on big-M models with many binaries, see ``_auto_branch_var`` and docs/ANALYSIS-bigm.md),
+    ``"width"`` (largest
     relative width among nonlinear variables; on the lifted quadratic LP, relative width
     times the McCormick gap of the variable's products at the relaxation point), ``"pseudocost"`` (product score
     of per-variable bound gains observed so far, on the lifted quadratic LP times a continuous
@@ -2096,7 +2099,7 @@ def minimize(
         # them, at every node); the weight keeps the predicted gains of variables the LP leaves
         # nearly integral (often only IPM noise) from outranking the ambiguous ones. On the
         # k-means models (m423, m424) the plain product rule lost to most-fractional branching by
-        # 2-3x in nodes; with the weight it matches or beats both (docs/ANALYSIS-bigm.md)
+        # 2-3x in nodes; with the weight it is close to or better than both (docs/ANALYSIS-bigm.md)
         sc = sc * np.where(imask, np.minimum(fr, 1.0 - fr), 1.0)
         return np.where(cand & np.isfinite(sc), sc, np.where(cand, 0.0, -1.0)), True
 
