@@ -218,6 +218,7 @@ def test_dive_runs_in_chunks_when_the_whole_dive_does_not_fit(monkeypatch):
     minimize(_mixed, lo, hi, **{**MIXED, "max_iter": 3})
     K = _kernels(_mixed)
     monkeypatch.setattr(bnb, "_DIVE_FRAC", np.inf)
+    monkeypatch.setattr(bnb, "_ROOT_DIVE_SHARE", None)  # (this test is about the time limit)
     monkeypatch.setattr(K, "dive", _CountingDive(K.dive))
     _slow_bound(monkeypatch, 0.5)
     minimize(_mixed, lo, hi, time_limit=2.0, **MIXED)  # a whole dive (3 x 0.5 s, x 1.5) would not fit
@@ -305,3 +306,116 @@ def test_root_obbt_kernel_started_when_dives_find_first_incumbent(monkeypatch):
                  local_solve=False, time_limit=120)  # fmt: skip
     assert np.isfinite(r.fun)
     assert calls == [True]
+
+
+def _ring(x):  # constrained, many local minima: the tree's OBBT has work at every node
+    return jnp.sum(jnp.sin(4 * x) * x) + 0.0123
+
+
+def _ring_g(x):
+    return jnp.atleast_1d(jnp.sum(x**2) - 4.0)
+
+
+def test_tree_obbt_skipped_when_it_does_not_fit(monkeypatch):
+    """obbt="tree": a batch's OBBT calls run only when their estimated cost (before the first call:
+    the slowest bound call times 2 n obbt_rounds) fits in _TREE_OBBT_SHARE of the time left. A
+    call cannot be interrupted, so one started regardless would overrun the limit (minlp.org m6:
+    131 s). Bound calls slowed to 0.25 s give an estimate of 3 s per call: none fits a 3 s limit,
+    and without the check the first call runs."""
+    lo, hi = -2 * np.ones(3), 2 * np.ones(3)
+    opts = dict(ineq=_ring_g, obbt="tree", abs_tol=0.0, rel_tol=0.0, max_iter=10**6)
+    minimize(_ring, lo, hi, **{**opts, "max_iter": 3})  # compile
+    calls = []
+    orig = bnb._Precompiled.__call__
+
+    def call(self, *args, **kw):
+        out = orig(self, *args, **kw)
+        if self.name == "obbt":
+            calls.append(1)
+        elif self.name == "bound":
+            jax.block_until_ready(out)
+            time.sleep(0.25)
+        return out
+
+    monkeypatch.setattr(bnb._Precompiled, "__call__", call)
+    monkeypatch.setattr(bnb, "_ROOT_OBBT_SHARE", None)  # (the root's own cost rule would skip it too)
+    monkeypatch.setattr(bnb, "_ROOT_OBBT_COST", 0.0)
+    t = time.perf_counter()
+    r = minimize(_ring, lo, hi, time_limit=3.0, **opts)
+    assert r.status == "time_limit" and r.lower_bound <= r.fun
+    assert not calls and time.perf_counter() - t < 3.0 + 1.5
+    monkeypatch.setattr(bnb, "_TREE_OBBT_SHARE", None)
+    minimize(_ring, lo, hi, time_limit=3.0, **opts)
+    assert calls
+
+
+def test_root_local_budget(monkeypatch):
+    """Under a time limit the root stages' local solves share _ROOT_LOCAL_SHARE of it: at 0 none
+    runs before the search, and the search still finds the optimum (an incumbent-only change)."""
+    seen = []
+    mk = bnb.make_local
+
+    def make_local(*a, **k):
+        solve = mk(*a, **k)
+
+        def counting(X0, *b, **kw):
+            seen.append(len(X0))
+            return solve(X0, *b, **kw)
+
+        return counting
+
+    monkeypatch.setattr(bnb, "make_local", make_local)
+    lo, hi = MIXED_BOX
+    ref = minimize(_mixed, lo, hi, integer=[4, 5, 6], max_iter=200)
+    stages = []
+    monkeypatch.setattr(bnb, "_TRACE", lambda stage, ub: stages.append((stage, len(seen))))
+    for share, root_solves in ((None, True), (0.0, False)):
+        bnb.clear_cache()  # (the local solver is cached per problem)
+        seen.clear()
+        stages.clear()
+        monkeypatch.setattr(bnb, "_ROOT_LOCAL_SHARE", share)
+        r = minimize(_mixed, lo, hi, integer=[4, 5, 6], max_iter=200, time_limit=600)
+        assert (next(n for s, n in stages if s == "search") > 0) == root_solves
+        assert r.status == ref.status and abs(r.fun - ref.fun) <= 1e-6 * (1 + abs(ref.fun))
+
+
+def test_root_dive_budget(monkeypatch):
+    """The root dives' kernel chunks get _ROOT_DIVE_SHARE of the time limit: with 0.6 s per
+    kernel run and a 1 s budget the first chunk runs and the second (two steps, 1.5 x 1.2 s
+    estimated) does not; without the budget the root dive runs all its chunks."""
+    lo, hi = MIXED_BOX
+    minimize(_mixed, lo, hi, **{**MIXED, "max_iter": 3})
+    K = _kernels(_mixed)
+    monkeypatch.setattr(bnb, "_DIVE_FRAC", np.inf)
+    runs = []
+    monkeypatch.setattr(bnb, "_TRACE", lambda stage, ub: runs.append((stage, K.dive.runs)))
+    for share, root_runs in ((0.01, 1), (None, 2)):  # (3 integers: chunks of 1 and 2 steps)
+        monkeypatch.setattr(bnb, "_ROOT_DIVE_SHARE", share)
+        monkeypatch.setattr(K, "dive", _CountingDive(K.dive.jitted if hasattr(K.dive, "jitted") else K.dive,
+                                                     seconds=0.6))  # fmt: skip
+        runs.clear()
+        minimize(_mixed, lo, hi, time_limit=100.0, **{**MIXED, "max_iter": 2})
+        assert next(n for s, n in runs if s == "root_enum") == root_runs
+
+
+def _binary(x):  # three continuous and six binary variables
+    return _hard(x[:3]) + jnp.sum((x[3:] - 0.3) ** 2 * jnp.cos(x[:1] + x[3:])) + 0.0271
+
+
+def test_probe_budget(monkeypatch):
+    """Root probing's estimated cost (its kernel calls times the slowest bound call) may take
+    _PROBE_SHARE of the time left: with bound calls slowed to 0.3 s and 1% of the time left
+    of a 20 s limit (< 0.3 s) no binary is probed; without the limit all six are."""
+    lo, hi = np.r_[-3.0 * np.ones(3), np.zeros(6)], np.r_[3.0 * np.ones(3), np.ones(6)]
+    # (6 binaries: more assignments than the root enumerates; no OBBT, which could fix them first)
+    opts = dict(integer=[3, 4, 5, 6, 7, 8], abs_tol=0.0, rel_tol=0.0, max_iter=2, obbt=False)
+    minimize(_binary, lo, hi, **opts)  # compile
+    _slow_bound(monkeypatch, 0.3)
+    events = []
+    monkeypatch.setattr(bnb, "_TRACE", lambda stage, ub: events.append(stage))
+    for share, probed in ((0.01, False), (None, True)):
+        monkeypatch.setattr(bnb, "_PROBE_SHARE", share)
+        events.clear()
+        r = minimize(_binary, lo, hi, time_limit=20.0, **opts)
+        assert any(e.startswith("+probe_eval 6 ") for e in events) == probed
+        assert r.lower_bound <= r.fun

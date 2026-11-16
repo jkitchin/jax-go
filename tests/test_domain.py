@@ -131,6 +131,81 @@ def test_free_slacks_make_instances_supported():
         assert not infeasible and np.all(np.isfinite(lo)) and np.all(np.isfinite(hi)), name
 
 
+# ---------------------------------------------------------------- NumPy structure sweeps (domain._interval_rows, ...)
+
+
+def _mixed():
+    """Rows using every operation ``domain._iop`` handles, with linear and nonlinear uses of x3, x4."""
+    f = lambda x: 2.0 * x[3] - x[0] * x[1] + jnp.exp(0.3 * x[2])  # noqa: E731
+
+    def ineq(x):
+        return jnp.stack([
+            x[0] ** 2 - 3.0 * x[1] / 4.0 + jnp.sqrt(x[2] + 1.0) - x[3],
+            x[0] / (x[2] + 2.0) - x[4] + jnp.log(x[1] + 3.0),
+            jnp.abs(x[0] - x[1]) + jnp.maximum(x[2], x[0]) - jnp.minimum(x[1], 0.5) - x[3] - 2.0 * x[4],
+            x[1] ** 3 - x[0] ** -2 * 0.1 - x[4] ** 2,
+            -(x[0] * x[0]) + x[2] * x[3] - 1.0,
+        ])  # fmt: skip
+
+    eq = lambda x: jnp.atleast_1d(x[0] + 2.0 * x[1] - x[2] / 3.0)  # noqa: E731
+    return f, ineq, eq
+
+
+@pytest.mark.parametrize("seed", range(4))
+def test_interval_rows_enclose_row_values(seed):
+    """The NumPy forward sweep's row intervals hold every sampled row value of the box."""
+    from jaxglobal.domain import _interval_rows, _scalar_program
+
+    f, ineq, eq = _mixed()
+    prog = _scalar_program(f, ineq, eq, 5)
+    assert prog is not None
+    rng = np.random.default_rng(seed)
+    a = np.array([0.5, -1.0, 0.0, -2.0, 0.0]) + rng.uniform(0, 0.5, 5)
+    lo, hi = a, a + rng.uniform(0.1, 3.0, 5)
+    L, H = _interval_rows(prog, lo, hi)
+    X = rng.uniform(lo, hi, size=(500, 5))
+    V = np.stack([np.concatenate([np.atleast_1d(np.asarray(fn(jnp.asarray(x)))) for fn in (f, ineq, eq)]) for x in X])
+    assert V.shape[1] == len(L)
+    assert np.all(V >= L - 1e-9 * (1 + np.abs(L))) and np.all(V <= H + 1e-9 * (1 + np.abs(H)))
+    # an infinite end stays sound (and finite rows that do not use it stay finite)
+    hi2 = hi.copy()
+    hi2[4] = INF
+    L2, H2 = _interval_rows(prog, lo, hi2)
+    assert np.all(L2 <= L + 1e-12) and np.all(H2 >= H - 1e-12) and np.isfinite(H2[0])
+
+
+def test_linear_coefs_match_the_jacobian():
+    import jax
+
+    from jaxglobal.domain import _linear_coefs, _row_structure, _scalar_program
+
+    f, ineq, eq = _mixed()
+    prog = _scalar_program(f, ineq, eq, 5)
+    dep, nl, _ = _row_structure(f, ineq, eq, 5, prog=prog)
+    C = _linear_coefs(prog, [3, 4])
+    x = jnp.asarray([0.7, -0.4, 0.3, 1.1, 0.6])
+    J = np.asarray(jax.jacfwd(lambda x: jnp.concatenate([jnp.atleast_1d(fn(x)) for fn in (f, ineq, eq)]))(x))[:, [3, 4]]
+    lin = dep[:, [3, 4]] & ~nl[:, [3, 4]]
+    assert np.allclose(C[lin], J[lin]) and np.all(np.isnan(C[nl[:, [3, 4]]])) and np.all(C[~dep[:, [3, 4]]] == 0.0)
+
+
+@pytest.mark.parametrize("name", ["m3", "clay0203m"])
+def test_numpy_structure_gives_the_same_box(name, monkeypatch):
+    """bound_domain with the NumPy sweeps (``_NUMPY_STRUCTURE``) derives the box the JAX sweeps did."""
+    from jaxglobal import domain
+    from jaxglobal.nl import read_nl
+
+    M = read_nl(DATA / f"{name}.nl", integers="mask")
+    out = []
+    for on in (False, True):
+        monkeypatch.setattr(domain, "_NUMPY_STRUCTURE", on)
+        lo, hi, infeasible, _, _ = bound_domain(M.f, M.ineq, M.eq, M.lo, M.hi, integer=np.asarray(M.integer))
+        assert not infeasible
+        out.append((lo, hi))
+    (l0, h0), (l1, h1) = out
+    assert np.allclose(l0, l1, rtol=1e-9, atol=1e-12) and np.allclose(h0, h1, rtol=1e-9, atol=1e-12)
+
+
 # ---------------------------------------------------------------- LP bounds (domain.LinearRelaxation)
 
 
