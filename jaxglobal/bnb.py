@@ -1098,6 +1098,7 @@ _ROOT_OBBT_COST = 10.0  # root OBBT runs only with this many slowest bound-kerne
 # root OBBT runs only if its estimated cost (bound call x 2 n obbt_rounds / batch) is at most this
 # share of the time left (None: no such check)
 _ROOT_OBBT_SHARE = 0.25
+_OBBT_FIT_SHARE = 0.5  # the root OBBT kernel compiles after the root bound only if its call fits this share of the time left
 _SCREEN_MIN_BATCH = 8  # rows per call of the candidate screens (fvals, viol; ``_batched``)
 
 
@@ -2527,10 +2528,11 @@ def _minimize(
                          gate=obbt_gate if _GATE_COMPILES else None)  # fmt: skip
 
     def obbt_may_fit():
-        """Whether the root OBBT call could pass its cost rules (stage ``root_obbt``) with the time
-        left now (it only shrinks): if not, its kernel is not compiled (on m34_convex2, cold, a
-        ~12 s compile at three cores next to the root dives, for a call that never ran)."""
-        left = None if deadline is None else deadline - time.perf_counter()
+        """Whether the root OBBT call is likely to pass its cost rules (stage ``root_obbt``): with
+        ``_OBBT_FIT_SHARE`` of the time left now, as the root dives come first. If not, its kernel
+        is not compiled (m34_convex2, cold: a ~12 s compile at three cores next to the root dives
+        for a call that never ran; m410_CLay0203HRS: 15.7 s, with all the time left counted)."""
+        left = None if deadline is None else _OBBT_FIT_SHARE * (deadline - time.perf_counter())
         if left is None or not bound_call[0]:
             return True
         if left <= _ROOT_OBBT_COST * bound_call[0]:
