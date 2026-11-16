@@ -1697,9 +1697,16 @@ def _minimize(
         fp = functools.partial(K.fingerprint, lo.size) if kcache.cache_root() else None
         first = [bound_kernel.start(b, lo.size, fp, extra, gate=None if i == 0 else later, tier=tier_gate if i == 0 else None)
                  for i, b in enumerate(padded.sizes)]  # fmt: skip
-        # (a kernel traced in under _GATE_TRACE_S compiles in a few seconds: then the others start with it)
-        later.after(first[0] if _GATE_COMPILES else None,
-                    lambda: getattr(bound_kernel, "traced_seconds", np.inf) < _GATE_TRACE_S)  # fmt: skip
+        def small_bound():
+            """A bound kernel traced in under _GATE_TRACE_S compiles in a few seconds: then nothing is
+            held, root OBBT included (on small start50 models its compile, held until after the root
+            bound, added 0.5-1 s to solves of 5-8 s)."""
+            if getattr(bound_kernel, "traced_seconds", np.inf) < _GATE_TRACE_S:
+                obbt_gate.open()
+                return True
+            return False
+
+        later.after(first[0] if _GATE_COMPILES else None, small_bound)
         if obbt == "tree":  # obbt="root": started once the root shows OBBT will run (``need_obbt``)
             for b in padded.sizes:
                 K.obbt.start(b, lo.size, fp, gate=later)
