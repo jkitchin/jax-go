@@ -26,6 +26,7 @@ from __future__ import annotations
 import functools
 import itertools
 import os
+import sys
 import threading
 import time
 from collections import OrderedDict
@@ -260,8 +261,23 @@ def _pools():
     return _POOLS
 
 
+# Python's GIL switch interval (s) while ``minimize`` runs (restored after; None: unchanged). The
+# kernels are traced on background threads, in Python, while the main thread runs local solves
+# (a callback per function evaluation), kernel calls and eager JAX ops, each of which releases
+# and retakes the GIL: at the default 5 ms a busy tracer thread holds the GIL for up to 5 ms at
+# every retake. A loop of short jitted calls with a busy thread: 1.49 s at 5 ms, 0.14 s at 1 ms,
+# 0.06 s alone; on m34_convex2 the final float64 check (_verify: eager ops) took 22 s next to the
+# OA kernel's trace.
+SWITCH_INTERVAL = 0.001
 _GATE_COMPILES = True  # hold the compiles not needed for the root bound (``_Gate``); False: compile each once traced
 _GATE_TRACE_S = 1.0  # ...but not behind a bound kernel traced (or loaded from the disk cache) in less than this
+# The root bound kernel is first compiled with these XLA options when its trace took at least
+# _TIER_TRACE_S (a large kernel), then again with the defaults in the background (``_Precompiled``'s
+# ``tier``); calls switch to that executable once it is ready. LLVM at -O0 halves the compile
+# (m34_convex2: 12.2 s -> 5.7 s, 21 -> 11 s of CPU) for calls about 30% slower (1.95 -> 2.5 s per
+# 16 boxes). Empty: no tiers.
+_FAST_COMPILE = {"xla_backend_optimization_level": 0}
+_TIER_TRACE_S = 3.0
 _LIVE = threading.local()  # ``gates``: the ``_Gate``s of the running ``minimize`` on this thread
 
 
@@ -397,7 +413,7 @@ class _Precompiled:
     """
 
     def __init__(self, jitted, name):
-        self.jitted, self.name, self.ready = jitted, name, {}
+        self.jitted, self.name, self.ready, self.better = jitted, name, {}, {}
         self._local = threading.local()  # per dispatching thread (``_dispatch_pool``): ``dispatched``
 
     @property
@@ -413,14 +429,17 @@ class _Precompiled:
     def _key(args):
         return tuple((a.shape, a.dtype, getattr(a, "weak_type", False)) for a in args)
 
-    def start(self, b, n, fingerprint=None, extra=(), args=None, gate=None):
+    def start(self, b, n, fingerprint=None, extra=(), args=None, gate=None, tier=None):
         """Compile in the background for ``b`` boxes of dimension ``n`` (single device).
 
         ``fingerprint()``, called on the tracer thread, names the problem for
         the disk cache (None: do not cache). ``extra``: shapes of further
         (unbatched) float64 arguments after the cutoff. ``args``: all the argument
         shapes instead, when they are not ``(lo, hi, cutoff, *extra)``. ``gate``: a
-        ``_Gate`` that holds the XLA compile (the trace is not held). Returns the build's future."""
+        ``_Gate`` that holds the XLA compile (the trace is not held). ``tier``: a ``_Gate``; a
+        kernel traced in at least ``_TIER_TRACE_S`` is first compiled with ``_FAST_COMPILE``
+        (calls use it until then) and again with XLA's defaults behind ``tier``, whose
+        executable the calls use once it is ready. Returns the build's future."""
         args = self._args(b, n, extra) if args is None else args
         key = self._key(args)
         if key not in self.ready:
@@ -431,6 +450,9 @@ class _Precompiled:
                 t = time.perf_counter()
                 lowered = self._lower(args, fingerprint)
                 self.traced_seconds = time.perf_counter() - t
+                if tier is not None and _FAST_COMPILE and self.traced_seconds >= _TIER_TRACE_S:
+                    self.better[key] = kcache.track(tier.submit(lowered.compile))
+                    return submit(functools.partial(lowered.compile, compiler_options=dict(_FAST_COMPILE)))
                 return submit(lowered.compile)
 
             self.ready[key] = kcache.track(tracer.submit(build))
@@ -521,6 +543,9 @@ class _Precompiled:
             else:
                 if _past(deadline):  # ready, but out of time: no new call
                     raise _Deadline(self.name)
+                better = self.better.get(key)  # (``tier``: the fully optimized executable, once compiled)
+                if better is not None and better.done() and better.exception() is None:
+                    compiled = better.result()
                 self.dispatched = time.perf_counter()
                 return compiled(*args)
         if _past(deadline):  # jit would trace and compile synchronously, with no deadline
@@ -1642,13 +1667,14 @@ def _minimize(
     padded = _Padder(batch, batch_sizes, jax.devices() if devices is None else list(devices))
     # the other kernels' XLA compiles wait for the root bound kernel's (``_Gate``): traced now, compiled
     # once it is compiled (or as soon as one is needed); root OBBT's once the root decides it will run
-    later, obbt_gate = _Gate(), _Gate()
+    later, obbt_gate, tier_gate = _Gate(), _Gate(), _Gate()  # (tier_gate: opened when the search starts)
     if not _GATE_COMPILES:
         obbt_gate.open()
-    _live_gates().extend([later, obbt_gate])  # (opened when ``minimize`` returns: the disk caches still fill)
+    _live_gates().extend([later, obbt_gate, tier_gate])  # (opened when ``minimize`` returns: the disk caches still fill)
     if padded.mesh is None:  # compile the kernels in the background while the setup below runs
         fp = functools.partial(K.fingerprint, lo.size) if kcache.cache_root() else None
-        first = [bound_kernel.start(b, lo.size, fp, extra, gate=None if i == 0 else later) for i, b in enumerate(padded.sizes)]
+        first = [bound_kernel.start(b, lo.size, fp, extra, gate=None if i == 0 else later, tier=tier_gate if i == 0 else None)
+                 for i, b in enumerate(padded.sizes)]  # fmt: skip
         # (a kernel traced in under _GATE_TRACE_S compiles in a few seconds: then the others start with it)
         later.after(first[0] if _GATE_COMPILES else None,
                     lambda: getattr(bound_kernel, "traced_seconds", np.inf) < _GATE_TRACE_S)  # fmt: skip
@@ -2615,6 +2641,7 @@ def _minimize(
         b = oa_budget()
         oa_primal(rlo.min(axis=0), rhi.max(axis=0), list(np.atleast_2d(rxr)[:2]), b, wait=0.5 * b)
     _mk("search")
+    tier_gate.open()  # (the root bound kernel's fully optimized compile, ``_FAST_COMPILE``)
     open_lo, open_hi, open_lb, open_xr = rlo, rhi, lb, rxr
     width0 = _branch_widths(width0, rlo, rhi)
     sumL, sumR, cnt = np.zeros(lo.size), np.zeros(lo.size), np.zeros(lo.size)  # pseudocost sums, observations
@@ -2968,6 +2995,9 @@ def minimize(*args, **kwargs):
     # small, and OpenBLAS's spinning helper threads oversubscribe the CPU next to the dispatch
     # threads, the background compiles and the local solves
     gates, _LIVE.gates = getattr(_LIVE, "gates", None), []
+    switch = sys.getswitchinterval()
+    if SWITCH_INTERVAL:
+        sys.setswitchinterval(min(switch, SWITCH_INTERVAL))
     try:
         with blas.limited():
             return _minimize(*args, **kwargs)
@@ -2975,3 +3005,4 @@ def minimize(*args, **kwargs):
         for g in _LIVE.gates:
             g.open()
         _LIVE.gates = gates
+        sys.setswitchinterval(switch)
