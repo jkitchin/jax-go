@@ -375,18 +375,29 @@ def _past(deadline):
 
 
 _POLL = (5e-5, 1e-2, 0.05)  # ``_await``: shortest and longest poll interval (s), and the interval as a share of the wait so far
+_AWAIT_SAFE, _AWAIT_MIN = 10.0, 1.0  # ``_await`` blocks without polling while more than this many slowest calls (+ s) are left
 
 
-def _await(out, deadline, name):
+def _await(out, deadline, name, kernel=None):
     """``jax.block_until_ready(out)`` (a kernel call's outputs), but ``_Deadline`` once ``deadline``
     passes with the call still running: the call cannot be interrupted, so it is left to finish
     in the background and its result is dropped, as if it had not been dispatched (every handler
     of ``_Deadline`` leaves the caller's state as it was before the call). Before this a call
     dispatched just before the limit ran to the end: minlp.org m47_bcp8's first bound call takes
     about 67 s, and the solve returned after 122 s with a 60 s limit. Polls ``is_ready`` at
-    intervals of 5% of the wait so far (within ``_POLL``), so a call ends at most ~5% late."""
+    intervals of 5% of the wait so far (within ``_POLL``), so a call ends at most ~5% late.
+
+    Polling costs about 0.1 ms per call (0.4 -> 0.6 ms for a small kernel), so it is used only
+    for a kernel's first call and when the time left is under ``_AWAIT_SAFE`` times its slowest
+    call so far (``kernel.slowest``, kept here) plus ``_AWAIT_MIN`` s; otherwise this blocks."""
     if deadline is None or not np.isfinite(deadline):
         return jax.block_until_ready(out)
+    t = time.perf_counter()
+    slow = getattr(kernel, "slowest", None)
+    if slow is not None and deadline - t > _AWAIT_SAFE * slow + _AWAIT_MIN:
+        out = jax.block_until_ready(out)
+        kernel.slowest = max(slow, time.perf_counter() - t)
+        return out
     leaves = [x for x in jax.tree.leaves(out) if hasattr(x, "is_ready")]
     t = time.perf_counter()
     while not all(x.is_ready() for x in leaves):
@@ -394,6 +405,8 @@ def _await(out, deadline, name):
         if now > deadline:
             raise _Deadline(name)
         time.sleep(min(_POLL[1], max(_POLL[0], _POLL[2] * (now - t)), deadline - now + _POLL[0]))
+    if kernel is not None:
+        kernel.slowest = max(slow or 0.0, time.perf_counter() - t)
     return out
 
 
@@ -1099,24 +1112,31 @@ _ROOT_OBBT_COST = 10.0  # root OBBT runs only with this many slowest bound-kerne
 # share of the time left (None: no such check)
 _ROOT_OBBT_SHARE = 0.25
 _OBBT_FIT_SHARE = 0.5  # the root OBBT kernel compiles after the root bound only if its call fits this share of the time left
-_SCREEN_MIN_BATCH = 8  # rows per call of the candidate screens (fvals, viol; ``_batched``)
+_SCREEN_BATCHES = (8, 64)  # rows per call of the candidate screens (fvals, viol; ``_batched``)
 
 
 def _batched(fn, X):
-    """``fn`` (a ``jit(vmap(...))``) on the points ``X`` (k, n), in calls of ``_SCREEN_MIN_BATCH`` rows
-    (the last padded with copies of the first row), rows ``:k`` returned. A jitted function compiles
-    once per input shape, and the candidates screened per call vary from 1 to hundreds: each new
-    count was a new compile of the model's constraint violation (4.6 s on minlp.org m31, cold,
-    inside the deadline's last seconds). Power-of-two buckets still compiled a few of them (2.7 s
-    each on m34_convex2, on the main thread during the root dives); one size compiles once, off the
-    main thread (``minimize``'s ``_warm_screen``), and the calls cost about the same per point."""
+    """``fn`` (a ``jit(vmap(...))``) on the points ``X`` (k, n), in calls of the ``_SCREEN_BATCHES``
+    sizes (the large one while more than a third of it is left; a short last call padded with
+    copies of the first row), rows ``:k`` returned. A jitted function compiles once per input
+    shape, and the candidates screened per call vary from 1 to hundreds: each new count was a new
+    compile of the model's constraint violation (4.6 s on minlp.org m31, cold, inside the
+    deadline's last seconds). Power-of-two buckets still compiled several (2.7 s each on
+    m34_convex2, on the main thread during the root dives); the two sizes compile off the main
+    thread (``minimize``'s ``_warm_screen``)."""
     X = np.atleast_2d(np.asarray(X, dtype=np.float64))
-    k, c = X.shape[0], _SCREEN_MIN_BATCH
-    kb = max(c, -(-k // c) * c)
-    if kb > k:
-        X = np.concatenate([X, np.repeat(X[:1], kb - k, axis=0)])
-    outs = [fn(jnp.asarray(X[i:i + c], dtype=jnp.float64)) for i in range(0, kb, c)]  # (all dispatched first)
-    return np.concatenate([np.asarray(o) for o in outs])[:k]
+    k, (small, big) = X.shape[0], _SCREEN_BATCHES
+    if k == 0:
+        return np.zeros(0)
+    outs, i = [], 0
+    while i < k:
+        c = big if k - i > big // 3 else small
+        Xc = X[i:i + c]
+        if len(Xc) < c:
+            Xc = np.concatenate([Xc, np.repeat(Xc[:1], c - len(Xc), axis=0)])
+        outs.append((fn(jnp.asarray(Xc, dtype=jnp.float64)), min(c, k - i)))  # (all dispatched first)
+        i += c
+    return np.concatenate([np.asarray(o)[:m] for o, m in outs])
 
 
 def _ncpu():
@@ -1745,11 +1765,12 @@ def _minimize(
             options["max_wall_time"] = float(min(options.get("max_wall_time", np.inf), cap))
         return solve_local_(X0, LO, HI, options=options)
 
-    def _warm_screen():  # the smallest screen batch, compiled off the main thread (see _batched)
-        x = np.clip(0.0, lo, hi)[None]
-        _batched(K.fvals, x)
-        if ineq is not None or eq is not None:
-            _batched(K.viol, x)
+    def _warm_screen():  # both screen batch sizes, compiled off the main thread (see _batched)
+        for k in _SCREEN_BATCHES:
+            x = np.repeat(np.clip(0.0, lo, hi)[None], k, axis=0)
+            _batched(K.fvals, x)
+            if ineq is not None or eq is not None:
+                _batched(K.viol, x)
 
     from concurrent.futures import ThreadPoolExecutor
 
@@ -2022,7 +2043,7 @@ def _minimize(
         another, so the result is the same."""
 
         def one(c):
-            o = _await(kernel(*c, cutoff, *extra, deadline=deadline), deadline, kernel.name)
+            o = _await(kernel(*c, cutoff, *extra, deadline=deadline), deadline, kernel.name, kernel)
             return o, time.perf_counter() - kernel.dispatched  # (not counting the wait for the executable)
 
         if padded.mesh is not None:  # sharded calls compile through jit (synchronously)
@@ -2333,7 +2354,7 @@ def _minimize(
             if not time_for(None if per_step is None else per_step * c):
                 break
             try:
-                DL, DH, F = _await(K.dive(DL, DH, X, cut, F, step(p), step(p + c), deadline=deadline), deadline, "dive")
+                DL, DH, F = _await(K.dive(DL, DH, X, cut, F, step(p), step(p + c), deadline=deadline), deadline, "dive", K.dive)
             except (_CompileTimeout, _Deadline):
                 break
             p, chunk = p + c, 2 * chunk

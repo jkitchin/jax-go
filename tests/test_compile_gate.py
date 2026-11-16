@@ -82,14 +82,14 @@ def test_await_deadline():
     assert np.asarray(bnb._await(jnp.ones(3), None, "x")).sum() == 3
 
 
-def test_batched_one_shape():
-    """``_batched`` gives every row's value and compiles a single batch shape."""
+def test_batched_two_shapes():
+    """``_batched`` gives every row's value and compiles only the ``_SCREEN_BATCHES`` shapes."""
     fn = jax.jit(jax.vmap(lambda x: jnp.sum(x**2)))
     rng = np.random.default_rng(0)
-    for k in (1, 7, 8, 9, 30, 64):
+    for k in (1, 7, 8, 9, 21, 22, 30, 64, 65, 100, 200):
         X = rng.normal(size=(k, 3))
         assert np.allclose(bnb._batched(fn, X), np.sum(X**2, axis=1))
-    assert fn._cache_size() == 1
+    assert fn._cache_size() == len(bnb._SCREEN_BATCHES)
 
 
 def test_tiered_compile(monkeypatch):
