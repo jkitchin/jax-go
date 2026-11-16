@@ -144,6 +144,21 @@ class QuadraticForm(NamedTuple):
     sec_col: np.ndarray = np.zeros(0, np.int64)
     sec_cw: np.ndarray = np.zeros(0)
     sec_cx: np.ndarray = np.zeros(0)
+    # big-M coefficient tightening (``with_bigm``): inequality row bm_row (index into g) has the
+    # binary variable bm_col with coefficient bm_coef, at position bm_at among the nonzeros of the
+    # g block (``_layout``'s static values); the row's other nonzeros are bm_ocol / bm_oval
+    # (padded with column 0, value 0)
+    bm_row: np.ndarray = np.zeros(0, np.int64)
+    bm_col: np.ndarray = np.zeros(0, np.int64)
+    bm_coef: np.ndarray = np.zeros(0)
+    bm_at: np.ndarray = np.zeros(0, np.int64)
+    bm_ocol: np.ndarray = np.zeros((0, 1), np.int64)
+    bm_oval: np.ndarray = np.zeros((0, 1))
+    # ... except squares of variables, a w_ii + b x_i, kept together (their range is that of
+    # a x_i^2 + b x_i): factor bm_qvar, coefficients bm_qa, bm_qb (padded with 0)
+    bm_qvar: np.ndarray = np.zeros((0, 1), np.int64)
+    bm_qa: np.ndarray = np.zeros((0, 1))
+    bm_qb: np.ndarray = np.zeros((0, 1))
 
 
 def _eigen_cuts(Q, n, max_support=None, max_pairs=None):
@@ -591,6 +606,99 @@ def polynomial_form(f, ineq, eq, n, degree=MAX_DEGREE, max_columns=MAX_COLUMNS, 
                           max_poly_columns=max_poly_columns, sym_seconds=sym_seconds)
 
 
+def with_bigm(Q, n, ints):
+    """``Q`` with the big-M rows of its inequalities marked (``bm_*`` fields): every row ``g``
+    with an integer variable among its columns (the one of largest coefficient). On a box where
+    that variable is in [0, 1], ``_lp`` tightens its coefficient to what the box allows
+    (``_bigm``). None or ``Q`` unchanged when there is nothing to mark."""
+    if Q is None:
+        return Q
+    ints = np.asarray(ints, np.int64).reshape(-1)
+    if not ints.size:
+        return Q
+    isint = np.zeros(Q.E.shape[1], bool)
+    isint[ints[ints < n]] = True
+    g = Q.E[1:1 + Q.n_g]
+    r_nz, c_nz = np.nonzero(g)
+    pos = {(int(r), int(c)): k for k, (r, c) in enumerate(zip(r_nz, c_nz))}
+    sq = {n + p: int(a) for p, (a, b_) in enumerate(Q.pairs) if a == b_ and a < n}  # square column -> factor
+    rows, cols, coefs, ats, others = [], [], [], [], []
+    for r in range(g.shape[0]):
+        nz = np.flatnonzero(g[r])
+        cand = nz[isint[nz]]
+        if not cand.size or cand.size == nz.size:
+            continue
+        j = int(cand[np.argmax(np.abs(g[r, cand]))])
+        rows.append(r)
+        cols.append(j)
+        coefs.append(float(g[r, j]))
+        ats.append(pos[(r, j)])
+        lin = {int(c): float(g[r, c]) for c in nz if c != j}
+        quad = []
+        for c in list(lin):
+            if c >= n and c in sq and sq[c] != j:
+                i = sq[c]
+                quad.append((i, lin.pop(c), lin.pop(i, 0.0)))
+        others.append((list(lin.items()), quad))
+    if not rows:
+        return Q
+    W = max(1, max(len(o[0]) for o in others))
+    Wq = max(1, max(len(o[1]) for o in others))
+    oc, ov = np.zeros((len(rows), W), np.int64), np.zeros((len(rows), W))
+    qv, qa, qb = np.zeros((len(rows), Wq), np.int64), np.zeros((len(rows), Wq)), np.zeros((len(rows), Wq))
+    for k, (lin, quad) in enumerate(others):
+        for t, (c, v) in enumerate(lin):
+            oc[k, t], ov[k, t] = c, v
+        for t, (i, a, b_) in enumerate(quad):
+            qv[k, t], qa[k, t], qb[k, t] = i, a, b_
+    return Q._replace(bm_row=np.asarray(rows, np.int64), bm_col=np.asarray(cols, np.int64),
+                      bm_coef=np.asarray(coefs), bm_at=np.asarray(ats, np.int64), bm_ocol=oc, bm_oval=ov,
+                      bm_qvar=qv, bm_qa=qa, bm_qb=qb)
+
+
+def _bigm(Q, vlo, vhi, b_g):
+    """Tightened coefficients and right-hand sides of the marked big-M rows (``with_bigm``) on the
+    box of columns ``[vlo, vhi]``. A row ``a.v + m y <= r`` (``r = b_g`` of the row, ``y`` binary)
+    holds at every point of the box with ``y`` in {0, 1} iff ``a.v + m' y <= r'`` does, where, with
+    ``U`` the largest value of ``a.v`` over the box (rounded up):
+
+    * ``m > 0``: ``y = 0`` leaves ``a.v <= r``, implied by the box when ``U < r``; with
+      ``d = min(r - U, m)``: ``m' = m - d``, ``r' = r - d`` (at ``y = 1`` the row is unchanged,
+      at ``y = 0`` it reads ``a.v <= r - d``, and ``r - d >= U``);
+    * ``m < 0``: ``y = 1`` leaves ``a.v <= r - m``; with ``d = min(r - m - U, -m)``: ``m' = m + d``,
+      ``r' = r``.
+
+    So the rows are valid wherever the original ones are, for integral ``y``, and the LP relaxation
+    (fractional ``y``) is tighter: the classic coefficient tightening of MIP presolve, per box.
+    Rows whose binary is not within [0, 1] on the box, or with an unbounded ``U``, are unchanged."""
+    j, m = jnp.asarray(Q.bm_col), jnp.asarray(Q.bm_coef, vlo.dtype)
+    oc, ov = jnp.asarray(Q.bm_ocol), jnp.asarray(Q.bm_oval, vlo.dtype)
+    r = b_g[jnp.asarray(Q.bm_row)]
+    terms = jnp.maximum(ov * vlo[oc], ov * vhi[oc])
+    U = jnp.sum(terms, axis=1)
+    vmag = jnp.maximum(jnp.abs(vlo), jnp.abs(vhi))
+    mag = jnp.sum(jnp.abs(ov) * vmag[oc], axis=1) + jnp.abs(r)
+    qi, qa, qb = jnp.asarray(Q.bm_qvar), jnp.asarray(Q.bm_qa, vlo.dtype), jnp.asarray(Q.bm_qb, vlo.dtype)
+    if Q.bm_qvar.size:  # a x^2 + b x over [l, u]: its largest value at l, u or the (clipped) vertex
+        ql, qu = vlo[qi], vhi[qi]
+        xv = jnp.clip(-qb / jnp.where(qa != 0, 2 * qa, 1.0), ql, qu)
+
+        def q(x):
+            return qa * x * x + qb * x
+
+        U = U + jnp.sum(jnp.maximum(jnp.maximum(q(ql), q(qu)), q(xv)), axis=1)
+        qm = jnp.maximum(jnp.abs(ql), jnp.abs(qu))
+        mag = mag + jnp.sum(jnp.abs(qa) * qm * qm + jnp.abs(qb) * qm, axis=1)
+    W = ov.shape[1] + 3 * qa.shape[1]
+    U = U + SAFE_K * EPS * (W + 3) * mag
+    ok = (vlo[j] >= 0.0) & (vhi[j] <= 1.0) & jnp.isfinite(U) & jnp.isfinite(r)
+    d = jnp.where(m > 0, jnp.clip(r - U, 0.0, m), jnp.clip(r - m - U, 0.0, -m))
+    d = jnp.where(ok, d, 0.0)
+    m_new = jnp.where(m > 0, m - d, m + d)
+    r_new = jnp.where(m > 0, r - d, r)
+    return m_new, r_new
+
+
 def _binary_cuts(col, n, ints):
     """Valid rows for the columns that are products of binary variables.
 
@@ -1015,6 +1123,11 @@ def _lp(Q, L, lo, hi, tol, safe, cutoff=None):
     if L.cutoff_row:
         pieces.append(jnp.asarray(L.static_vals[n_static:]))
     vals = jnp.concatenate(pieces)
+    if Q.bm_row.size:  # big-M rows: coefficients tightened to the box (``_bigm``)
+        g0 = 4 * P  # first g row; its values start after the 12 P McCormick values
+        m_new, r_new = _bigm(Q, vlo, vhi, b[g0:g0 + Q.n_g])
+        vals = vals.at[12 * P + jnp.asarray(Q.bm_at)].set(m_new)
+        b = b.at[g0 + jnp.asarray(Q.bm_row)].set(r_new)
     R, C = L.pattern.rows, L.pattern.cols
     absAv = _segsum(jnp.abs(vals) * vmag[C], R, L.pattern.m)
 
