@@ -48,6 +48,8 @@ The same certificate gives bound tightening for free:
 from __future__ import annotations
 
 import functools
+import threading
+from collections import OrderedDict
 
 import jax
 import jax.numpy as jnp
@@ -58,6 +60,35 @@ from .relax import SAFE_K
 from .univariate import make_relaxer
 
 EPS = float(jnp.finfo(jnp.float64).eps)
+
+
+_JOINT, _JOINT_LOCK, _JOINT_SIZE = OrderedDict(), threading.Lock(), 8
+
+
+def _joint(f, ineq, eq, n):
+    """``(tape, program)``: the joint tape of ``f``, ``ineq``, ``eq`` on ``n`` variables and its
+    scalarized program (None when ``use_interpreter`` refuses the tape or ``scalarize`` fails).
+    Kept for the last ``_JOINT_SIZE`` problems: ``_nonlinear_vars``, ``_affine_forms`` and
+    ``_tape_eqns`` each built it again inside every kernel's trace (m34_convex2: about 1 s each).
+    A tape closing over a tracer is returned uncached."""
+    from .fbbt import _has_tracer, joint_tape
+    from .fbbt_interp import scalarize, use_interpreter
+
+    key = (f, ineq, eq, int(n))
+    with _JOINT_LOCK:
+        if key in _JOINT:
+            _JOINT.move_to_end(key)
+            return _JOINT[key]
+    with jax.ensure_compile_time_eval():
+        tape = joint_tape(f, ineq, eq, np.zeros(n))
+    if _has_tracer(tape):
+        return tape, None
+    prog = scalarize(tape, n) if use_interpreter(tape, n, min_rows=0) else None
+    with _JOINT_LOCK:
+        _JOINT[key] = (tape, prog)
+        while len(_JOINT) > _JOINT_SIZE:
+            _JOINT.popitem(last=False)
+    return tape, prog
 
 
 def _nonlinear_vars(f, ineq, eq, n):
@@ -74,14 +105,7 @@ def _nonlinear_vars(f, ineq, eq, n):
     duplicate rows; calling it linear would only drop valid cuts, never add an
     invalid one.
     """
-    from .fbbt import _has_tracer, joint_tape
-    from .fbbt_interp import scalarize, use_interpreter
-
-    with jax.ensure_compile_time_eval():
-        tape = joint_tape(f, ineq, eq, np.zeros(n))
-    if _has_tracer(tape) or not use_interpreter(tape, n, min_rows=0):
-        return None
-    prog = scalarize(tape, n)
+    prog = _joint(f, ineq, eq, n)[1]
     if prog is None:
         return None
     S = len(prog.const_val)
@@ -117,14 +141,7 @@ def _affine_forms(f, ineq, eq, n):
     function itself, so these give the cut every point gives it (``make_constrained_bounder`` and
     ``make_obbt`` with ``SPLIT_AFFINE``), without its forward-mode pass. None when the tape is not
     scalarized or the table would exceed ``AFFINE_MAX_ENTRIES``."""
-    from .fbbt import _has_tracer, joint_tape
-    from .fbbt_interp import scalarize, use_interpreter
-
-    with jax.ensure_compile_time_eval():
-        tape = joint_tape(f, ineq, eq, np.zeros(n))
-    if _has_tracer(tape) or not use_interpreter(tape, n, min_rows=0):
-        return None
-    prog = scalarize(tape, n)
+    prog = _joint(f, ineq, eq, n)[1]
     if prog is None:
         return None
     S = len(prog.const_val)
@@ -641,12 +658,11 @@ class _SubParts:
 
 def _tape_eqns(f, ineq, eq, n):
     """Equations of the joint tape of ``f``, ``ineq``, ``eq`` (0 if it cannot be built)."""
-    from .fbbt import _has_tracer, joint_tape
+    from .fbbt import _has_tracer
     from .fbbt_interp import tape_size
 
     try:
-        with jax.ensure_compile_time_eval():
-            tape = joint_tape(f, ineq, eq, np.zeros(n))
+        tape = _joint(f, ineq, eq, n)[0]
         if _has_tracer(tape):
             return 0
         return int(tape_size(tape)[1])
