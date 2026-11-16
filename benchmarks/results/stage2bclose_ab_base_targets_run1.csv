@@ -1,0 +1,5 @@
+solver,name,status,time,primal,dual,nodes,message,load,threads,peak_rss_mb
+jaxglobal,m474_Bental5_2Player_PriceTaker_FixedCharge1,time_limit,60.6030901899976,6146.614511713038,6319.014781161315,3,time_limit,1.79,0,2393
+jaxglobal,m399_CLay0303HRcone,time_limit,60.62976093999896,28351.419467305564,26669.037451481414,503,time_limit,4.01,0,1910
+jaxglobal,m6_del_asl_hvar,time_limit,60.50475990599807,1.5364151807428352,1.5307687267976948,3045,time_limit,2.80,0,1325
+jaxglobal,m473_Bental5_2Player_PriceTaker_FixedCharge0,time_limit,60.948847911000485,7221.614583332594,7256.672974703618,2255,time_limit,3.55,0,1726
