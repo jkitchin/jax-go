@@ -1152,6 +1152,10 @@ _OA_ROOT_WAIT = 0.0
 # compile (20 s on minlp.org m410_CLay0203HRS, cold) ended at 57 s of a 60 s limit, and the call that
 # finds m410's optimum (1.5 s, warm) never ran. False: always after the root stages.
 _OA_EARLY = True
+# ...its compile, though, only for a program of at most this many jaxpr equations (else once the search
+# starts): minlp.org m399 / m406, 34k / 31k, compile in 3-4 s; m422_kClus_3_20_5_BM, 77k, took 20 s at
+# load 14 and slowed the root stages by 6 s
+_OA_EARLY_EQNS = 50_000
 # with a cut pool (reduced-space LP), the heuristic takes its cuts from the pool's tangent kernel (the
 # lp.py relaxation, compiled in the background anyway) instead of its own cut program (``jacfwd`` of
 # relax.py's relaxation of every row: 76k jaxpr equations, 9-18 s of XLA compile on m410)
@@ -2811,7 +2815,10 @@ def _minimize(
                         pool["exe"].result().add_done_callback(compiled)
                     else:
                         low = MB.lower()
-                        later.submit(lambda: MB.compile(low)).add_done_callback(compiled)
+                        # (a large program compiles only once the search starts, as without
+                        # ``_OA_EARLY``: on m422 its 20 s compile slowed the root stages under load)
+                        small = MB.eqns is not None and _OA_EARLY_EQNS is not None and MB.eqns <= _OA_EARLY_EQNS
+                        (later if small else tier_gate).submit(lambda: MB.compile(low)).add_done_callback(compiled)
                 except BaseException as e:  # noqa: BLE001
                     out.set_exception(e)
 

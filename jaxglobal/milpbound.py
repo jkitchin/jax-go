@@ -88,6 +88,7 @@ class MilpBound:
         self._flo = jax.jit(lambda lo, hi: rf(0.5 * (lo + hi), lo, hi).lo)
         self._ready = None  # ``ready``: None until traced and compiled, then whether it compiled
         self._exe = None  # ``ready``: the cut program's executable for ``cut_values``' argument shapes
+        self.eqns = None  # ``lower``: the cut program's jaxpr equations
         nl = _nonlinear_vars(f, ineq, eq, n)
         self.nonlinear = np.ones(n, bool) if nl is None else np.asarray(nl, bool).any(axis=0)
         with jax.ensure_compile_time_eval():
@@ -123,7 +124,8 @@ class MilpBound:
         ``ready``, for a caller that queues the compile itself."""
         n = self.n
         args = (jnp.zeros((CHUNK, n)), jnp.zeros(n), jnp.ones(n))
-        if _count_eqns(jax.make_jaxpr(self._cuts)(*args).jaxpr) > MAX_EQNS:
+        self.eqns = _count_eqns(jax.make_jaxpr(self._cuts)(*args).jaxpr)
+        if self.eqns > MAX_EQNS:
             return None
         return self._cuts.trace(*args).lower()
 
