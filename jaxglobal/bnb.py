@@ -1150,8 +1150,11 @@ _OA_ROOT_WAIT = 0.0
 # compiled once the root bound kernel is, when the bound kernel is still building as the root waits
 # for it (cold): the main thread is idle then. Started after the root stages instead, its trace and
 # compile (20 s on minlp.org m410_CLay0203HRS, cold) ended at 57 s of a 60 s limit, and the call that
-# finds m410's optimum (1.5 s, warm) never ran. False: always after the root stages.
-_OA_EARLY = True
+# finds m410's optimum (1.5 s, warm) never ran. Off (mixed evidence): m406 solved in 2 of 3 cold A/B pairs
+# with it (base: 0 of 3), but on the k-means big-M models (m420-m422) the early trace and compile cost the
+# search 10-60% of its nodes (bounds 10-15% lower in 3 of 3, twice). m410 itself gets its cuts from the
+# pool kernel (``_OA_POOL``). False: after the root stages, as before.
+_OA_EARLY = False
 # ...its compile, though, only for a program of at most this many jaxpr equations (else once the search
 # starts): minlp.org m399 / m406, 34k / 31k, compile in 3-4 s; m422_kClus_3_20_5_BM, 77k, took 20 s at
 # load 14 and slowed the root stages by 6 s; m420_kClus_3_20_2_BM (41k) searched fewer nodes with it
