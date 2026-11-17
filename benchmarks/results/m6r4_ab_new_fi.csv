@@ -1,0 +1,6 @@
+solver,name,status,time,primal,dual,nodes,message,load,threads,peak_rss_mb
+jaxglobal,hadamard_4,optimal,1.633614695999313,3.0,3.0000010000001414,1,optimal,9.99,2,300
+jaxglobal,autocorr_bern20-10,optimal,5.942932586999632,-2936.0,-2936.000001033287,1,optimal,9.99,2,506
+jaxglobal,ex1252a,optimal,55.17459504699946,128893.74101350497,128886.18167929626,5943,optimal,9.91,2,849
+jaxglobal,hadamard_5,optimal,45.39180216299974,4.99999999999,5.000001000000724,263,optimal,8.94,2,1123
+jaxglobal,autocorr_bern30-04,optimal,3.8143401530005576,-324.0,-324.0000010004751,1,optimal,10.60,2,363

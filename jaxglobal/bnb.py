@@ -53,23 +53,80 @@ from .relax import SAFE_K
 from .univariate import make_relaxer
 
 
+def _mccormick_gap(xi, xj, li, ui, lj, uj, sq):
+    """The gap between the McCormick over- and underestimators of ``xi * xj`` (of ``xi ** 2``
+    where ``sq``) at the given point (0 where it is not finite)."""
+    xi, xj = np.clip(xi, li, ui), np.clip(xj, lj, uj)
+    with np.errstate(invalid="ignore", over="ignore"):
+        cv = np.where(sq, xi * xi, np.maximum(lj * xi + li * xj - li * lj, uj * xi + ui * xj - ui * uj))
+        cc = np.where(sq, (li + ui) * xi - li * ui, np.minimum(lj * xi + ui * xj - ui * lj, uj * xi + li * xj - li * uj))
+        return np.where(np.isfinite(cc - cv), np.maximum(cc - cv, 0.0), 0.0)
+
+
 def _gap_scores(Q, lo, hi, x):
     """Per (box, variable): the sum, over the products it is a factor of, of the gap between
     the McCormick over- and underestimators at the relaxation point ``x`` (how far the
-    product's LP column can be from the product there)."""
+    product's LP column can be from the product there).
+
+    On a polynomial form (``quadratic.polynomial_form``) a factor can itself be a product
+    column: its value at ``x`` is the exact product of its variables there, its bounds the
+    interval product of theirs, and a product's gap counts for every variable of both factors
+    (on h * y^2, for h and y)."""
     I, J = Q.pairs[:, 0], Q.pairs[:, 1]
-    li, ui, lj, uj = lo[:, I], hi[:, I], lo[:, J], hi[:, J]
-    xi, xj = np.clip(x[:, I], li, ui), np.clip(x[:, J], lj, uj)
-    sq = I == J
-    cv = np.where(sq, xi * xi, np.maximum(lj * xi + li * xj - li * lj, uj * xi + ui * xj - ui * uj))
-    cc = np.where(sq, (li + ui) * xi - li * ui, np.minimum(lj * xi + ui * xj - ui * lj, uj * xi + li * xj - li * uj))
-    gap = np.where(np.isfinite(cc - cv), np.maximum(cc - cv, 0.0), 0.0)
-    out = np.zeros_like(lo)
-    np.add.at(out.T, I, gap.T)
-    np.add.at(out.T, J, np.where(sq, 0.0, gap).T)
-    return out
+    n = lo.shape[1]
+    if np.all(I < n) and np.all(J < n):
+        gap = _mccormick_gap(x[:, I], x[:, J], lo[:, I], hi[:, I], lo[:, J], hi[:, J], I == J)
+        out = np.zeros_like(lo)
+        np.add.at(out.T, I, gap.T)
+        np.add.at(out.T, J, np.where(I == J, 0.0, gap).T)
+        return out
+    groups, S = _poly_prep(Q, n)
+    P = len(I)
+    V, L, U = (np.concatenate([a, np.zeros((a.shape[0], P))], axis=1) for a in (np.clip(x, lo, hi), lo, hi))
+    gap = np.zeros((lo.shape[0], P))
+    with np.errstate(invalid="ignore", over="ignore"):
+        for g in groups:  # by level: a product's factors are columns of lower levels
+            a, b = I[g], J[g]
+            sq = a == b
+            gap[:, g] = _mccormick_gap(V[:, a], V[:, b], L[:, a], U[:, a], L[:, b], U[:, b], sq)
+            c = n + g
+            V[:, c] = V[:, a] * V[:, b]
+            cs = np.stack([L[:, a] * L[:, b], L[:, a] * U[:, b], U[:, a] * L[:, b], U[:, a] * U[:, b]])
+            straddle = sq & (L[:, a] <= 0) & (U[:, a] >= 0)  # (an interval square straddling 0 starts at 0)
+            L[:, c], U[:, c] = np.where(straddle, 0.0, cs.min(axis=0)), cs.max(axis=0)
+    return np.asarray((S.T @ gap.T).T)
 
 
+_POLY_PREP = {}  # id(Q) -> (Q, levels' pair indices, support matrix): ``_poly_prep``'s cache
+
+
+def _poly_prep(Q, n):
+    """A polynomial form's products grouped by level (each group's factors are columns of lower
+    levels), and the sparse (P, n) matrix of each product's variables (its monomial's support)."""
+    hit = _POLY_PREP.get(id(Q))
+    if hit is not None and hit[0] is Q:
+        return hit[1], hit[2]
+    import scipy.sparse as sp
+
+    I, J = Q.pairs[:, 0], Q.pairs[:, 1]
+    P = len(I)
+    lev = np.zeros(n + P, np.int64)
+    sup = [frozenset((j,)) for j in range(n)]
+    for p in range(P):
+        a, b = int(I[p]), int(J[p])
+        lev[n + p] = 1 + max(lev[a], lev[b])
+        sup.append(sup[a] | sup[b])
+    groups = [np.flatnonzero(lev[n:] == v) for v in np.unique(lev[n:])]
+    rows = np.repeat(np.arange(P), [len(sup[n + p]) for p in range(P)])
+    cols = np.fromiter((j for p in range(P) for j in sorted(sup[n + p])), np.int64, count=len(rows))
+    S = sp.csr_matrix((np.ones(len(rows)), (rows, cols)), shape=(P, n))
+    if len(_POLY_PREP) > 8:
+        _POLY_PREP.clear()
+    _POLY_PREP[id(Q)] = (Q, groups, S)
+    return groups, S
+
+
+_GAP_POLY = True  # branching: weigh scores by the McCormick gaps of a polynomial form's products too (not only a quadratic one's)
 _GAP_FLOOR = 1e-3  # _gap_weights: weight of a variable whose products are all exact at the relaxation point
 
 
@@ -233,18 +290,27 @@ def clear_cache():
     _CACHE.clear()
 
 
+_CACHE_LOCK = threading.Lock()  # (``minimize``'s speculative kernel build, ``_SPECULATE``, uses the cache off the main thread)
+
+
 def _cached(key, build):
-    """LRU lookup of ``key`` in the kernel cache; unhashable keys are not cached."""
+    """LRU lookup of ``key`` in the kernel cache; unhashable keys are not cached. (The lock
+    guards the dictionary only: ``build`` runs outside it.)"""
     try:
-        hit = key in _CACHE
+        with _CACHE_LOCK:
+            hit = key in _CACHE
+            if hit:
+                _CACHE.move_to_end(key)
+                return _CACHE[key]
     except TypeError:
         return build()
-    if hit:
-        _CACHE.move_to_end(key)
-        return _CACHE[key]
-    val = _CACHE[key] = build()
-    while len(_CACHE) > _CACHE_SIZE:
-        _CACHE.popitem(last=False)
+    val = build()
+    with _CACHE_LOCK:
+        if key in _CACHE:  # built meanwhile on another thread: keep that one
+            return _CACHE[key]
+        _CACHE[key] = val
+        while len(_CACHE) > _CACHE_SIZE:
+            _CACHE.popitem(last=False)
     return val
 
 
@@ -1250,6 +1316,30 @@ def _quadratic_form(f, ineq, eq, n):
     return _cached(("quadratic_form", f, ineq, eq, n), lambda: quadratic_form(f, ineq, eq, n))
 
 
+def _kernel_opts(*, n_fw, n_kelley, fbbt, fbbt_rounds, dbbt, obbt, obbt_rounds, univariate, alphabb, multivariate,
+                 lifted, crown, feas_tol, safe, imask, quadratic, cut_pool, exact, bigm, batch, batch_sizes):
+    """``_Kernels``' options (its cache key) as ``minimize`` sets them."""
+    return dict(n_fw=n_fw, n_kelley=n_kelley, fbbt=bool(fbbt), fbbt_rounds=fbbt_rounds, dbbt=bool(dbbt),
+                obbt=obbt or False, obbt_rounds=obbt_rounds, univariate=univariate, alphabb=alphabb,
+                multivariate=multivariate, lifted=lifted, crown=bool(crown), feas_tol=feas_tol, safe=bool(safe),
+                integer=tuple(int(i) for i in np.flatnonzero(imask)), quadratic=bool(quadratic),
+                cut_pool=int(cut_pool), exact=bool(exact), bigm=bool(bigm) and bool(imask.any()),
+                boxes=_memory_boxes(batch, batch_sizes))  # fmt: skip
+
+
+# Speculative bound kernel: on a problem with unbounded variables, ``bound_domain`` (seconds: local
+# solves, LP bounds) runs before the kernels' options are known, and the bound kernel's trace and
+# compile then start after it. When the lifted LP bounds the problem its kernels do not depend on
+# the box (the options that do, ``cut_pool`` and ``exact``, only matter for the reduced-space
+# cuts), so ``minimize`` builds them on a background thread while ``bound_domain`` runs, and uses
+# them if the options it then computes agree (otherwise the speculative compile is only lost CPU).
+# Continuous problems only: with integers the root stages after the bound (dives, local solves,
+# probing) wait for kernels compiled behind the bound kernel, and an earlier root bound bought
+# nothing there in one measurement under heavy load (minlp.org m391, load 13-15: no incumbent
+# from the root dives, 15 nodes against 1727 without speculation).
+_SPECULATE = True
+
+
 _ASSIGN_KELLEY = 2  # n_kelley=None: Kelley rounds on disjunctive assignment models (_assignment_bigm), else 4
 _ASSIGN_MIN, _ASSIGN_SHARE = 20, 0.9  # _assignment_bigm: at least this many binaries, this share of them in both kinds of rows
 _ASSIGN_LINEAR = 0.5  # branch_var="auto": pseudocost when at least this share of the binaries switch a linear row
@@ -1381,6 +1471,32 @@ def _pseudo_boolean(K, f, ineq, eq, lo, hi, lo_user, hi_user, imask, abs_tol, re
     return Result(x=x, fun=ub, lower_bound=min(lb, ub), converged=True, iterations=0, nodes=1, evaluations=0,
                   time=time.perf_counter() - t0, status="optimal", max_violation=maxv, verified=True,
                   message="solved exactly by variable elimination (binary polynomial)")
+
+
+def _speculate(f, ineq, eq, n, kw, sym_seconds):
+    """Start building ``minimize``'s kernels before ``bound_domain`` (``_SPECULATE``; a continuous
+    problem), on a background thread: the kernel options ``kw`` (no cut pool), then, if the
+    lifted LP bounds the problem, the bound kernel's trace and compile for the smallest call
+    size. Returns the future of those options (None when the lifted LP does not apply)."""
+
+    def build():
+        o = dict(kw)
+        if o["n_kelley"] is None:
+            o["n_kelley"] = 4  # (no integers: not an assignment model, ``_ASSIGN_KELLEY``)
+        o = _kernel_opts(**o)
+        K = _cached(("kernels", f, ineq, eq, tuple(sorted(o.items()))), lambda: _Kernels(f, ineq, eq, **o))
+        if K.lifted_form(n, sym_seconds) is None:
+            return None
+        b = min({min(int(s), kw["batch"]) for s in kw["batch_sizes"]} or {kw["batch"]})  # (``_Padder``'s smallest size)
+        K.bound.start(b, n, functools.partial(K.fingerprint, n) if kcache.cache_root() else None)
+        return o
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    ex = ThreadPoolExecutor(1, thread_name_prefix="jaxglobal-speculate")
+    fut = ex.submit(build)
+    ex.shutdown(wait=False)
+    return fut
 
 
 def _minimize(
@@ -1550,6 +1666,15 @@ def _minimize(
     lo_user, hi_user = lo, hi
     seed_x, seed_f = None, np.inf
     imask = _integer_mask(integer, lo.size)
+    spec = None  # the speculative kernel build (``_SPECULATE``): a future of its options, None if not lifted
+    if _SPECULATE and not imask.any() and not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))) \
+            and (ineq is not None or eq is not None) and quadratic and not lifted and not crown and not _FAST_COMPILE and obbt in (False, None, "root", "tree") \
+            and len(jax.devices() if devices is None else devices) == 1:  # fmt: skip
+        spec = _speculate(f, ineq, eq, lo.size, dict(
+            n_fw=n_fw, n_kelley=n_kelley, fbbt=fbbt, fbbt_rounds=fbbt_rounds, dbbt=dbbt, obbt=obbt,
+            obbt_rounds=obbt_rounds, univariate=univariate, alphabb=alphabb, multivariate=multivariate, lifted=lifted,
+            crown=False, feas_tol=feas_tol, safe=safe, imask=imask, quadratic=quadratic, cut_pool=0, exact=False,
+            bigm=bigm, batch=batch, batch_sizes=batch_sizes), min(SYM_SHARE * time_limit, SEARCH_SECONDS))
     _mark("bound_domain")
     if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
         # derive finite bounds from the constraints and a feasible point (domain.py)
@@ -1625,12 +1750,18 @@ def _minimize(
         if parts_ok is not None:
             pmask, exact, convex = parts_ok(lo, hi, convex=True)
     _mark("kernels")
-    opts = dict(n_fw=n_fw, n_kelley=n_kelley, fbbt=bool(fbbt), fbbt_rounds=fbbt_rounds, dbbt=bool(dbbt),
-                obbt=obbt or False, obbt_rounds=obbt_rounds, univariate=univariate, alphabb=alphabb,
-                multivariate=multivariate, lifted=lifted, crown=bool(crown), feas_tol=feas_tol, safe=bool(safe),
-                integer=tuple(int(i) for i in np.flatnonzero(imask)), quadratic=bool(quadratic),
-                cut_pool=int(cut_pool) if pmask is not None and pmask.any() else 0, exact=bool(exact),
-                bigm=bool(bigm) and bool(imask.any()), boxes=_memory_boxes(batch, batch_sizes))  # fmt: skip
+    opts = _kernel_opts(n_fw=n_fw, n_kelley=n_kelley, fbbt=fbbt, fbbt_rounds=fbbt_rounds, dbbt=dbbt, obbt=obbt,
+                        obbt_rounds=obbt_rounds, univariate=univariate, alphabb=alphabb, multivariate=multivariate,
+                        lifted=lifted, crown=crown, feas_tol=feas_tol, safe=safe, imask=imask, quadratic=quadratic,
+                        cut_pool=int(cut_pool) if pmask is not None and pmask.any() else 0, exact=exact, bigm=bigm,
+                        batch=batch, batch_sizes=batch_sizes)  # fmt: skip
+    if spec is not None:  # the speculative kernels (``_SPECULATE``), if they are these
+        try:
+            o = spec.result()
+        except Exception:  # noqa: BLE001 -- a failed speculative build: build as usual
+            o = None
+        if o is not None and dict(opts, cut_pool=0, exact=False) == o:
+            opts = o  # (the lifted LP takes no cut pool and ignores ``exact``)
     K = _cached(("kernels", f, ineq, eq, tuple(sorted(opts.items()))), lambda: _Kernels(f, ineq, eq, **opts))
     # the cut pool: tangents of the root box's relaxation at good points, added to every node LP
     pool = None
@@ -1766,6 +1897,11 @@ def _minimize(
         P = lf.sym[np.all((lo[lf.sym] == lo) & (hi[lf.sym] == hi), axis=1)]
         sym = P if len(P) else None
         sym_moved = np.any(P != np.arange(lo.size), axis=0)  # (the support of the elements kept)
+    # the lifted LP's products, whose McCormick gaps weigh the branching scores (``_gap_weights``)
+    # (_GAP_POLY: a polynomial form's too. On minlp.org m6_del_asl_hvar, the products of near-fixed
+    # complementarity variables (width ~1e-5, but relative width 0.3-0.6 against their root width)
+    # held the best box's bound for 21 of 60 iterations without them: 2813 -> 1777 nodes)
+    gap_form = quad if quad is not None or not _GAP_POLY else lf
     width0 = np.where(branchable, width0, np.inf)  # never split linear variables
     if branch_auto and branch_var == "width" and assign >= _ASSIGN_LINEAR:
         # disjunctive assignment models switching linear rows (docs/ANALYSIS-bigm.md); on the
@@ -2870,8 +3006,8 @@ def _minimize(
         if branch_var == "width":
             pp = np.arange(k)
             score = np.where(branchable & free, relw, -1.0)
-            if quad is not None:  # lifted quadratic LP: relative width times the McCormick gap
-                score = _gap_weights(quad, plo, phi, pxr, relw, branchable & free)
+            if gap_form is not None:  # lifted LP: relative width times the McCormick gap
+                score = _gap_weights(gap_form, plo, phi, pxr, relw, branchable & free)
             if imask.any():  # integers fractional at the relaxation point first, most fractional first
                 frac = np.abs(pxr - np.round(pxr))
                 score = np.where(imask & free & (frac > INT_TOL), 2.0 + frac, score)
@@ -2887,14 +3023,14 @@ def _minimize(
             groups = [[i] for i in range(k)]
         else:
             score, _ = pseudo_scores(relw, phi > plo, pxr)
-            if branch_var == "pseudocost" and quad is not None:
-                # lifted quadratic LP: weigh each continuous variable's pseudocost score by its
+            if branch_var == "pseudocost" and gap_form is not None:
+                # lifted LP (quadratic or polynomial, ``gap_form``): weigh each continuous variable's pseudocost score by its
                 # width score (relative width times the McCormick gap of its products at the
                 # relaxation point), much as SCIP combines pseudocosts with violation. Gains
                 # alone say nothing while the bound sits on a floor (kall_diffcircles_8's
                 # objective variable >= 0 holds every bound at 0 for the first ~15k nodes):
                 # unsolved at 61k nodes before, solved in 18k with the weights
-                wsc = _gap_weights(quad, plo, phi, pxr, relw, branchable & free)
+                wsc = _gap_weights(gap_form, plo, phi, pxr, relw, branchable & free)
                 score = np.where((score >= 0) & ~imask, score * np.maximum(wsc, _GAP_FLOOR), score)
             if branch_var == "pseudocost":
                 if imask.any():  # as with width, integers fractional at the relaxation point first

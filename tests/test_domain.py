@@ -598,3 +598,34 @@ def test_batched_caps_on_large_tapes_match_one_at_a_time(seed, monkeypatch):
     for a, c in zip(one, many):
         np.testing.assert_allclose(a, c, rtol=1e-12)
     assert np.all(np.isfinite(many[1][ny:ny + ns][np.isin(np.arange(ns), slack)]))
+
+
+@pytest.mark.parametrize("speculate", [True, False])
+def test_speculative_kernels(monkeypatch, speculate):
+    """With unbounded variables and a lifted LP, the kernels are built while ``bound_domain`` runs
+    (``bnb._SPECULATE``) and used: one set of kernels, the same result as without."""
+    from jaxglobal import bnb
+
+    monkeypatch.setattr(bnb, "_SPECULATE", speculate)
+    bnb.clear_cache()
+    futures = []
+    spec = bnb._speculate
+    monkeypatch.setattr(bnb, "_speculate", lambda *a: futures.append(spec(*a)) or futures[-1])
+
+    def f(x):  # x2 = x0 * x1 and x3 = x2 * x0 (cubic) are declared free
+        return (x[0] - 0.7) ** 2 + x[3] + 0.5 * x[2]
+
+    def eq(x):
+        return jnp.stack([x[2] - x[0] * x[1], x[3] - x[2] * x[0]])
+
+    r = minimize(f, [0.0, -1.0, -INF, -INF], [2.0, 1.0, INF, INF], eq=eq, time_limit=120)
+    assert r.status == "optimal"
+    kernels = [k for k in bnb._CACHE if isinstance(k, tuple) and k[0] == "kernels" and k[1] is f]
+    assert len(kernels) == 1
+    # the optimum by grid search: x1 = -1 (x0 > 0), min over x0 of (x0 - 0.7)^2 - x0^2 - 0.5 x0
+    t = np.linspace(0.0, 2.0, 200001)
+    fstar = np.min((t - 0.7) ** 2 - t**2 - 0.5 * t)
+    assert abs(r.fun - fstar) <= 1e-5 * (1 + abs(fstar)) and r.lower_bound <= fstar + 1e-6
+    assert len(futures) == int(speculate)
+    if speculate:  # the lifted LP applies, and the kernels used are the speculative ones
+        assert futures[0].result() == dict(kernels[0][4])

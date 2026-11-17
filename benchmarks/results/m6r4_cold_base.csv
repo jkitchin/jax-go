@@ -1,0 +1,5 @@
+solver,name,status,time,primal,dual,nodes,message,load,threads,peak_rss_mb
+jaxglobal,m6_del_asl_hvar,time_limit,60.336499168000046,1.5364151807428352,1.5262039662556304,2021,time_limit,9.18,0,1185
+jaxglobal,m6_del_asl_hvar,time_limit,60.97883832499974,1.5364151807428352,1.5262039662556304,2021,time_limit,7.30,0,1238
+jaxglobal,m6_del_asl_hvar,time_limit,60.55453361799937,1.5364151807428352,1.5262039662556304,2021,time_limit,7.57,0,1187
+jaxglobal,m6_del_asl_hvar,time_limit,60.93099905100007,1.5364151807428352,1.530505491199187,2789,time_limit,6.87,0,1254

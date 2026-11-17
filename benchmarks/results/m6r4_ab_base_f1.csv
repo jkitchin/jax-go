@@ -1,0 +1,3 @@
+solver,name,status,time,primal,dual,nodes,message,load,threads,peak_rss_mb
+jaxglobal,m6_del_asl_hvar,time_limit,61.03127890399992,1.5364151807428352,1.4694988432599272,741,time_limit,5.48,2,1092
+jaxglobal,m473_Bental5_2Player_PriceTaker_FixedCharge0,time_limit,61.54932798799928,7221.614583332933,7256.654379680552,463,time_limit,8.67,2,1110

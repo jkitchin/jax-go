@@ -199,6 +199,34 @@ def test_gap_weights():
     assert np.allclose(w[1], [1.0, 0.5, -1.0])
 
 
+def test_gap_scores_polynomial_form():
+    """On a polynomial form a product's factor can be a product column (x0 * (x1^2)): the
+    factor's value is the exact product at the point, its bounds the interval product, and the
+    product's gap counts for every variable of the monomial. A quadratic form is unchanged."""
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from jaxglobal.bnb import _gap_scores, _mccormick_gap
+
+    lo = np.array([[0.5, -1.0], [1.0, 2.0]])
+    hi = np.array([[2.0, 2.0], [3.0, 2.5]])
+    x = np.array([[1.0, 0.5], [2.0, 2.25]])
+    Q = SimpleNamespace(pairs=np.array([[1, 1], [0, 2]]))  # column 2 = x1^2, column 3 = x0 * x1^2
+    g = _gap_scores(Q, lo, hi, x)
+    sq = _mccormick_gap(x[:, 1], x[:, 1], lo[:, 1], hi[:, 1], lo[:, 1], hi[:, 1], True)
+    l2 = np.where(lo[:, 1] * hi[:, 1] <= 0, 0.0, np.minimum(lo[:, 1] ** 2, hi[:, 1] ** 2))  # [0, 4] and [4, 6.25]
+    u2 = np.maximum(lo[:, 1] ** 2, hi[:, 1] ** 2)
+    cub = _mccormick_gap(x[:, 0], x[:, 1] ** 2, lo[:, 0], hi[:, 0], l2, u2, False)
+    assert np.all(cub > 0) and np.all(sq > 0)
+    assert np.allclose(g[:, 0], cub) and np.allclose(g[:, 1], sq + cub)
+    # a quadratic form: the same as the pairwise sum
+    Q2 = SimpleNamespace(pairs=np.array([[0, 1], [1, 1]]))
+    g2 = _gap_scores(Q2, lo, hi, x)
+    xy = _mccormick_gap(x[:, 0], x[:, 1], lo[:, 0], hi[:, 0], lo[:, 1], hi[:, 1], False)
+    assert np.allclose(g2[:, 0], xy) and np.allclose(g2[:, 1], xy + sq)
+
+
 def _assignment_model(items=10, link=True, assign=True, quad=False):
     """``items`` points x_i in [0, 10], each placed left (b_i0: x_i <= 4) or right (b_i1: x_i >= 6)
     by big-M rows; minimize sum (x_i - 5 - 0.1 i)^2. Variables: x (items), then b (2 items)."""
