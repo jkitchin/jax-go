@@ -315,7 +315,7 @@ def test_separate_writes_only_pool_slots():
     L = _layout(Q, n, n_tan, False, n_sep)
     P, W, K, T2 = len(Q.pairs), Q.pool_cols.shape[1], L.K, len(Q.qr_g)
     assert K and L.pattern.m == L.sep_row + n_sep * K
-    assert L.sep_row == 4 * P + Q.n_g + 2 * Q.n_h + 2 * len(Q.rlt_var) + Q.cut_rhs.size + n_tan * P + 2 * T2
+    assert L.sep_row == 4 * P + Q.n_g + 2 * Q.n_h + 2 * len(Q.rlt_var) + Q.cut_rhs.size + n_tan * L.spread * P + 2 * T2
     lo, hi = jnp.asarray(np.r_[np.zeros(4), -1.0, -1.0]), jnp.asarray(np.r_[np.ones(4), 2.0, 2.0])
     vlo, vhi, vals, b, _ = _lp(Q, L, lo, hi, 0.0, False)
     cols = jnp.asarray(L.pattern.cols)
