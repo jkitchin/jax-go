@@ -389,6 +389,10 @@ class _Gate:
 
         _pools()[1].submit(fn).add_done_callback(done)
 
+    @property
+    def is_open(self):
+        return self._open
+
     def open(self, *_):
         """Start the held compiles (idempotent; usable as a done callback)."""
         with self._lock:
@@ -1130,10 +1134,35 @@ _OA = True
 _OA_SHARE, _OA_SECONDS = 0.15, 30.0  # its time: at most this share of time_limit (in all) and seconds per call
 _OA_EVERY = 0.1  # the search resumes it each time this share of the time limit (at most 600 s) has passed
 _OA_MILP = 0.5  # each MILP of a call gets at most this share of the call's budget
+# MILP rounds per call, within its time budget (32 was tried: on minlp.org m406 the root call's 8 rounds
+# stopped short of the optimum, but that was with its completions unsolved, see ``root["oa"]``; with
+# 32, m420_kClus_3_20_2_BM searched 1019-1279 nodes against 3327 with 8 and no early build)
+_OA_ROUNDS = 8
+# an improving completion is solved again from itself with ``_WARM[0]``: on minlp.org m410 cold the
+# optimal assignment's completion stopped at 41709.26 (optimum 41572.90), and its no-good cut then
+# made the next MILP infeasible: the heuristic was done for the solve
+_OA_WARM = True
 # the root call waits at most this share of its budget for the heuristic's cut program to compile (it
 # starts compiling just before): cold, the 4.5 s wait (of a 60 s limit) on minlp.org's layout models
 # always ended before the compile did, and the search then ran the heuristic anyway
 _OA_ROOT_WAIT = 0.0
+# the heuristic's cut program is traced on the kernel tracer thread (after the root kernels) and
+# compiled once the root bound kernel is, when the bound kernel is still building as the root waits
+# for it (cold): the main thread is idle then. Started after the root stages instead, its trace and
+# compile (20 s on minlp.org m410_CLay0203HRS, cold) ended at 57 s of a 60 s limit, and the call that
+# finds m410's optimum (1.5 s, warm) never ran. Off (mixed evidence): m406 solved in 2 of 3 cold A/B pairs
+# with it (base: 0 of 3), but on the k-means big-M models (m420-m422) the early trace and compile cost the
+# search 10-60% of its nodes (bounds 10-15% lower in 3 of 3, twice). m410 itself gets its cuts from the
+# pool kernel (``_OA_POOL``). False: after the root stages, as before.
+_OA_EARLY = False
+# ...its compile, though, only for a program of at most this many jaxpr equations (else once the search
+# starts): minlp.org m399 / m406, 34k / 31k, compile in 3-4 s; m422_kClus_3_20_5_BM, 77k, took 20 s at
+# load 14 and slowed the root stages by 6 s; m420_kClus_3_20_2_BM (41k) searched fewer nodes with it
+_OA_EARLY_EQNS = 35_000
+# with a cut pool (reduced-space LP), the heuristic takes its cuts from the pool's tangent kernel (the
+# lp.py relaxation, compiled in the background anyway) instead of its own cut program (``jacfwd`` of
+# relax.py's relaxation of every row: 76k jaxpr equations, 9-18 s of XLA compile on m410)
+_OA_POOL = True
 _PROBE = True  # integer variables: root probing on binaries (``probe`` in ``minimize``)
 # root probing's estimated cost may take at most this share of the time left (None: no limit); minlp.org
 # m400 (36 binaries, 0.5-2 s per bound call cold) spent 10 s of a 60 s limit probing for no gain
@@ -1149,7 +1178,14 @@ _DIVE_BACKOFF = 80  # most iterations between periodic dives that do not improve
 # optimal
 _DIVE_FRAC = 0.2
 _ROOT_DIVE_SHARE = 0.1  # the root dives' kernel chunks: at most this share of the time limit (None: no limit)
+# with an incumbent, the root dives run only if the dive kernel is ready: they do not wait for its
+# compile (cold, about 5 s on minlp.org m410_CLay0203HRS at load 3). The search's dives use it later.
+_ROOT_DIVE_NOWAIT = True
 _POOL_NLP_FRAC = 0.3  # at most this share of the wall time goes to the cut pool's local solves
+# True: ...of the search's wall time under a time limit (else of the solve's). Off: cold, the elapsed time
+# is mostly compile, and on minlp.org m410 the share of it let them take 5.5 of the search's 26 s, but
+# MINLPLib cvxnonsep_normcon30 needs them (123 nodes; 2729-3567 and unsolved in 60 s with it on)
+_POOL_NLP_SEARCH = False
 _POOL_CHUNK = 16  # points per call of the cut pool's tangent kernel
 _POOL_ADD = 2  # LP points of the lowest-bound boxes of each batch whose tangents join the cut pool
 # the per-child local solves of the cut pool are probed (half the children get them) on
@@ -1178,6 +1214,18 @@ _RETRY_MIN, _RETRY_FRAC = 1.0, 0.05
 # box the solve slides back to the root's relaxation optimum, whose roundings were tried already.
 # On minlp.org m474 the LP points of the best open boxes carry the optimal assignment; m399 too.
 _NODE_LOCAL = True
+# under a time limit and with integer variables, the search's local searches (``update_incumbent``'s,
+# fix-and-solves of the roundings of the LP points of each batch) may take at most this share of the search's wall time so far: (without an
+# incumbent, with one). A batch of local solves is then skipped; the first always runs. On the
+# minlp.org CLay models they took 50-90% of the search (m400: 23.5 of 25 s, 3 bound calls in all;
+# m410: 13.6 of 26 s), one 1-7 s batch per iteration against a 0.3-1 s bound call. Continuous problems
+# are left out: there these solves are the incumbent heuristic (MINLPLib kall_diffcircles_8 lost its
+# optimum with the cap). None: no cap.
+_SEARCH_LOCAL_SHARE = (0.5, 0.25)
+# the pool kernel without rows (``pool_judge``) is built only with this many times the root bound
+# kernel's measured build time (trace + compile, from the kernel start to the root bound) left: on
+# m410 cold it started 7 s before the limit (a 12 s build) and slowed the last local solves
+_PLAIN_FIT = 2.0
 _POLISH_ROUNDS = 5  # incumbent polish (``polish`` in ``minimize``): rounds while it keeps improving
 _POLISH_CANDS = 512  # integer neighbours (one step, swaps) tried per polish round
 _POLISH_CHUNK = 64  # most neighbours per batch of local solves (the time budget is checked between batches)
@@ -1186,6 +1234,10 @@ _ROOT_OBBT_COST = 10.0  # root OBBT runs only with this many slowest bound-kerne
 # share of the time left (None: no such check)
 _ROOT_OBBT_SHARE = 0.25
 _OBBT_FIT_SHARE = 0.5  # the root OBBT kernel compiles after the root bound only if its call fits this share of the time left
+# root OBBT: a compile still held or running at the stage counts in its cost (the bound kernel's compile
+# time). Off: on minlp.org m410 it saved a 5.5-9 s wait for no tightening, but MINLPLib cvxnonsep_nsig30
+# lost its solve (115 -> 2047+ nodes) when the cold root skipped OBBT for it
+_OBBT_HELD = False
 _SCREEN_BATCHES = (8, 64)  # rows per call of the candidate screens (fvals, viol; ``_batched``)
 # obbt="tree": a batch's OBBT calls run only if their estimated cost is at most this share of the time
 # left (None: no such check); otherwise its boxes are bounded without OBBT (``tree_obbt_fits``)
@@ -1559,6 +1611,7 @@ def _minimize(
     extras get shares of it: the root's local solves ``_ROOT_LOCAL_SHARE``, its polish
     ``_POLISH_ROOT_SHARE``, its dives ``_ROOT_DIVE_SHARE``, probing ``_PROBE_SHARE`` of the time
     left, and ``obbt="tree"`` runs a batch's OBBT only when it fits ``_TREE_OBBT_SHARE`` of it.
+    With integer variables the search's local searches get ``_SEARCH_LOCAL_SHARE`` of its wall time.
 
     Bounds may be infinite: finite ones are derived first from the constraints,
     unused variables, and FBBT against a feasible point found by local solves
@@ -1835,6 +1888,7 @@ def _minimize(
         if done is not None:
             return done
     _mark("start_compile")
+    t_build = time.perf_counter()
     extra = () if pool is None else (pool["rows"].shape, pool["root"].shape)  # the bound kernel's pool arguments
     padded = _Padder(batch, batch_sizes, jax.devices() if devices is None else list(devices))
     # the other kernels' XLA compiles wait for the root bound kernel's (``_Gate``): traced now, compiled
@@ -1913,6 +1967,7 @@ def _minimize(
                            lambda: make_local(f, ineq, eq, lo, hi, local_solver, patterns=K.structure(lo.size)))
 
     root = dict(on=True, local=0.0, polish=0.0)  # in the root stages; their local solves' and polish's wall s
+    search = dict(t=None, local=0.0)  # when the search started; wall s of its local searches (``_SEARCH_LOCAL_SHARE``)
 
     def solve_local(X0, LO=None, HI=None, options=None):
         """``solve_local_`` with pounce's ``max_wall_time`` set from the time left before ``deadline``.
@@ -1929,7 +1984,9 @@ def _minimize(
         (screened like any candidate, so they only propose what they are). On minlp.org m472 and
         m474, cold, they took 13-28 s of a 60 s limit for incumbents the search's node-box solves
         then improved on."""
-        timed = root["on"] and deadline is not None and _ROOT_LOCAL_SHARE is not None
+        # (the outer-approximation heuristic's completions are not: it has its own budget, and an
+        # unsolved completion would cost it the assignment for good, through its no-good cut)
+        timed = root["on"] and not root.get("oa") and deadline is not None and _ROOT_LOCAL_SHARE is not None
         if deadline is not None:
             cap = max(deadline - time.perf_counter(), 0.05)
             if timed:
@@ -2164,7 +2221,8 @@ def _minimize(
         if pool is None or not local_solve or _past(deadline):
             return None
         t = time.perf_counter()
-        if pool.setdefault("nlp_time", 0.0) > _POOL_NLP_FRAC * (t - t0):
+        since = search["t"] if _POOL_NLP_SEARCH and deadline is not None and search["t"] is not None else t0
+        if pool.setdefault("nlp_time", 0.0) > _POOL_NLP_FRAC * (t - since):
             return None
         st = pool.setdefault("nlp", dict(mode="probe", since=it, gt=[], gu=[]))
         if st["mode"] == "on" and it - st["since"] >= _POOL_REPROBE:
@@ -2195,10 +2253,12 @@ def _minimize(
         if min(len(st["gt"]), len(st["gu"])) >= _POOL_PROBE_N:
             on = np.mean(st["gt"]) >= np.mean(st["gu"]) + _POOL_GAIN
             st.update(mode="on" if on else "off", since=it)
-            if not on and padded.mesh is None:
+            fits = deadline is None or _PLAIN_FIT is None or deadline - time.perf_counter() >= _PLAIN_FIT * build_s
+            if not on and padded.mesh is None and fits:
                 # the pool's rows cost the node LP up to 2x (process): the pool kernel without
                 # rows for the rest of the search, once it has compiled in the background (not
-                # at the start: that compile competed with the root phase of every solve)
+                # at the start: that compile competed with the root phase of every solve; nor
+                # without ``_PLAIN_FIT`` times the bound kernel's build time left)
                 pool["plain"] = True
                 for b in padded.sizes:
                     bound_kernel.start(b, lo.size, pool["fp"], ((0, lo.size + 2), pool["root"].shape))
@@ -2375,6 +2435,13 @@ def _minimize(
             if np.isfinite(ub) and backoff[1] > 0:
                 backoff[1] -= 1
                 return
+            if search["t"] is not None and deadline is not None and _SEARCH_LOCAL_SHARE is not None and imask.any():
+                # (``_SEARCH_LOCAL_SHARE``: the search's local searches within their share of its time)
+                share = _SEARCH_LOCAL_SHARE[1 if np.isfinite(ub) else 0]
+                if search["local"] > share * (time.perf_counter() - search["t"]):
+                    polish()
+                    return
+            t_local = time.perf_counter()
             node = blo is not None and (not imask.any() or (_NODE_LOCAL and xr is not None))
             boxes = tuple(np.array(b) for b in zip(*sboxes)) if node else None
             xl, fl = local(starts, boxes=boxes)
@@ -2396,6 +2463,8 @@ def _minimize(
             elif np.isfinite(ub):
                 backoff[0] = min(2 * backoff[0] + 1, _LOCAL_BACKOFF)
                 backoff[1] = backoff[0]
+            if search["t"] is not None:
+                search["local"] += time.perf_counter() - t_local
         polish()
 
     prng = np.random.default_rng(1)  # random starts of the incumbent heuristics (``rng`` drives the dives)
@@ -2564,11 +2633,16 @@ def _minimize(
         k = min(len(points), _DIVES)
         pad = lambda A: np.concatenate([A[:k], np.repeat(A[:1], _DIVES - k, 0)])  # noqa: E731
         steps = int(imask.sum())
-        DL, DH, X = jnp.asarray(pad(blo)), jnp.asarray(pad(bhi)), jnp.asarray(pad(points))
-        F, cut = jnp.zeros(_DIVES, jnp.bool_), jnp.asarray(ub, jnp.float64)
-        step = lambda p: jnp.asarray(p, jnp.int32)  # noqa: E731
-        try:  # compiled in the background; skipped if not ready by the deadline
-            K.dive.wait(DL, DH, X, cut, F, step(0), step(0), deadline=deadline)
+        # (NumPy arguments: the eager ``jnp`` ops they replace each compiled a tiny XLA program on the
+        # main thread, 0.8-2 s apiece next to the background compiles: 4.7 s on minlp.org m410 cold)
+        DL, DH, X = (np.asarray(pad(np.asarray(A, np.float64)), np.float64) for A in (blo, bhi, points))
+        F, cut = np.zeros(_DIVES, np.bool_), np.asarray(ub, np.float64)
+        step = lambda p: np.asarray(p, np.int32)  # noqa: E731
+        # compiled in the background; skipped if not ready by the deadline (``_ROOT_DIVE_NOWAIT``: at
+        # the root with an incumbent, if not ready now)
+        nowait = _ROOT_DIVE_NOWAIT and root["on"] and np.isfinite(ub) and deadline is not None
+        try:
+            K.dive.wait(DL, DH, X, cut, F, step(0), step(0), deadline=time.perf_counter() if nowait else deadline)
         except _CompileTimeout:
             return
         per_step = step_cost[0] or bound_call[0] or None
@@ -2692,19 +2766,79 @@ def _minimize(
     oa_state = dict(time=0.0, calls=0, mb=None, box=None, last=-np.inf, ub=np.inf)  # ``oa_primal``: wall seconds,
     # calls, ``MilpBound.propose``'s state, its box, when it last ran, the incumbent value then
 
+    def pool_tangents(P, blo, bhi):
+        """The cut pool's tangent kernel (``K.pool_cuts``, compiled for ``_POOL_CHUNK`` points) at
+        the points ``P`` on the box ``[blo, bhi]``: ``(a, b)`` of every part, ``MilpBound``'s
+        ``tangents``."""
+        exe = pool["exe"].result().result()
+        a, b = [], []
+        for c in range(0, len(P), _POOL_CHUNK):
+            Pc = P[c:c + _POOL_CHUNK]
+            Pc = np.concatenate([Pc, np.repeat(Pc[:1], _POOL_CHUNK - len(Pc), 0)])
+            ac, bc = exe(jnp.asarray(Pc, jnp.float64), jnp.asarray(blo, jnp.float64), jnp.asarray(bhi, jnp.float64))
+            a.append(np.asarray(ac))
+            b.append(np.asarray(bc))
+        return np.concatenate(a)[:len(P)], np.concatenate(b)[:len(P)]
+
+    # (``_OA_POOL``) the heuristic's cuts from the cut pool's tangent kernel, when there is one
+    oa_pool = bool(_OA_POOL and pool is not None and pool.get("exe") is not None)
+
     def oa_mb():
+        if oa_pool:  # (per solve: its tangents are this solve's kernel)
+            with _CACHE_LOCK:
+                if oa_state.get("pool_mb") is None:
+                    oa_state["pool_mb"] = milpbound.MilpBound(f, ineq, eq, lo.size, feas_tol=feas_tol,
+                                                              tangents=pool_tangents)  # fmt: skip
+            return oa_state["pool_mb"]
         return _cached(("milp_root", f, ineq, eq, lo.size, feas_tol),
                        lambda: milpbound.MilpBound(f, ineq, eq, lo.size, feas_tol=feas_tol))  # fmt: skip
 
-    def oa_start():
+    def oa_start(early=False):
         """Build and compile ``oa_primal``'s cut program in a background thread (once): 5-15 s of
         tracing and XLA compiling on minlp.org's 85-226 variable models, which on the main thread
         took most of the heuristic's budget. Started after the root stages (dives, OBBT, probing),
         only when the gap is still open: started with the root bound, its tracing (GIL) and
         compiling slowed those stages by 10-25 s under load (minlp.org m472, m474). The root call
         waits for it up to half its budget; the search's later calls run once it is done.
-        ``oa_state["fut"]`` resolves to whether it compiled."""
+        ``oa_state["fut"]`` resolves to whether it compiled.
+
+        With a cut pool (``_OA_POOL``) there is no program of its own: the cuts come from the
+        pool's tangent kernel (``pool_tangents``), compiled anyway, and the future resolves once
+        that has. ``early`` (``_OA_EARLY``): the program is traced on the kernel tracer thread,
+        after the kernels queued there (the root OBBT kernel's included: the root needs those
+        first), and compiled once ``later`` opens (the root bound kernel compiled), or once the
+        search starts for a program of more than ``_OA_EARLY_EQNS`` equations. Under a time limit
+        the pool variant starts at the root bound (stage ``root_bound``), the early program only
+        on a cold build of a large bound kernel: the main thread then waits for that kernel, and
+        the tracing and compiling of the 10-25 s above compete less with the root stages than
+        they did (the compiles are gated, ``_Gate``)."""
         if oa_state.get("fut") is not None or not (_OA and oa_binary and local_solve):
+            return
+        if early or oa_pool:
+            out = Future()
+
+            def compiled(c):
+                try:
+                    out.set_result(bool(c.result()) if not oa_pool else c.exception() is None)
+                except BaseException as e:  # noqa: BLE001 -- handed to ``oa_primal``, which skips the heuristic
+                    out.set_exception(e)
+
+            def trace():
+                try:
+                    MB = oa_mb()
+                    if oa_pool:  # (the tangent kernel was traced before this on the same thread)
+                        pool["exe"].result().add_done_callback(compiled)
+                    else:
+                        low = MB.lower()
+                        # (a large program compiles only once the search starts, as without
+                        # ``_OA_EARLY``: on m422 its 20 s compile slowed the root stages under load)
+                        small = MB.eqns is not None and _OA_EARLY_EQNS is not None and MB.eqns <= _OA_EARLY_EQNS
+                        (later if small else tier_gate).submit(lambda: MB.compile(low)).add_done_callback(compiled)
+                except BaseException as e:  # noqa: BLE001
+                    out.set_exception(e)
+
+            _pools()[0].submit(trace)
+            oa_state["fut"] = kcache.track(out)
             return
         ex = ThreadPoolExecutor(1, thread_name_prefix="jaxglobal-oa")
         oa_state["fut"] = kcache.track(ex.submit(lambda: oa_mb().ready()))
@@ -2748,6 +2882,15 @@ def _minimize(
                                                    options=dict(_WARM[-1], max_wall_time=oa_left()))), L[bad], H[bad])  # fmt: skip
                 Y[bad], F[bad] = Z, screen(Z)
             i = int(np.argmin(F))
+            if _OA_WARM and _WARM and F[i] < ub and not _past(deadline):
+                # (``_OA_WARM``) an improving completion again from itself with the small initial
+                # barrier: the proposal's assignment is then never lost to an imprecise solve (its
+                # no-good cut excludes it for good)
+                Z = np.clip(np.asarray(solve_local(Y[i:i + 1], L[i:i + 1], H[i:i + 1],
+                                                   options=dict(_WARM[0], max_wall_time=oa_left()))), L[i], H[i])  # fmt: skip
+                Fz = screen(Z)
+                if Fz[0] < F[i]:
+                    Y[i], F[i] = Z[0], Fz[0]
             if F[i] < ub:
                 ub, xbest = float(F[i]), Y[i]
             pool_add(Y[np.isfinite(F)])
@@ -2764,13 +2907,15 @@ def _minimize(
         t = time.perf_counter()
         MB = oa_mb()
         _sub("oa")
+        root["oa"] = True
         try:
             pts = ([xbest] if np.isfinite(ub) else []) + S0
             oa_state["mb"] = MB.propose(blo, bhi, imask, complete, extra=pts, cutoff=ub, budget=budget, tol=tol(),
-                                        milp_time=_OA_MILP * budget, state=oa_state["mb"])  # fmt: skip
+                                        milp_time=_OA_MILP * budget, state=oa_state["mb"], rounds=_OA_ROUNDS)  # fmt: skip
         except Exception:  # noqa: BLE001 -- an optional heuristic: any failure keeps the incumbent
             pass
         finally:
+            root["oa"] = False
             oa_state["time"] += time.perf_counter() - t
             oa_state["calls"] += 1
             oa_state["last"], oa_state["ub"] = time.perf_counter(), ub
@@ -2798,6 +2943,11 @@ def _minimize(
             K.obbt.start(1, lo.size, functools.partial(K.fingerprint, lo.size) if kcache.cache_root() else None,
                          gate=obbt_gate if _GATE_COMPILES else None)  # fmt: skip
 
+    def obbt_built():
+        """Whether the root OBBT kernel's executable is ready (its background build done)."""
+        fut = K.obbt.ready.get(K.obbt._key(K.obbt._args(1, lo.size)))
+        return bool(fut is not None and fut.done() and fut.exception() is None and fut.result().done())
+
     def obbt_may_fit():
         """Whether the root OBBT call is likely to pass its cost rules (stage ``root_obbt``): with
         ``_OBBT_FIT_SHARE`` of the time left now, as the root dives come first. If not, its kernel
@@ -2815,11 +2965,18 @@ def _minimize(
         return est <= _ROOT_OBBT_SHARE * left
 
     _mk("root_bound")
-    if obbt == "root" and (constrained or np.isfinite(ub)) and any(bound_kernel.pending(b, lo.size, extra) for b in padded.sizes):
+    building = any(bound_kernel.pending(b, lo.size, extra) for b in padded.sizes)
+    if obbt == "root" and (constrained or np.isfinite(ub)) and building:
         # the main thread is about to wait for the bound kernel's build: trace the OBBT kernel in that
         # idle time (queued behind the bound and dive kernels) rather than after the root bound,
         # when ``need_obbt`` can first tell. A warm cache has the bound kernel ready: no guess then.
         start_root_obbt()
+    big = building and getattr(bound_kernel, "traced_seconds", np.inf) >= _GATE_TRACE_S
+    if imask.any() and padded.mesh is None and deadline is not None and (oa_pool or (_OA_EARLY and big)):
+        # the heuristic's cuts: from the pool's tangent kernel (nothing to build), or its own program
+        # built early (not behind a small bound kernel: a small problem's root may close the gap,
+        # and its heuristic is then never needed); queued behind the OBBT kernel's trace
+        oa_start(early=True)
     try:
         lb, xc, fc, rlo, rhi, rxr = evaluate(lo[None], hi[None])
     except _CompileTimeout as e:  # no bound at all yet: report what is known
@@ -2831,6 +2988,7 @@ def _minimize(
                       message=f"time_limit reached {why}; no bound computed",
                       max_violation=maxv, verified=verified)  # fmt: skip
     _mk("root_incumbent")
+    build_s = time.perf_counter() - t_build  # the root bound kernel's build (trace + compile) and first call
     update_incumbent(xc, fc, lb)
 
     if need_obbt():
@@ -2872,6 +3030,11 @@ def _minimize(
         # 0.55 s bound call), it runs only if that is at most _ROOT_OBBT_SHARE of the time left.
         ov = K.obbt_variables(lo.size)  # (the variables it tightens: 2 LPs each per round)
         obbt_est = bound_call[0] * max(1.0, 2.0 * (lo.size if ov is None else len(ov)) * obbt_rounds / padded.sizes[0])
+        if _OBBT_HELD and obbt == "root" and padded.mesh is None and not obbt_built():
+            # its compile is still to run (held: ``obbt_may_fit`` said no after the root bound) or
+            # still running: the wait counts, at the root bound kernel's compile time (its build less
+            # its trace). On minlp.org m410 cold the root waited 5.5-9 s for it, for no tightening
+            obbt_est += max(build_s - getattr(bound_kernel, "traced_seconds", 0.0), 0.0)
         obbt_fits = obbt_est <= _ROOT_OBBT_SHARE * left
     if need_obbt() and obbt_fits:  # (the search would end at once on a closed gap: OBBT would only cost its compile)
         # the dives may have found the first incumbent (no constraints): start the kernel now if
@@ -2921,6 +3084,7 @@ def _minimize(
     _mk("search")
     tier_gate.open()  # (the root bound kernel's fully optimized compile, ``_FAST_COMPILE``)
     root["on"] = False
+    search["t"] = time.perf_counter()
     open_lo, open_hi, open_lb, open_xr = rlo, rhi, lb, rxr
     width0 = _branch_widths(width0, rlo, rhi)
     sumL, sumR, cnt = np.zeros(lo.size), np.zeros(lo.size), np.zeros(lo.size)  # pseudocost sums, observations

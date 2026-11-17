@@ -98,3 +98,58 @@ def test_minimize_same_answer_without_oa(monkeypatch):
     b = minimize(f, lo, hi, ineq=ineq, integer=[2, 3])
     assert a.status == b.status == "optimal" and a.verified
     assert abs(a.fun - b.fun) < 1e-5 and a.lower_bound <= a.fun + 1e-6
+
+
+def _pool_tangents(f, ineq, eq=None):
+    """``MilpBound``'s ``tangents`` from ``lp.make_pool_cuts`` (as ``minimize`` does with its cut pool's kernel)."""
+    import jax
+
+    from jaxglobal.lp import make_pool_cuts
+
+    cuts = jax.jit(jax.vmap(make_pool_cuts(f, ineq, eq), in_axes=(0, None, None)))
+    return lambda P, lo, hi: tuple(np.asarray(z) for z in cuts(jnp.asarray(P), jnp.asarray(lo), jnp.asarray(hi)))
+
+
+def test_tangent_cuts_are_valid_and_match_the_affine_rows():
+    # the cuts from the pool's tangent kernel: every cut is below its part on the box, and the
+    # affine rows' cuts are the rows themselves (the own cut program's too)
+    f, ineq, lo, hi, imask = _bigm()
+    own, tan = MilpBound(f, ineq, None, 4), MilpBound(f, ineq, None, 4, tangents=_pool_tangents(f, ineq))
+    rng = np.random.default_rng(0)
+    P = rng.uniform(lo, hi, (5, 4))
+    (vf, vg, _, _), (Jf, Jg, _, _) = tan.cut_values(P, lo, hi)
+    (vf0, vg0, _, _), (Jf0, Jg0, _, _) = own.cut_values(P, lo, hi)
+    np.testing.assert_allclose(vg, vg0, atol=1e-12)
+    np.testing.assert_allclose(Jg, Jg0, atol=1e-12)
+    np.testing.assert_allclose(vf, vf0, atol=1e-9)  # (f is convex: both are its tangent planes)
+    X = rng.uniform(lo, hi, (200, 4))
+    fx = np.array([float(f(jnp.asarray(x))) for x in X])
+    for k in range(len(P)):  # each objective cut below f on the box
+        cut = vf[k, 0] + (X - P[k]) @ Jf[k, 0]
+        assert np.all(cut <= fx + 1e-9)
+
+
+def test_propose_with_tangent_cuts():
+    f, ineq, lo, hi, imask = _bigm()
+    complete, tried = _exact_fixed(f, ineq, lo, hi, imask)
+    st = MilpBound(f, ineq, None, 4, tangents=_pool_tangents(f, ineq)).propose(lo, hi, imask, complete, budget=20.0,
+                                                                               rounds=6)
+    assert st["rounds"] >= 1 and abs(complete.ub - 0.28) < 1e-5
+    assert len(tried) == len(set(tried))
+
+
+def test_compile_options_same_cuts(monkeypatch):
+    # the cut program compiled with ``COMPILE_OPTIONS`` (LLVM -O0) and with XLA's defaults
+    import jaxglobal.milpbound as mb
+
+    f, ineq, lo, hi, _ = _bigm()
+    P = np.random.default_rng(1).uniform(lo, hi, (3, 4))
+    a = MilpBound(f, ineq, None, 4)
+    assert a.ready() and a._exe is not None
+    monkeypatch.setattr(mb, "COMPILE_OPTIONS", {})
+    b = MilpBound(f, ineq, None, 4)
+    assert b.ready()
+    import jax
+
+    for x, y in zip(jax.tree.leaves(a.cut_values(P, lo, hi)), jax.tree.leaves(b.cut_values(P, lo, hi))):
+        np.testing.assert_allclose(np.asarray(x), np.asarray(y), rtol=1e-9, atol=1e-12)
