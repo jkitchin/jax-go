@@ -40,6 +40,10 @@ _DEBUG = False
 
 CHUNK = 8  # points per call of the cut program (``cut_values``)
 MAX_EQNS = 100_000  # ``ready``: cut programs with more jaxpr equations are not compiled
+# XLA options of the cut program's compile (``ready``). It runs a few calls per MILP round, so its
+# compile is what costs: at LLVM -O0 minlp.org m410_CLay0203HRS's (76k equations) compiles in 9.3 s
+# instead of 13.7 s, and a call takes 5.0 ms instead of 6.4 ms (values equal to 2e-10). Empty: defaults.
+COMPILE_OPTIONS = {"xla_backend_optimization_level": 0}
 
 
 def _count_eqns(jaxpr):
@@ -62,10 +66,15 @@ def _vec(fn):
 class MilpBound:
     """``bound(lo, hi, points, ...)`` for one problem; the relaxations' cut functions are compiled once."""
 
-    def __init__(self, f, ineq, eq, n, feas_tol=1e-6):
+    def __init__(self, f, ineq, eq, n, feas_tol=1e-6, tangents=None):
+        """``tangents``: optional ``tangents(P, lo, hi) -> (a, b)``, numpy ``(k, K, n)`` and ``(k, K)``:
+        cuts ``a . x + b`` at the points ``P`` of valid convex minorants on ``[lo, hi]`` of the parts
+        [cv_f, cv_g..., cv_h..., -cc_h...] (``lp.make_pool_cuts``' layout; ``b = -inf`` for none).
+        ``cut_values`` then takes its cuts from it instead of compiling its own cut program
+        (``ready`` / ``lower`` / ``compile`` are not needed)."""
         from .lp import _nonlinear_vars
 
-        self.n, self.feas_tol = n, feas_tol
+        self.n, self.feas_tol, self._tangents = n, feas_tol, tangents
         g, h = _vec(ineq), _vec(eq)
         rf, rg, rh = relax(f), relax(g), relax(h)
 
@@ -78,6 +87,7 @@ class MilpBound:
         self._cuts = jax.jit(lambda X, lo, hi: (val(X, lo, hi), jac(X, lo, hi)))
         self._flo = jax.jit(lambda lo, hi: rf(0.5 * (lo + hi), lo, hi).lo)
         self._ready = None  # ``ready``: None until traced and compiled, then whether it compiled
+        self._exe = None  # ``ready``: the cut program's executable for ``cut_values``' argument shapes
         nl = _nonlinear_vars(f, ineq, eq, n)
         self.nonlinear = np.ones(n, bool) if nl is None else np.asarray(nl, bool).any(axis=0)
         with jax.ensure_compile_time_eval():
@@ -89,28 +99,54 @@ class MilpBound:
         """The cut program at the points ``P`` (k, n), evaluated ``CHUNK`` points at a time (the last
         chunk padded), so that it compiles once whatever the number of points."""
         P = np.asarray(P, np.float64)
-        lo, hi = jnp.asarray(lo), jnp.asarray(hi)
+        if self._tangents is not None:
+            a, b = (np.asarray(z, np.float64) for z in self._tangents(P, lo, hi))
+            with np.errstate(invalid="ignore"):
+                v = b + np.einsum("kmn,kn->km", a, P)  # (the value at p of each cut; -inf: no cut)
+            a = np.where(np.isfinite(v)[..., None], a, np.nan)  # (dropped by ``rows``)
+            e = np.cumsum([1, self.m_ineq, self.m_eq])
+            return ((v[:, :1], v[:, e[0]:e[1]], v[:, e[1]:e[2]], -v[:, e[2]:]),
+                    (a[:, :1], a[:, e[0]:e[1]], a[:, e[1]:e[2]], -a[:, e[2]:]))  # (-cc_h -> cc_h)
+        lo, hi = jnp.asarray(lo, jnp.float64), jnp.asarray(hi, jnp.float64)
         outs = []
         for c in range(0, len(P), CHUNK):
             Pc = P[c:c + CHUNK]
             Pc = np.concatenate([Pc, np.repeat(Pc[:1], CHUNK - len(Pc), 0)])
-            outs.append(jax.tree_util.tree_map(np.asarray, self._cuts(jnp.asarray(Pc), lo, hi)))
+            cuts = self._exe if self._exe is not None else self._cuts
+            outs.append(jax.tree_util.tree_map(np.asarray, cuts(jnp.asarray(Pc), lo, hi)))
         return jax.tree_util.tree_map(lambda *a: np.concatenate(a)[:len(P)], *outs)
 
-    def ready(self):
-        """Trace and compile the cut program (and ``_flo``) once; False when it is too large
-        (``MAX_EQNS`` jaxpr equations: smallinvDAXr3b010-011's 122,851 took 52 s and 4.2 GB to
-        compile, against 6-10 s and under 0.7 GB for 18,000-91,000 on minlp.org m426 and m474).
-        Meant for a background thread; the result is kept."""
+    def lower(self):
+        """Trace and lower the cut program; None when it is too large (``MAX_EQNS`` jaxpr
+        equations: smallinvDAXr3b010-011's 122,851 took 52 s and 4.2 GB to compile, against 6-10 s
+        and under 0.7 GB for 18,000-91,000 on minlp.org m426 and m474). The first half of
+        ``ready``, for a caller that queues the compile itself."""
+        n = self.n
+        args = (jnp.zeros((CHUNK, n)), jnp.zeros(n), jnp.ones(n))
+        if _count_eqns(jax.make_jaxpr(self._cuts)(*args).jaxpr) > MAX_EQNS:
+            return None
+        return self._cuts.trace(*args).lower()
+
+    def compile(self, low):
+        """Compile ``lower``'s result (``COMPILE_OPTIONS``) and ``_flo``; the second half of ``ready``.
+        Returns whether the cut program is ready (False for ``low`` None)."""
         if self._ready is None:
-            n = self.n
-            args = (jnp.zeros((CHUNK, n)), jnp.zeros(n), jnp.ones(n))
-            if _count_eqns(jax.make_jaxpr(self._cuts)(*args).jaxpr) > MAX_EQNS:
+            if low is None:
                 self._ready = False
             else:
-                jax.block_until_ready(self._cuts(*args))
+                n = self.n
+                args = (jnp.zeros((CHUNK, n)), jnp.zeros(n), jnp.ones(n))
+                exe = low.compile(compiler_options=dict(COMPILE_OPTIONS)) if COMPILE_OPTIONS else low.compile()
+                jax.block_until_ready(exe(*args))
                 jax.block_until_ready(self._flo(args[1], args[2]))
-                self._ready = True
+                self._exe, self._ready = exe, True
+        return self._ready
+
+    def ready(self):
+        """Trace and compile the cut program (and ``_flo``) once (``lower``, then ``compile``); False
+        when it is too large. Meant for a background thread; the result is kept."""
+        if self._ready is None:
+            self.compile(self.lower())
         return self._ready
 
     def rows(self, P, lo, hi):

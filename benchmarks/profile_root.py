@@ -119,6 +119,8 @@ def child(name, nl_dir, tl):
 
     jax.monitoring.register_event_time_span_listener(on_span)
     bnb._PROFILE = lambda stage: marks.append((stage, time.time()))
+    trace = []  # (stage or +sub-event, incumbent, bound, time): ``bnb._TRACE``, every search iteration too
+    bnb._TRACE = lambda stage, ub: trace.append((stage, float(ub), float(bnb._LB[0]), time.time()))
 
     # setup work on the main thread
     bnb.bound_domain = timed("fn", "bound_domain", bnb.bound_domain)
@@ -146,7 +148,15 @@ def child(name, nl_dir, tl):
 
         def timed_solve(X0, *b, **kw):
             n_local[0] += 1
-            return timed("fn", "local_solve", solve, lambda a_, k_: f"#{n_local[0]} starts={len(X0)}")(X0, *b, **kw)
+            # the caller chain inside bnb (e.g. update_incumbent>local>solve_local): which heuristic paid
+            fr, who = sys._getframe(1), []
+            while fr is not None and len(who) < 4:
+                if fr.f_globals.get("__name__") == "jaxglobal.bnb" and fr.f_code.co_name != "_minimize":
+                    who.append(fr.f_code.co_name)
+                fr = fr.f_back
+            who = ">".join(reversed(who[1:]))  # (without solve_local itself)
+            return timed("fn", "local_solve", solve,
+                         lambda a_, k_: f"#{n_local[0]} starts={len(X0)} {who}")(X0, *b, **kw)  # fmt: skip
 
         return timed_solve
 
@@ -176,7 +186,9 @@ def child(name, nl_dir, tl):
             t = time.time()
             try:
                 wait = None if deadline is None or not np.isfinite(deadline) else max(deadline - time.perf_counter(), 0)
-                fut.result(timeout=wait).result(timeout=wait)
+                inner = fut.result(timeout=wait)
+                bnb._Gate.release(inner)  # (a held compile: needed now, as ``_Precompiled.__call__`` does)
+                inner.result(timeout=wait)
             except Exception:
                 pass
             span("fn", f"wait:{self.name}", t, time.time())
@@ -297,7 +309,7 @@ def child(name, nl_dir, tl):
         info["quadratic"] = any(v is not None for v in K._quadratic.values())
         info["structure"] = any(v is not None for v in K._structure.values())
     return dict(name=name, t_import=t_import, t_read=t_read, t_min=t_min, t_end=t_end, marks=marks, spans=spans,
-                paths=paths, info=info)  # fmt: skip
+                paths=paths, info=info, trace=trace)  # fmt: skip
 
 
 # ---------------------------------------------------------------- analysis
