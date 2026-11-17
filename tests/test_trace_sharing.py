@@ -194,7 +194,9 @@ def test_pool_cuts_skip_affine_functions(monkeypatch):
     monkeypatch.setattr(LP, "_nonlinear_of", lambda f, g, h: (lambda n: None))
     old = jax.vmap(LP.make_pool_cuts(_f, _g, _h, univariate=True, alphabb=True), in_axes=(0, None, None))(P, lo, hi)
     (a1, b1), (a0, b0) = new, old
-    live = np.r_[np.ones(4, bool), np.zeros(4, bool)]  # f, g: relaxed; h (affine): left out, no cut
+    live = np.r_[np.ones(4, bool), np.zeros(4, bool)]  # f, g: relaxed; h (affine): its affine form
     assert np.array_equal(np.asarray(b1)[:, live], np.asarray(b0)[:, live])
     assert np.array_equal(np.asarray(a1)[:, live], np.asarray(a0)[:, live])
-    assert np.all(np.isneginf(np.asarray(b1)[:, ~live])) and np.all(np.asarray(a1)[:, ~live] == 0)
+    # the affine parts' cuts are the forms themselves: the relaxed cuts up to rounding
+    np.testing.assert_allclose(np.asarray(a1)[:, ~live], np.asarray(a0)[:, ~live], atol=1e-12)
+    np.testing.assert_allclose(np.asarray(b1)[:, ~live], np.asarray(b0)[:, ~live], atol=1e-12)

@@ -1041,19 +1041,27 @@ def make_pool_cuts(f, ineq=None, eq=None, univariate=False, alphabb=False, multi
     prepare, parts, _ = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate, safe, exact=exact)
     nonlinear = _nonlinear_of(f, ineq, eq)
     sizes_of = functools.lru_cache(maxsize=None)(lambda n: _part_sizes(f, ineq, eq, n))
+    affine_of = functools.lru_cache(maxsize=None)(lambda n: _affine_forms(f, ineq, eq, n))
 
     def cuts(p, lo, hi):
         n = p.size
         # a function with no nonlinear part (``_nonlinear_vars``) is not relaxed: its parts are
-        # affine, never pooled (``pool_parts``), and get b = -inf (no cut) here
-        nl, skip, live = nonlinear(n), None, None
-        if nl is not None and nl.shape[1] == n and nl.any():
+        # affine, and their cut is the affine form itself (``_affine_forms``; the parts are never
+        # pooled, but OA's ``MilpBound(tangents=...)`` reads them). Without finite forms, or with
+        # ``safe``, every function is relaxed as before.
+        nl, skip, live, forms = nonlinear(n), None, None, None
+        if not safe and nl is not None and nl.shape[1] == n and nl.any():
             sizes = sizes_of(n)
             skip = _SubParts(parts, np.flatnonzero(nl.any(axis=1)), sizes).skip
             if all(s is None for s in skip):
                 skip = None
             else:
                 live = np.concatenate([np.full(m * (2 if i == 2 else 1), s is None) for i, (m, s) in enumerate(zip(sizes, skip))])
+                forms = affine_of(n)
+                dead = ~live
+                if (forms is None or forms[0].shape != (live.size, n)
+                        or not (np.all(np.isfinite(forms[0][dead])) and np.all(np.isfinite(forms[1][dead])))):
+                    skip, live, forms = None, None, None
         data = prepare(lo, hi, skip)
 
         def fn(x):
@@ -1064,9 +1072,11 @@ def make_pool_cuts(f, ineq=None, eq=None, univariate=False, alphabb=False, multi
         b = v - J @ p
         if safe:
             b = b - SAFE_K * (p.size + 3) * EPS * (jnp.abs(v) + jnp.abs(J) @ jnp.abs(p))
-        ok = jnp.isfinite(b) & jnp.all(jnp.isfinite(J), axis=1)
         if live is not None:
-            ok &= jnp.asarray(live)
+            dead = ~live
+            J = jnp.where(jnp.asarray(dead)[:, None], jnp.asarray(np.where(dead[:, None], forms[0], 0.0)), J)
+            b = jnp.where(jnp.asarray(dead), jnp.asarray(np.where(dead, forms[1], 0.0)), b)
+        ok = jnp.isfinite(b) & jnp.all(jnp.isfinite(J), axis=1)
         return jnp.where(ok[:, None], J, 0.0), jnp.where(ok, b, -jnp.inf)
 
     return cuts
