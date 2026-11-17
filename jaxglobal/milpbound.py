@@ -374,6 +374,7 @@ class MilpBound:
                 st["NG"].append(row)
                 st["ng_lo"].append(1.0 - float(np.sum(x[ii] > 0.5)))
             Y, F, ub = fixed_solve(x[None])
+            if _DEBUG: print("complete", np.round(np.asarray(F), 3), ub)
             P = [x] + [y for y in np.atleast_2d(Y) if np.all(np.isfinite(y))]
             new = self.rows(np.clip(np.array(P), lo, hi), lo, hi)
             if new is not None:

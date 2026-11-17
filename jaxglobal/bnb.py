@@ -1138,6 +1138,10 @@ _OA_MILP = 0.5  # each MILP of a call gets at most this share of the call's budg
 # raised the MILP value 3560 -> 18492 (optimum 26669) and stopped; the next call, _OA_EVERY later,
 # found the optimum in its first round
 _OA_ROUNDS = 32
+# an improving completion is solved again from itself with ``_WARM[0]``: on minlp.org m410 cold the
+# optimal assignment's completion stopped at 41709.26 (optimum 41572.90), and its no-good cut then
+# made the next MILP infeasible: the heuristic was done for the solve
+_OA_WARM = True
 # the root call waits at most this share of its budget for the heuristic's cut program to compile (it
 # starts compiling just before): cold, the 4.5 s wait (of a 60 s limit) on minlp.org's layout models
 # always ended before the compile did, and the search then ran the heuristic anyway
@@ -1220,7 +1224,7 @@ _ROOT_OBBT_COST = 10.0  # root OBBT runs only with this many slowest bound-kerne
 # share of the time left (None: no such check)
 _ROOT_OBBT_SHARE = 0.25
 _OBBT_FIT_SHARE = 0.5  # the root OBBT kernel compiles after the root bound only if its call fits this share of the time left
-_OBBT_HELD = True  # root OBBT: a compile still held at the stage counts in its cost (the bound kernel's compile time)
+_OBBT_HELD = True  # root OBBT: a compile still held or running at the stage counts in its cost (the bound kernel's compile time)
 _SCREEN_BATCHES = (8, 64)  # rows per call of the candidate screens (fvals, viol; ``_batched``)
 # obbt="tree": a batch's OBBT calls run only if their estimated cost is at most this share of the time
 # left (None: no such check); otherwise its boxes are bounded without OBBT (``tree_obbt_fits``)
@@ -1966,7 +1970,9 @@ def _minimize(
         (screened like any candidate, so they only propose what they are). On minlp.org m472 and
         m474, cold, they took 13-28 s of a 60 s limit for incumbents the search's node-box solves
         then improved on."""
-        timed = root["on"] and deadline is not None and _ROOT_LOCAL_SHARE is not None
+        # (the outer-approximation heuristic's completions are not: it has its own budget, and an
+        # unsolved completion would cost it the assignment for good, through its no-good cut)
+        timed = root["on"] and not root.get("oa") and deadline is not None and _ROOT_LOCAL_SHARE is not None
         if deadline is not None:
             cap = max(deadline - time.perf_counter(), 0.05)
             if timed:
@@ -2613,9 +2619,11 @@ def _minimize(
         k = min(len(points), _DIVES)
         pad = lambda A: np.concatenate([A[:k], np.repeat(A[:1], _DIVES - k, 0)])  # noqa: E731
         steps = int(imask.sum())
-        DL, DH, X = jnp.asarray(pad(blo)), jnp.asarray(pad(bhi)), jnp.asarray(pad(points))
-        F, cut = jnp.zeros(_DIVES, jnp.bool_), jnp.asarray(ub, jnp.float64)
-        step = lambda p: jnp.asarray(p, jnp.int32)  # noqa: E731
+        # (NumPy arguments: the eager ``jnp`` ops they replace each compiled a tiny XLA program on the
+        # main thread, 0.8-2 s apiece next to the background compiles: 4.7 s on minlp.org m410 cold)
+        DL, DH, X = (np.asarray(pad(np.asarray(A, np.float64)), np.float64) for A in (blo, bhi, points))
+        F, cut = np.zeros(_DIVES, np.bool_), np.asarray(ub, np.float64)
+        step = lambda p: np.asarray(p, np.int32)  # noqa: E731
         # compiled in the background; skipped if not ready by the deadline (``_ROOT_DIVE_NOWAIT``: at
         # the root with an incumbent, if not ready now)
         nowait = _ROOT_DIVE_NOWAIT and root["on"] and np.isfinite(ub) and deadline is not None
@@ -2852,6 +2860,15 @@ def _minimize(
                                                    options=dict(_WARM[-1], max_wall_time=oa_left()))), L[bad], H[bad])  # fmt: skip
                 Y[bad], F[bad] = Z, screen(Z)
             i = int(np.argmin(F))
+            if _OA_WARM and _WARM and F[i] < ub and not _past(deadline):
+                # (``_OA_WARM``) an improving completion again from itself with the small initial
+                # barrier: the proposal's assignment is then never lost to an imprecise solve (its
+                # no-good cut excludes it for good)
+                Z = np.clip(np.asarray(solve_local(Y[i:i + 1], L[i:i + 1], H[i:i + 1],
+                                                   options=dict(_WARM[0], max_wall_time=oa_left()))), L[i], H[i])  # fmt: skip
+                Fz = screen(Z)
+                if Fz[0] < F[i]:
+                    Y[i], F[i] = Z[0], Fz[0]
             if F[i] < ub:
                 ub, xbest = float(F[i]), Y[i]
             pool_add(Y[np.isfinite(F)])
@@ -2868,6 +2885,7 @@ def _minimize(
         t = time.perf_counter()
         MB = oa_mb()
         _sub("oa")
+        root["oa"] = True
         try:
             pts = ([xbest] if np.isfinite(ub) else []) + S0
             oa_state["mb"] = MB.propose(blo, bhi, imask, complete, extra=pts, cutoff=ub, budget=budget, tol=tol(),
@@ -2875,6 +2893,7 @@ def _minimize(
         except Exception:  # noqa: BLE001 -- an optional heuristic: any failure keeps the incumbent
             pass
         finally:
+            root["oa"] = False
             oa_state["time"] += time.perf_counter() - t
             oa_state["calls"] += 1
             oa_state["last"], oa_state["ub"] = time.perf_counter(), ub
@@ -2901,6 +2920,11 @@ def _minimize(
         if obbt == "root" and padded.mesh is None:
             K.obbt.start(1, lo.size, functools.partial(K.fingerprint, lo.size) if kcache.cache_root() else None,
                          gate=obbt_gate if _GATE_COMPILES else None)  # fmt: skip
+
+    def obbt_built():
+        """Whether the root OBBT kernel's executable is ready (its background build done)."""
+        fut = K.obbt.ready.get(K.obbt._key(K.obbt._args(1, lo.size)))
+        return bool(fut is not None and fut.done() and fut.exception() is None and fut.result().done())
 
     def obbt_may_fit():
         """Whether the root OBBT call is likely to pass its cost rules (stage ``root_obbt``): with
@@ -2984,10 +3008,10 @@ def _minimize(
         # 0.55 s bound call), it runs only if that is at most _ROOT_OBBT_SHARE of the time left.
         ov = K.obbt_variables(lo.size)  # (the variables it tightens: 2 LPs each per round)
         obbt_est = bound_call[0] * max(1.0, 2.0 * (lo.size if ov is None else len(ov)) * obbt_rounds / padded.sizes[0])
-        if _GATE_COMPILES and _OBBT_HELD and not obbt_gate.is_open:
-            # its compile was held (``obbt_may_fit`` said no after the root bound) and would run now:
-            # counted at the root bound kernel's compile time (its build less its trace). On minlp.org
-            # m410, cold, the root otherwise waited 9 s for a compile that the rule had just missed
+        if _OBBT_HELD and obbt == "root" and padded.mesh is None and not obbt_built():
+            # its compile is still to run (held: ``obbt_may_fit`` said no after the root bound) or
+            # still running: the wait counts, at the root bound kernel's compile time (its build less
+            # its trace). On minlp.org m410 cold the root waited 5.5-9 s for it, for no tightening
             obbt_est += max(build_s - getattr(bound_kernel, "traced_seconds", 0.0), 0.0)
         obbt_fits = obbt_est <= _ROOT_OBBT_SHARE * left
     if need_obbt() and obbt_fits:  # (the search would end at once on a closed gap: OBBT would only cost its compile)
