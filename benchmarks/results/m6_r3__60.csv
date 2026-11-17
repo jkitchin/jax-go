@@ -1,0 +1,2 @@
+solver,name,status,time,primal,dual,nodes,message,load,threads,peak_rss_mb
+jaxglobal,m6_del_asl_hvar,time_limit,60.65179772800002,1.5364151807428352,1.5358392987542802,4851,time_limit,2.14,0,1132
