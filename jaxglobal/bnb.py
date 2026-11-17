@@ -1602,6 +1602,8 @@ def _minimize(
     extras get shares of it: the root's local solves ``_ROOT_LOCAL_SHARE``, its polish
     ``_POLISH_ROOT_SHARE``, its dives ``_ROOT_DIVE_SHARE``, probing ``_PROBE_SHARE`` of the time
     left, and ``obbt="tree"`` runs a batch's OBBT only when it fits ``_TREE_OBBT_SHARE`` of it.
+    The search's local searches get ``_SEARCH_LOCAL_SHARE`` of the search's wall time, and the cut
+    pool's local solves ``_POOL_NLP_FRAC`` of it (``_POOL_NLP_SEARCH``).
 
     Bounds may be infinite: finite ones are derived first from the constraints,
     unused variables, and FBBT against a feasible point found by local solves
@@ -2796,7 +2798,12 @@ def _minimize(
         pool's tangent kernel (``pool_tangents``), compiled anyway, and the future resolves once
         that has. ``early`` (``_OA_EARLY``): the program is traced on the kernel tracer thread,
         after the kernels queued there (the root OBBT kernel's included: the root needs those
-        first), and compiled once ``later`` opens (the root bound kernel compiled)."""
+        first), and compiled once ``later`` opens (the root bound kernel compiled), or once the
+        search starts for a program of more than ``_OA_EARLY_EQNS`` equations. Under a time limit
+        the pool variant starts at the root bound (stage ``root_bound``), the early program only
+        on a cold build of a large bound kernel: the main thread then waits for that kernel, and
+        the tracing and compiling of the 10-25 s above compete less with the root stages than
+        they did (the compiles are gated, ``_Gate``)."""
         if oa_state.get("fut") is not None or not (_OA and oa_binary and local_solve):
             return
         if early or oa_pool:
