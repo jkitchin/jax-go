@@ -64,7 +64,9 @@ by a bound on the rounding of the tangent ``J (y - x)`` over the box.
 
 from __future__ import annotations
 
+import functools
 import math
+import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
@@ -653,10 +655,16 @@ def classify(prog):
     return Certificate(**cert)
 
 
+@functools.lru_cache(maxsize=64)
+def _flat_of(fn):
+    return lambda x: jnp.reshape(fn(x), (-1,))
+
+
 def certificate_of(fn, x):
-    """``classify`` of ``fn``'s scalarized tape at the shape of ``x`` (None if it does not scalarize)."""
+    """``classify`` of ``fn``'s scalarized tape at the shape of ``x`` (None if it does not scalarize).
+    Memoized per tape (shared per ``fn``, ``fbbt.make_tape``): each kernel's relaxers classified it."""
     from .fbbt import _has_tracer, make_tape
-    from .fbbt_interp import scalarize
+    from .fbbt_interp import _config, _memo, scalarize
 
     if jnp.ndim(x) != 1:
         return None
@@ -664,13 +672,17 @@ def certificate_of(fn, x):
         tape = make_tape(fn, x)
         if _has_tracer(tape):
             return None
-        prog = scalarize(tape, x.shape[0])
-        if prog is None:
-            return None
-        cert = classify(prog)
-        if cert is not None:
-            cert.size = len(tape.nodes)
-        return cert
+
+        def build():
+            prog = scalarize(tape, x.shape[0])
+            if prog is None:
+                return None
+            cert = classify(prog)
+            if cert is not None:
+                cert.size = len(tape.nodes)
+            return cert
+
+        return _memo(tape, ("certificate", int(x.shape[0]), _config(sys.modules[__name__])), build)
 
 
 def affine_of(fn, x):
@@ -809,9 +821,7 @@ def wrap(fn, base, safe=False, sides=("cv", "cc"), conditional=False):
     if not ENABLED:
         return base
 
-    def flat(x):
-        return jnp.reshape(fn(x), (-1,))
-
+    flat = _flat_of(fn)  # (one function object per fn: its tape and certificate are shared)
     get = tape_cache(lambda x: (_Holder(certificate_of(flat, x)),))
 
     def cert_of(x):

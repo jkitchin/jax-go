@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jax.extend import core as jcore
 
 from .fbbt import Const, _has_tracer, make_tape, tape_cache
@@ -108,6 +109,14 @@ def _live_eqns(jaxpr):
                 if isinstance(inner, jcore.Jaxpr):
                     for _ in range(e.params.get("length", 1) if e.primitive.name == "scan" else 1):
                         yield from _live_eqns(inner)
+
+
+def _out_size(tape):
+    """Number of elements of the output of ``tape`` (None unless it has exactly one output)."""
+    if len(tape.outs) != 1:
+        return None
+    (a,) = tape.outs
+    return int(np.size(a.val)) if isinstance(a, Const) else int(np.prod(tape.shapes[a][0], dtype=np.int64))
 
 
 def _has_tracer_consts(closed):
@@ -234,7 +243,9 @@ def make_alphabb(fn, eigen=True, safe=False, interpret="auto"):
         if not smooth:
             return None
         n = lo.size
-        m = jnp.size(flat(lo))
+        m = _out_size(tape)  # (not ``flat(lo)`` when known: evaluating the function for its size traced it again)
+        if m is None:
+            m = jnp.size(flat(lo))
         path, how = hessian(tape, lo)
         if path == "interpret":
             ids = jnp.asarray(how.program.outs[0])

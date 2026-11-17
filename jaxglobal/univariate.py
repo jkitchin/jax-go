@@ -28,6 +28,7 @@ argument, so pieces containing them are left to the ordinary rules.
 
 from __future__ import annotations
 
+import threading
 from typing import NamedTuple
 
 import jax
@@ -61,35 +62,84 @@ def smooth_eqn(eqn):
     return name in SMOOTH_ELEMENTWISE or (name in SMOOTH_IF and SMOOTH_IF[name](eqn.params))
 
 
+_MASKS, _MASKS_LOCK, _MASKS_SIZE = {}, threading.Lock(), 64
+
+
 def _dep_masks(tape, n):
-    """Per slot: float array ``shape + (n,)``, > 0 where the element depends on x_j."""
-    masks = {0: jnp.eye(n)}
+    """Per slot: float array ``shape + (n,)``, > 0 where the element depends on x_j.
+
+    Computed in numpy (eager ``jnp`` operations here compiled one tiny XLA executable per
+    operation and shape, 1-2 s per relaxer in a kernel's trace), and memoized per tape: the
+    relaxers, FBBT and the structure analyses of one problem share their tapes (``fbbt.make_tape``).
+    The data-movement and ``dot_general`` rules ``_np_move`` does not cover are applied with
+    their primitives, as before."""
+    with _MASKS_LOCK:
+        hit = _MASKS.get(id(tape))
+    if hit is not None and hit[0] is tape and hit[1] == n:
+        return hit[2]
+    masks = {0: np.eye(n)}
     for node in tape.nodes:
         eqn, name = node.eqn, node.eqn.primitive.name
         var = [not isinstance(a, Const) and a in masks for a in node.ins]
         if not any(var):
             continue
-        out_shapes = [tape.shapes[s][0] for s in node.outs]
+        out_shapes = [tuple(tape.shapes[s][0]) for s in node.outs]
         ins = [masks[a] if v else (a.val if isinstance(a, Const) else None) for a, v in zip(node.ins, var)]
         try:
             if name in MOVE or name == "dot_general":
-                outs = _apply_masks(eqn, node, ins, var, tape)
+                outs = _np_move(eqn, ins, var, n)
+                if outs is None:
+                    with jax.ensure_compile_time_eval():
+                        outs = [np.asarray(o) for o in _apply_masks(eqn, node, ins, var, tape)]
             elif name in RULES:  # elementwise
-                acc = jnp.zeros(out_shapes[0] + (n,))
+                acc = np.zeros(out_shapes[0] + (n,))
                 for m, v in zip(ins, var):
                     if v:
-                        shp = jnp.shape(m)[:-1]
-                        m = jnp.reshape(m, (1,) * (len(out_shapes[0]) - len(shp)) + shp + (n,))
-                        acc = acc + jnp.broadcast_to(jnp.abs(m), out_shapes[0] + (n,))
+                        shp = np.shape(m)[:-1]
+                        m = np.reshape(m, (1,) * (len(out_shapes[0]) - len(shp)) + shp + (n,))
+                        acc = acc + np.broadcast_to(np.abs(m), out_shapes[0] + (n,))
                 outs = [acc] * len(node.outs)
             else:
                 raise NotImplementedError
         except Exception:  # unknown structure: depends on everything
-            total = sum(jnp.sum(jnp.abs(m), axis=tuple(range(m.ndim - 1))) for m, v in zip(ins, var) if v)
-            outs = [jnp.broadcast_to(total, s + (n,)) for s in out_shapes]
+            total = sum(np.sum(np.abs(m), axis=tuple(range(m.ndim - 1))) for m, v in zip(ins, var) if v)
+            outs = [np.broadcast_to(total, s + (n,)) for s in out_shapes]
         for s, m in zip(node.outs, outs):
-            masks[s] = jnp.abs(jnp.asarray(m, jnp.float64))
+            masks[s] = np.abs(np.asarray(m, np.float64))
+    with _MASKS_LOCK:
+        _MASKS[id(tape)] = (tape, n, masks)
+        while len(_MASKS) > _MASKS_SIZE:
+            _MASKS.pop(next(iter(_MASKS)))
     return masks
+
+
+def _np_move(eqn, ins, var, n):
+    """``_apply_masks`` in numpy for the common data-movement primitives (masks carry a trailing
+    axis of length ``n``), or None for the others."""
+    name, p = eqn.primitive.name, eqn.params
+    if name in ("convert_element_type", "copy", "copy_p") and len(ins) == 1:
+        return [ins[0]]
+    if name == "squeeze":
+        return [np.squeeze(ins[0], axis=tuple(p["dimensions"]))] if p["dimensions"] else [ins[0]]
+    if name == "slice":
+        st = p["strides"] or (1,) * len(p["start_indices"])
+        return [ins[0][tuple(slice(a, b, c) for a, b, c in zip(p["start_indices"], p["limit_indices"], st))]]
+    if name == "reshape" and p.get("dimensions") is None:
+        return [np.reshape(ins[0], tuple(p["new_sizes"]) + (n,))]
+    if name == "broadcast_in_dim" and len(ins) == 1:
+        m, shape = ins[0], tuple(p["shape"])
+        expand = [1] * len(shape)
+        for d, k in zip(p["broadcast_dimensions"], np.shape(m)[:-1]):
+            expand[d] = k
+        return [np.broadcast_to(np.reshape(m, tuple(expand) + (n,)), shape + (n,))]
+    if name in ("concatenate", "stack"):
+        parts = [m if v else np.zeros(np.shape(m) + (n,)) for m, v in zip(ins, var)]
+        if any(m is None for m in parts) or (name == "stack" and p["axis"] < 0):
+            return None
+        if name == "concatenate":
+            return [np.concatenate(parts, axis=p["dimension"])]
+        return [np.stack(parts, axis=p["axis"])]
+    return None
 
 
 def _apply_masks(eqn, node, ins, var, tape):

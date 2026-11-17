@@ -37,6 +37,7 @@ import jax.numpy as jnp
 import jax.scipy.linalg
 import numpy as np
 
+from .fbbt import batched_init
 from .lp import EPS, reduce_ranges
 from .relax import SAFE_K
 from .symmetry import SEARCH_SECONDS, automorphisms
@@ -1590,7 +1591,8 @@ def _ipm(c, pat, vals, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10, target=j
     ones = jnp.ones(N)
     c0 = cert(y0)
     st = (z0, s0, y0, ones, ones, ones, ones, jnp.where(jnp.isnan(c0), -jnp.inf, c0), y0, 0, jnp.array(False))
-    z, _, _, _, _, _, _, best, yb, _, _ = jax.lax.while_loop(lambda st: ~done(st), body_pc if pc else body, st)
+    z, _, _, _, _, _, _, best, yb, _, _ = jax.lax.while_loop(lambda st: ~done(st), body_pc if pc else body,
+                                                             batched_init(st, s0, c0))
     return z, yb, best
 
 

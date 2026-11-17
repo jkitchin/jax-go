@@ -78,23 +78,28 @@ def tape_slots(fn, n):
     when it does not (straight-line code has no carry: XLA fuses its element-wise rules and
     reuses their buffers; measured below 0.5 GB per 16-box call on every MINLPLib int50 /
     start50 instance whose interpreted estimate would exceed the budget, see
-    docs/ANALYSIS-memory.md), None when the tape cannot be read."""
+    docs/ANALYSIS-memory.md), None when the tape cannot be read. The tape (``fbbt.make_tape``)
+    and its layout are shared: each kernel's bounder asked again."""
     import jax
-    import jax.numpy as jnp
 
     from .fbbt import _has_tracer, make_tape
-    from .fbbt_interp import layout, scalarize
+    from .fbbt_interp import _memo, layout, scalarize
+    from .lp import _as_vec
     from .relax_interp import fuse_xlogx, use_relax_interpreter
 
     try:
         with jax.ensure_compile_time_eval():
-            tape = make_tape(lambda x: jnp.atleast_1d(fn(x)), np.zeros(n))
+            tape = make_tape(_as_vec(fn), np.zeros(n))
         if _has_tracer(tape) or not use_relax_interpreter(tape, n):
             return 0
-        prog = scalarize(tape, n)
-        if prog is None or not len(prog.op) or len(tape.outs) != 1:
-            return 0
-        return int(layout(fuse_xlogx(prog)).prog.const_val.size)
+
+        def slots():
+            prog = scalarize(tape, n)
+            if prog is None or not len(prog.op) or len(tape.outs) != 1:
+                return 0
+            return int(layout(fuse_xlogx(prog)).prog.const_val.size)
+
+        return _memo(tape, ("slots", int(n)), slots)
     except Exception:
         return None
 

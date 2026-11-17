@@ -56,6 +56,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from . import memory
+from .fbbt import batched_init
 from .relax import SAFE_K
 from .univariate import make_relaxer
 
@@ -429,7 +430,7 @@ def _ipm_box(c, A, b, iters, sigma, cert, mu_tol, target, pc=True):
     ones = jnp.ones(n)
     c0 = cert(y0)
     st = (0, jnp.array(False), z0, s0, y0, ones, ones, ones, ones, jnp.where(jnp.isnan(c0), -jnp.inf, c0), y0)
-    st = jax.lax.while_loop(cond, body_pc if pc else body, st)
+    st = jax.lax.while_loop(cond, body_pc if pc else body, batched_init(st, c, b, s0, c0))
     return st[2], st[-1], st[-2]
 
 
@@ -497,7 +498,14 @@ def reduce_ranges(lo, hi, lb, r, cutoff):
 
 
 def _as_vec(fn):
-    return None if fn is None else (lambda x: jnp.atleast_1d(fn(x)))
+    """``x -> atleast_1d(fn(x))``, the same function object for the same ``fn`` (``_vec_of``): the
+    tapes of the relaxers are shared on it (``fbbt.make_tape``)."""
+    return None if fn is None else _vec_of(fn)
+
+
+@functools.lru_cache(maxsize=64)
+def _vec_of(fn):
+    return lambda x: jnp.atleast_1d(fn(x))
 
 
 def _parts_fn(f, ineq, eq, univariate, alphabb=False, multivariate=False, safe=False, convex=True, exact=False):
@@ -512,8 +520,12 @@ def _parts_fn(f, ineq, eq, univariate, alphabb=False, multivariate=False, safe=F
                        sides=sides, conditional=exact) if fn is not None else None
           for fn, sides in ((f, ("cv",)), (ineq, ("cv",)), (eq, ("cv", "cc")))]  # fmt: skip
 
-    def prepare(lo, hi):
-        return tuple(r.prepare(lo, hi) if r is not None else None for r in rs)
+    def prepare(lo, hi, skip=None):
+        """The relaxers' box data; ``skip`` (``parts_bounds``): None for the functions left out,
+        whose relaxation is never evaluated (tracing their preparation, e.g. alphaBB's interval
+        Hessian of an affine function, cost trace time for code XLA then drops)."""
+        skip = skip or (None, None, None)
+        return tuple(r.prepare(lo, hi) if r is not None and s is None else None for r, s in zip(rs, skip))
 
     def parts(x, lo, hi, data):
         return parts_bounds(x, lo, hi, data)[0]
@@ -594,14 +606,26 @@ def _exact_affine(affine_of, n, afp, safe):
     return A, b
 
 
+def _out_size(fn, n):
+    """Elements of ``fn``'s output on ``n`` variables, from its (shared) tape when it has one
+    output; else from ``jax.eval_shape``, which traces ``fn`` once more."""
+    from .fbbt import Const, make_tape
+
+    try:
+        with jax.ensure_compile_time_eval():
+            tape = make_tape(_as_vec(fn), np.zeros(n))
+    except Exception:  # noqa: BLE001 -- eval_shape below raises the function's own error
+        tape = None
+    if tape is not None and len(tape.outs) == 1:
+        (a,) = tape.outs
+        return int(np.size(a.val)) if isinstance(a, Const) else int(np.prod(tape.shapes[a][0], dtype=np.int64))
+    x = jax.ShapeDtypeStruct((n,), jnp.float64)
+    return int(np.prod(jax.eval_shape(lambda z: jnp.atleast_1d(fn(z)), x).shape))
+
+
 def _part_sizes(f, ineq, eq, n):
     """Outputs of ``(f, ineq, eq)`` (0 for a missing one): the parts are 1 + m_g + 2 m_h."""
-    x = jax.ShapeDtypeStruct((n,), jnp.float64)
-
-    def size(fn):
-        return 0 if fn is None else int(np.prod(jax.eval_shape(lambda z: jnp.atleast_1d(fn(z)), x).shape))
-
-    return size(f), size(ineq), size(eq)
+    return tuple(0 if fn is None else _out_size(fn, n) for fn in (f, ineq, eq))
 
 
 def _affine_bounds(A, b, sizes, skip, lo, hi):
@@ -688,12 +712,8 @@ def _shared_cuts(f, ineq, eq):
 
 def _n_parts(f, ineq, eq, n):
     """Number of convex parts [cv_f, cv_g..., cv_h..., -cc_h...] (``_parts_fn``)."""
-    x = jax.ShapeDtypeStruct((n,), jnp.float64)
-
-    def size(fn):
-        return int(np.prod(jax.eval_shape(lambda z: jnp.atleast_1d(fn(z)), x).shape))
-
-    return size(f) + (size(ineq) if ineq is not None else 0) + (2 * size(eq) if eq is not None else 0)
+    mf, mg, mh = _part_sizes(f, ineq, eq, n)
+    return mf + mg + 2 * mh
 
 
 KELLEY_STALL = 1e-4  # Kelley rounds stop once a round raises the bound by at most this share of the gap
@@ -746,7 +766,7 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
         nl = nonlinear(n)
         w = hi - lo
         c = 0.5 * (lo + hi)
-        data = prepare(lo, hi)
+        skip, data = None, None  # the functions the cut points leave out (``_SubParts``): not prepared
 
         # Affine parts (``_nonlinear_vars``: no nonlinear variable) have the same cut everywhere, and
         # ``_cut_rows`` keeps only their cut at the center. With ``SPLIT_AFFINE`` they are linearized
@@ -768,6 +788,7 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
                 # affine forms' ranges on the box
                 sizes = sizes_of(n)
                 sub = _SubParts(parts, nlp, sizes)
+                skip = sub.skip
                 aff = _affine_cuts(*exact, lo, w)
                 aff_b = _affine_bounds(*affine_of(n), sizes, sub.skip, lo, hi)
 
@@ -777,6 +798,7 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
                     return ck, gk, tuple(a if a is not None else e for a, e in zip(b, aff_b))
             else:
                 sub = _SubParts(parts, nlp)
+                data = prepare(lo, hi)
                 ca, ga, bounds_c = _cuts(parts, data, c, lo, hi, safe)
                 aff = (ca[afp][None], ga[afp][None])  # (1, Ka), (1, Ka, n)
 
@@ -792,6 +814,8 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
                 bounds of f, g, h (``_cuts``)."""
                 return _cuts(parts, data, p, lo, hi, safe)
 
+        if data is None:
+            data = prepare(lo, hi, skip)
         pts0 = cut_points(c, w, axis_vars(nl, n))
         P0 = pts0.shape[0]
         chunk = memory.point_chunk(point_bytes(n), P0, boxes, "node bound cut points")
@@ -944,7 +968,7 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
                 best, rlo, rhi, u = solve(const, coef, best, rlo, rhi, T, tlo_s, bad_t)
                 return k + 1, const, coef, best, rlo, rhi, u, _kelley_go(prev, best, cutoff)
 
-            init = (0, const, coef, best, rlo, rhi, u, _kelley_go(best0, best, cutoff, first=True))
+            init = batched_init((0, const, coef, best, rlo, rhi, u, _kelley_go(best0, best, cutoff, first=True)), lo, hi)
             _, _, _, best, rlo, rhi, u, _ = jax.lax.while_loop(lambda c: (c[0] < n_kelley) & c[7], kelley, init)
         else:
             # One loop for the first LP and the Kelley rounds, so the relaxation's forward-mode
@@ -981,7 +1005,7 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
                 pinfo0 = (jnp.array(False), ninf, ninf, ninf, ninf)
                 trips = jnp.where(first, nC, 1)
                 _, const, coef, pinfo = jax.lax.while_loop(lambda cc: cc[0] < trips, chunk_,
-                                                           (0, const, coef, pinfo0))
+                                                           batched_init((0, const, coef, pinfo0), trips, lo))
                 new = (pinfo[0], *t_range(*pinfo[1:]))
                 info = jax.tree.map(lambda a, b: jnp.where(first, a, b), new, info)
                 _, tlo, T, bad_t = info
@@ -992,7 +1016,8 @@ def make_constrained_bounder(f, ineq=None, eq=None, n_kelley=4, ipm_iters=40, to
                 return k + 1, const, coef, info, best, rlo, rhi, u, go
 
             info0 = (jnp.array(False), jnp.array(0.0), jnp.array(1.0), jnp.array(False))
-            init = (0, const, coef, info0, jnp.array(-jnp.inf), lo, hi, jnp.full(n, 0.5), jnp.array(True))
+            init = batched_init((0, const, coef, info0, jnp.array(-jnp.inf), lo, hi, jnp.full(n, 0.5), jnp.array(True)),
+                                lo, hi)
             out = jax.lax.while_loop(lambda c: (c[0] <= n_kelley) & c[8], round_, init)
             _, _, _, (infeasible, _, _, _), best, rlo, rhi, u, _ = out
 
@@ -1014,12 +1039,25 @@ def make_pool_cuts(f, ineq=None, eq=None, univariate=False, alphabb=False, multi
     ``v - a . p``. ``exact``: see ``_parts_fn``.
     """
     prepare, parts, _ = _parts_fn(f, ineq, eq, univariate, alphabb, multivariate, safe, exact=exact)
+    nonlinear = _nonlinear_of(f, ineq, eq)
+    sizes_of = functools.lru_cache(maxsize=None)(lambda n: _part_sizes(f, ineq, eq, n))
 
     def cuts(p, lo, hi):
-        data = prepare(lo, hi)
+        n = p.size
+        # a function with no nonlinear part (``_nonlinear_vars``) is not relaxed: its parts are
+        # affine, never pooled (``pool_parts``), and get b = -inf (no cut) here
+        nl, skip, live = nonlinear(n), None, None
+        if nl is not None and nl.shape[1] == n and nl.any():
+            sizes = sizes_of(n)
+            skip = _SubParts(parts, np.flatnonzero(nl.any(axis=1)), sizes).skip
+            if all(s is None for s in skip):
+                skip = None
+            else:
+                live = np.concatenate([np.full(m * (2 if i == 2 else 1), s is None) for i, (m, s) in enumerate(zip(sizes, skip))])
+        data = prepare(lo, hi, skip)
 
         def fn(x):
-            v = parts(x, lo, hi, data)
+            v = parts.bounds(x, lo, hi, data, skip)[0] if skip is not None else parts(x, lo, hi, data)
             return v, v
 
         J, v = jax.jacfwd(fn, has_aux=True)(p)
@@ -1027,6 +1065,8 @@ def make_pool_cuts(f, ineq=None, eq=None, univariate=False, alphabb=False, multi
         if safe:
             b = b - SAFE_K * (p.size + 3) * EPS * (jnp.abs(v) + jnp.abs(J) @ jnp.abs(p))
         ok = jnp.isfinite(b) & jnp.all(jnp.isfinite(J), axis=1)
+        if live is not None:
+            ok &= jnp.asarray(live)
         return jnp.where(ok[:, None], J, 0.0), jnp.where(ok, b, -jnp.inf)
 
     return cuts
@@ -1127,7 +1167,7 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
         nl = nonlinear(n)
         w = hi - lo
         c = 0.5 * (lo + hi)
-        data = prepare(lo, hi)
+        skip, data = None, None  # the functions the cut points leave out (``_SubParts``): not prepared
 
         # ``SPLIT_AFFINE`` as in the node bound: the affine parts are linearized once, at the center
         # (``_cut_rows`` keeps only that cut of theirs), and the cut points of both rounds linearize
@@ -1143,9 +1183,11 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
             exact = _exact_affine(affine_of, n, afp, safe)
             if exact is not None:  # (``AFFINE_EXACT``; the cut points relax only the functions they need)
                 sub = _SubParts(parts, nlp, sizes_of(n))
+                skip = sub.skip
                 aff = _affine_cuts(*exact, lo, w)
             else:
                 sub = _SubParts(parts, nlp)
+                data = prepare(lo, hi)
                 ca, ga, _ = _cuts(parts, data, c, lo, hi, safe)
                 aff = (ca[afp][None], ga[afp][None])  # (1, Ka), (1, Ka, n)
 
@@ -1156,6 +1198,9 @@ def make_obbt(f, ineq=None, eq=None, rounds=2, ipm_iters=40, tol=0.0, univariate
 
             def cuts_at(p):
                 return _cuts(parts, data, p, lo, hi, safe)[:2]
+
+        if data is None:
+            data = prepare(lo, hi, skip)
 
         def block(const, coef, obj, nlk):
             """Rows ``A u <= rhs`` (and their magnitudes) of cuts ``(P, K)`` / ``(P, K, n)``; part 0 is
