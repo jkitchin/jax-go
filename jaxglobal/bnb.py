@@ -1134,10 +1134,10 @@ _OA = True
 _OA_SHARE, _OA_SECONDS = 0.15, 30.0  # its time: at most this share of time_limit (in all) and seconds per call
 _OA_EVERY = 0.1  # the search resumes it each time this share of the time limit (at most 600 s) has passed
 _OA_MILP = 0.5  # each MILP of a call gets at most this share of the call's budget
-# MILP rounds per call, within its time budget: on minlp.org m406 cold the root call's 8 rounds (2.4 s)
-# raised the MILP value 3560 -> 18492 (optimum 26669) and stopped; the next call, _OA_EVERY later,
-# found the optimum in its first round
-_OA_ROUNDS = 32
+# MILP rounds per call, within its time budget (32 was tried: on minlp.org m406 the root call's 8 rounds
+# stopped short of the optimum, but that was with its completions unsolved, see ``root["oa"]``; with
+# 32, m420_kClus_3_20_2_BM searched 1019-1279 nodes against 3327 with 8 and no early build)
+_OA_ROUNDS = 8
 # an improving completion is solved again from itself with ``_WARM[0]``: on minlp.org m410 cold the
 # optimal assignment's completion stopped at 41709.26 (optimum 41572.90), and its no-good cut then
 # made the next MILP infeasible: the heuristic was done for the solve
@@ -1154,8 +1154,8 @@ _OA_ROOT_WAIT = 0.0
 _OA_EARLY = True
 # ...its compile, though, only for a program of at most this many jaxpr equations (else once the search
 # starts): minlp.org m399 / m406, 34k / 31k, compile in 3-4 s; m422_kClus_3_20_5_BM, 77k, took 20 s at
-# load 14 and slowed the root stages by 6 s
-_OA_EARLY_EQNS = 50_000
+# load 14 and slowed the root stages by 6 s; m420_kClus_3_20_2_BM (41k) searched fewer nodes with it
+_OA_EARLY_EQNS = 35_000
 # with a cut pool (reduced-space LP), the heuristic takes its cuts from the pool's tangent kernel (the
 # lp.py relaxation, compiled in the background anyway) instead of its own cut program (``jacfwd`` of
 # relax.py's relaxation of every row: 76k jaxpr equations, 9-18 s of XLA compile on m410)
@@ -1179,9 +1179,10 @@ _ROOT_DIVE_SHARE = 0.1  # the root dives' kernel chunks: at most this share of t
 # compile (cold, about 5 s on minlp.org m410_CLay0203HRS at load 3). The search's dives use it later.
 _ROOT_DIVE_NOWAIT = True
 _POOL_NLP_FRAC = 0.3  # at most this share of the wall time goes to the cut pool's local solves
-# ...of the search's wall time under a time limit (else of the solve's): cold, the elapsed time is mostly
-# compile, and on minlp.org m410 the share of it let them take 5.5 of the search's 26 s
-_POOL_NLP_SEARCH = True
+# True: ...of the search's wall time under a time limit (else of the solve's). Off: cold, the elapsed time
+# is mostly compile, and on minlp.org m410 the share of it let them take 5.5 of the search's 26 s, but
+# MINLPLib cvxnonsep_normcon30 needs them (123 nodes; 2729-3567 and unsolved in 60 s with it on)
+_POOL_NLP_SEARCH = False
 _POOL_CHUNK = 16  # points per call of the cut pool's tangent kernel
 _POOL_ADD = 2  # LP points of the lowest-bound boxes of each batch whose tangents join the cut pool
 # the per-child local solves of the cut pool are probed (half the children get them) on
@@ -1210,11 +1211,13 @@ _RETRY_MIN, _RETRY_FRAC = 1.0, 0.05
 # box the solve slides back to the root's relaxation optimum, whose roundings were tried already.
 # On minlp.org m474 the LP points of the best open boxes carry the optimal assignment; m399 too.
 _NODE_LOCAL = True
-# under a time limit, the search's local searches (``update_incumbent``'s, from the candidate and LP
-# points of each batch) may take at most this share of the search's wall time so far: (without an
+# under a time limit and with integer variables, the search's local searches (``update_incumbent``'s,
+# fix-and-solves of the roundings of the LP points of each batch) may take at most this share of the search's wall time so far: (without an
 # incumbent, with one). A batch of local solves is then skipped; the first always runs. On the
 # minlp.org CLay models they took 50-90% of the search (m400: 23.5 of 25 s, 3 bound calls in all;
-# m410: 13.6 of 26 s), one 1-7 s batch per iteration against a 0.3-1 s bound call. None: no cap.
+# m410: 13.6 of 26 s), one 1-7 s batch per iteration against a 0.3-1 s bound call. Continuous problems
+# are left out: there these solves are the incumbent heuristic (MINLPLib kall_diffcircles_8 lost its
+# optimum with the cap). None: no cap.
 _SEARCH_LOCAL_SHARE = (0.5, 0.25)
 # the pool kernel without rows (``pool_judge``) is built only with this many times the root bound
 # kernel's measured build time (trace + compile, from the kernel start to the root bound) left: on
@@ -1228,7 +1231,10 @@ _ROOT_OBBT_COST = 10.0  # root OBBT runs only with this many slowest bound-kerne
 # share of the time left (None: no such check)
 _ROOT_OBBT_SHARE = 0.25
 _OBBT_FIT_SHARE = 0.5  # the root OBBT kernel compiles after the root bound only if its call fits this share of the time left
-_OBBT_HELD = True  # root OBBT: a compile still held or running at the stage counts in its cost (the bound kernel's compile time)
+# root OBBT: a compile still held or running at the stage counts in its cost (the bound kernel's compile
+# time). Off: on minlp.org m410 it saved a 5.5-9 s wait for no tightening, but MINLPLib cvxnonsep_nsig30
+# lost its solve (115 -> 2047+ nodes) when the cold root skipped OBBT for it
+_OBBT_HELD = False
 _SCREEN_BATCHES = (8, 64)  # rows per call of the candidate screens (fvals, viol; ``_batched``)
 # obbt="tree": a batch's OBBT calls run only if their estimated cost is at most this share of the time
 # left (None: no such check); otherwise its boxes are bounded without OBBT (``tree_obbt_fits``)
@@ -1602,8 +1608,7 @@ def _minimize(
     extras get shares of it: the root's local solves ``_ROOT_LOCAL_SHARE``, its polish
     ``_POLISH_ROOT_SHARE``, its dives ``_ROOT_DIVE_SHARE``, probing ``_PROBE_SHARE`` of the time
     left, and ``obbt="tree"`` runs a batch's OBBT only when it fits ``_TREE_OBBT_SHARE`` of it.
-    The search's local searches get ``_SEARCH_LOCAL_SHARE`` of the search's wall time, and the cut
-    pool's local solves ``_POOL_NLP_FRAC`` of it (``_POOL_NLP_SEARCH``).
+    With integer variables the search's local searches get ``_SEARCH_LOCAL_SHARE`` of its wall time.
 
     Bounds may be infinite: finite ones are derived first from the constraints,
     unused variables, and FBBT against a feasible point found by local solves
@@ -2427,7 +2432,7 @@ def _minimize(
             if np.isfinite(ub) and backoff[1] > 0:
                 backoff[1] -= 1
                 return
-            if search["t"] is not None and deadline is not None and _SEARCH_LOCAL_SHARE is not None:
+            if search["t"] is not None and deadline is not None and _SEARCH_LOCAL_SHARE is not None and imask.any():
                 # (``_SEARCH_LOCAL_SHARE``: the search's local searches within their share of its time)
                 share = _SEARCH_LOCAL_SHARE[1 if np.isfinite(ub) else 0]
                 if search["local"] > share * (time.perf_counter() - search["t"]):
