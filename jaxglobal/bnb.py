@@ -1919,7 +1919,21 @@ def _minimize(
     if pool is not None:  # the pool's tangent kernel, traced after the bound kernels
         tracer, compiler = _pools()
         pts, vec = jax.ShapeDtypeStruct((_POOL_CHUNK, lo.size), jnp.float64), jax.ShapeDtypeStruct((lo.size,), jnp.float64)
-        pool["exe"] = kcache.track(tracer.submit(lambda: later.submit(K.pool_cuts.trace(pts, vec, vec).lower().compile)))
+        # (kept on the cached ``_Kernels`` once compiled, like the bound kernels: rebuilt per solve,
+        # whether it was ready before the search's first ``pool_add`` depended on timing, so
+        # repeated solves of one problem differed, ``test_dispatch``)
+        with _CACHE_LOCK:
+            done = getattr(K, "_pool_exe", {}).get(lo.size)
+        ok = (done is not None and done.done() and done.exception() is None and done.result().done()
+              and done.result().exception() is None)  # fmt: skip
+        if ok:
+            pool["exe"] = done
+        else:
+            pool["exe"] = kcache.track(tracer.submit(lambda: later.submit(K.pool_cuts.trace(pts, vec, vec).lower().compile)))
+            with _CACHE_LOCK:
+                if not hasattr(K, "_pool_exe"):
+                    K._pool_exe = {}
+                K._pool_exe[lo.size] = pool["exe"]
     _mark("start_dive_compile")
     if K.dive is not None and padded.mesh is None:  # the dive kernel too, traced after the others
         box, cut = jax.ShapeDtypeStruct((_DIVES, lo.size), jnp.float64), jax.ShapeDtypeStruct((), jnp.float64)
