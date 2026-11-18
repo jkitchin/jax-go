@@ -34,6 +34,10 @@ MARGIN_REL, MARGIN_ABS = 1e-6, 1e-7  # subtracted from HiGHS's dual bound
 MAX_ROWS = 200_000  # no MILP above this many cut rows
 MAX_ROWS0 = 40_000  # initial cut rows at most (fewer points when more)
 PROPOSE_GAP = 1e-2  # ``propose``: relative MILP gap at which HiGHS stops (a good assignment is enough)
+# ...while there is no incumbent (cutoff +inf): any assignment the cuts allow is worth completing.
+# minlp.org m400_CLay0304HRcone, from its root box: the first feasible proposal after 4.3 s and the
+# optimum after 6.5 s, against 15-22 s with PROPOSE_GAP (each MILP 0.2-0.5 s instead of 0.5-2.7 s)
+PROPOSE_GAP_NOINC = 1.0
 STALL, PATIENCE = 0.01, 3  # stop after PATIENCE rounds each raising the bound by under STALL of the gap
 _DEBUG = False
 
@@ -61,6 +65,74 @@ def _count_eqns(jaxpr):
 
 def _vec(fn):
     return (lambda x: jnp.atleast_1d(fn(x))) if fn is not None else (lambda x: jnp.zeros(0))
+
+
+def form_tangents(Q, n):
+    """``MilpBound``'s ``tangents`` from a lifted quadratic form ``Q`` (``quadratic.QuadraticForm``
+    of degree 2: rows ``[f, g..., h...] = E v + c`` with ``v = (x, w)``, column ``n + p`` the
+    product ``x_a x_b`` of ``pairs[p]``), in numpy: no trace, no compile. Each row's cut is the row
+    with every product replaced by the McCormick plane (``a != b``) or the tangent / secant of the
+    square (``a == b``) that is active at the point, an underestimator for a positive coefficient
+    and an overestimator for a negative one: a valid convex minorant of the row on the box, as
+    ``relax``'s. None when some product is of a lifted column (degree above 2).
+    Layout: [cv_f, cv_g..., cv_h..., -cc_h...]."""
+    E, c, pairs = np.asarray(Q.E, np.float64), np.asarray(Q.c, np.float64), np.asarray(Q.pairs, np.int64)
+    if len(pairs) and pairs.max() >= n:
+        return None
+    n_g, n_h = int(Q.n_g), int(Q.n_h)
+    A, B = (pairs[:, 0], pairs[:, 1]) if len(pairs) else (np.zeros(0, np.int64),) * 2
+    Ex, Ew = E[:, :n], E[:, n:]
+    h = slice(1 + n_g, 1 + n_g + n_h)
+
+    def planes(P, lo, hi, over):
+        """(k, Pairs) slopes on x_a, x_b and offsets of the plane for w = x_a x_b at each point:
+        the active McCormick under- (``over`` False) or overestimator."""
+        la, ua, lb, ub = lo[A], hi[A], lo[B], hi[B]
+        xa, xb = P[:, A], P[:, B]
+        sq = A == B
+        if not over:
+            # w >= lb xa + la xb - la lb  and  w >= ub xa + ua xb - ua ub: the larger at the point
+            v1, v2 = lb * xa + la * xb - la * lb, ub * xa + ua * xb - ua * ub
+            one = v1 >= v2
+            ca, cb, c0 = np.where(one, lb, ub), np.where(one, la, ua), np.where(one, -la * lb, -ua * ub)
+            # a square: the tangent at the point, 2 p x - p^2 (as slope on x_a; x_b is x_a)
+            ca, cb, c0 = np.where(sq, 2 * xa, ca), np.where(sq, 0.0, cb), np.where(sq, -xa * xa, c0)
+        else:
+            # w <= ub xa + la xb - la ub  and  w <= lb xa + ua xb - ua lb: the smaller at the point
+            v1, v2 = ub * xa + la * xb - la * ub, lb * xa + ua * xb - ua * lb
+            one = v1 <= v2
+            ca, cb, c0 = np.where(one, ub, lb), np.where(one, la, ua), np.where(one, -la * ub, -ua * lb)
+            # a square: the secant (la + ua) x - la ua
+            ca, cb, c0 = np.where(sq, la + ua, ca), np.where(sq, 0.0, cb), np.where(sq, -la * ua, c0)
+        return ca, cb, c0
+
+    def minorant(Er, cr, P, lo, hi):
+        """Slopes (k, R, n) and offsets (k, R) of the convex minorants of the rows ``Er v + cr``."""
+        Ex_, Ew_ = Er[:, :n], Er[:, n:]
+        k = len(P)
+        G = np.repeat(Ex_[None], k, 0)
+        b0 = np.repeat(cr[None], k, 0)
+        if len(A):
+            pos, neg = np.maximum(Ew_, 0.0), np.minimum(Ew_, 0.0)
+            for over, W in ((False, pos), (True, neg)):
+                ca, cb, c0 = planes(P, lo, hi, over)  # (k, Pairs)
+                # row r gets W[r, p] * (ca x_a + cb x_b + c0)
+                Ga = W[None] * ca[:, None, :]  # (k, R, Pairs)
+                Gb = W[None] * cb[:, None, :]
+                for q in range(len(A)):
+                    G[:, :, A[q]] += Ga[:, :, q]
+                    G[:, :, B[q]] += Gb[:, :, q]
+                b0 = b0 + np.einsum("rp,kp->kr", W, c0)
+        return G, b0
+
+    def tangents(P, lo, hi):
+        P = np.atleast_2d(np.asarray(P, np.float64))
+        lo, hi = np.asarray(lo, np.float64), np.asarray(hi, np.float64)
+        G, b0 = minorant(E, c, P, lo, hi)  # cv of every row
+        Gc, bc = minorant(-E[h], -c[h], P, lo, hi)  # cv of -h = -cc of h
+        return np.concatenate([G, Gc], axis=1), np.concatenate([b0, bc], axis=1)
+
+    return tangents
 
 
 class MilpBound:
@@ -346,14 +418,14 @@ class MilpBound:
             tl = left if milp_time is None else min(left, milp_time)
             try:
                 res = milp(cost, constraints=LinearConstraint(AA, LL, HH), integrality=integrality, bounds=box,
-                           options={"time_limit": float(tl), "mip_rel_gap": PROPOSE_GAP})  # fmt: skip
+                           options={"time_limit": float(tl), "mip_rel_gap": PROPOSE_GAP if np.isfinite(ub) else PROPOSE_GAP_NOINC})  # fmt: skip
                 if res.status == 4 and np.isfinite(st["tlo"]):
                     # HiGHS (scipy 1.18) reports a solve error on some small MILPs whose objective
                     # variable has a finite lower bound; without that bound they solve (the cuts bound t)
                     box = Bounds(np.r_[st["lo_i"], -np.inf], np.r_[st["hi_i"], np.inf])
                     st["tlo"] = -np.inf
                     res = milp(cost, constraints=LinearConstraint(AA, LL, HH), integrality=integrality, bounds=box,
-                               options={"time_limit": float(tl), "mip_rel_gap": PROPOSE_GAP})  # fmt: skip
+                               options={"time_limit": float(tl), "mip_rel_gap": PROPOSE_GAP if np.isfinite(ub) else PROPOSE_GAP_NOINC})  # fmt: skip
             except Exception:  # noqa: BLE001 -- HiGHS failure: no proposal
                 break
             st["rounds"] += 1

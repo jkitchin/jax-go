@@ -153,3 +153,47 @@ def test_compile_options_same_cuts(monkeypatch):
 
     for x, y in zip(jax.tree.leaves(a.cut_values(P, lo, hi)), jax.tree.leaves(b.cut_values(P, lo, hi))):
         np.testing.assert_allclose(np.asarray(x), np.asarray(y), rtol=1e-9, atol=1e-12)
+
+
+def test_form_tangents_are_minorants():
+    """``form_tangents``: each cut is below its row (cv parts) on the box, at random boxes and points,
+    with squares and bilinear terms of both signs; and the heuristic proposes with them."""
+    import jax
+
+    jax.config.update("jax_enable_x64", True)
+    from jaxglobal.milpbound import form_tangents
+    from jaxglobal.quadratic import quadratic_form
+
+    f = lambda v: v[0] ** 2 - 2.0 * v[0] * v[1] + 0.5 * v[2]
+    ineq = lambda v: jnp.array([v[1] ** 2 + v[2] ** 2 - 2.0 * v[3] * v[2] - 1.0, -v[0] * v[3] + 0.2])
+    eq = lambda v: jnp.array([v[0] * v[1] - v[2] - 0.1])
+    Q = quadratic_form(f, ineq, eq, 4)
+    T = form_tangents(Q, 4)
+    rows = lambda x: np.concatenate([[f(x)], ineq(x), eq(x), -eq(x)])
+    rng = np.random.default_rng(0)
+    for _ in range(20):
+        u, w = rng.uniform(-2, 2, 4), rng.uniform(-2, 2, 4)
+        lo, hi = np.minimum(u, w), np.maximum(u, w)
+        P, X = rng.uniform(lo, hi, (3, 4)), rng.uniform(lo, hi, (30, 4))
+        a, b = T(P, lo, hi)
+        assert a.shape == (3, 5, 4) and b.shape == (3, 5)
+        R = np.array([rows(x) for x in X])
+        cut = np.einsum("krn,xn->kxr", a, X) + b[:, None, :]
+        assert np.all(cut <= R[None] + 1e-9 * (1 + np.abs(R[None])))
+    # a degree-3 form has products of lifted columns: no tangents
+    from jaxglobal.quadratic import polynomial_form
+
+    P3 = polynomial_form(lambda v: v[0] * v[1] * v[2], lambda v: jnp.array([v[0] + v[1] - 1.0]), None, 3)
+    assert P3 is None or form_tangents(P3, 3) is None or P3.pairs.max() < 3
+    # propose with them on the big-M toy
+    f2, ineq2, lo2, hi2, imask2 = _bigm()
+    B = MilpBound(f2, ineq2, None, 4, tangents=form_tangents(quadratic_form(f2, ineq2, None, 4), 4))
+    seen = []
+
+    def complete(X):
+        X = np.atleast_2d(X)
+        seen.append(X[0, 2:].copy())
+        return X, np.full(len(X), np.inf), np.inf
+
+    st = B.propose(lo2, hi2, imask2, complete, budget=10.0, rounds=3)
+    assert st["rounds"] >= 1 and all(np.all(np.isin(s, (0.0, 1.0))) for s in seen)

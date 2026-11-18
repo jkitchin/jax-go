@@ -1164,6 +1164,7 @@ _OA_SHARE, _OA_SECONDS = 0.15, 30.0  # its time: at most this share of time_limi
 _OA_SHARE_NOINC = 0.5  # (None: _OA_SHARE always)
 _OA_ROUNDS_NOINC = 64  # (None: _OA_ROUNDS)
 _OA_NOINC_START = True
+_OA_FORM = True  # without a cut pool, the heuristic's cuts from the lifted quadratic form (``oa_mb``)
 _OA_EVERY = 0.1  # the search resumes it each time this share of the time limit (at most 600 s) has passed
 _OA_MILP = 0.5  # each MILP of a call gets at most this share of the call's budget
 # MILP rounds per call, within its time budget (32 was tried: on minlp.org m406 the root call's 8 rounds
@@ -2829,7 +2830,23 @@ def _minimize(
     # (``_OA_POOL``) the heuristic's cuts from the cut pool's tangent kernel, when there is one
     oa_pool = bool(_OA_POOL and pool is not None and pool.get("exe") is not None)
 
+    # (``_OA_FORM``) without a pool, a quadratic problem's heuristic takes its cuts from its lifted
+    # quadratic form (``milpbound.form_tangents``: McCormick planes in numpy) instead of its own cut
+    # program (54k jaxpr equations on minlp.org m400, 10-20 s of trace and compile cold)
+    oa_form = None
+    if _OA_FORM and not oa_pool and quadratic and not lifted and imask.any():
+        try:
+            Qf = _quadratic_form(f, ineq, eq, lo.size)
+            oa_form = None if Qf is None else milpbound.form_tangents(Qf, lo.size)
+        except Exception:  # noqa: BLE001 -- optional: the generic cut program instead
+            oa_form = None
+
     def oa_mb():
+        if oa_form is not None:
+            with _CACHE_LOCK:
+                if oa_state.get("form_mb") is None:
+                    oa_state["form_mb"] = milpbound.MilpBound(f, ineq, eq, lo.size, feas_tol=feas_tol, tangents=oa_form)
+            return oa_state["form_mb"]
         if oa_pool:  # (per solve: its tangents are this solve's kernel)
             with _CACHE_LOCK:
                 if oa_state.get("pool_mb") is None:
@@ -2859,6 +2876,11 @@ def _minimize(
         the tracing and compiling of the 10-25 s above compete less with the root stages than
         they did (the compiles are gated, ``_Gate``)."""
         if oa_state.get("fut") is not None or not (_OA and oa_binary and local_solve):
+            return
+        if oa_form is not None:  # nothing to trace or compile
+            done = Future()
+            done.set_result(True)
+            oa_state["fut"] = done
             return
         if early or oa_pool:
             out = Future()
@@ -3069,6 +3091,8 @@ def _minimize(
         # no incumbent after the root dives: build the heuristic's cut program now, beside root OBBT
         # and probing, rather than once they are done (``_OA_NOINC_START``)
         oa_start()
+        if oa_form is not None:  # its cuts need no build: run it now, before root OBBT and probing
+            oa_primal(rlo.min(axis=0), rhi.max(axis=0), list(np.atleast_2d(rxr)[:2]), oa_budget())
     # The root OBBT kernel solves two LPs per variable in one call, which cannot be interrupted:
     # skip it when the time left is under _ROOT_OBBT_COST times the slowest bound-kernel call (on
     # minlp.org m49, cold under load, it started with 11.6 s left and ran 30.6 s, 4.3 times the root

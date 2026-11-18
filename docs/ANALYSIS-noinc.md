@@ -1,5 +1,7 @@
 # No incumbent on m400 and m47 (minlp.org stage 2b), 2026-11-18
 
+Two commits: three no-incumbent rules for the heuristic, then cuts from the quadratic form with any MILP solution accepted while there is no incumbent. The first commit's m400 result was a lucky run; the follow-up makes it reliable.
+
 **Question.** Issue #87's next step 2: in 60 s cold, `main` reports no solution on m400_CLay0304HRcone or m47_bcp8. SCIP solves m400 in 2.8 s and finds no solution on m47 in 60 s. Why do we find none, and what fixes it?
 
 ## m400_CLay0304HRcone (MIQCP, 212 variables, 36 binaries)
@@ -33,14 +35,28 @@ Tried and not kept:
 - `_OA_EARLY` (trace at the root bound) with or without the 35k-equation compile limit: proposals from 31–40 s, but no feasible one in the 9 s budget.
 - The share alone: the program was ready too late (37.6 s or 45.8 s cold).
 
-**Effect (m400, cold, 60 s).**
+**Effect (m400, cold, 60 s), first commit.**
 
 | | first proposal | incumbent |
 |---|---|---|
 | `main` | 36.7 s | 40964.4 at 44.4 s in one run; none in three others |
-| new | 33.4 s | 40262.3875 (optimal) at 46.5 s |
+| these three rules | 33.4 s | 40262.3875 (optimal) at 46.5 s in one run |
 
-The run.py row is `time_limit`, primal 40262.39, dual 3025. Before, the primal was `nan` with a dual of −0.002. The bound still needs about 26 s of search after the incumbent (warm: optimal at 58.5 s), so m400 is not solved in 60 s.
+That run was lucky. In six later cold runs (three with each cut source of the follow-up below, before its MILP-gap change) the heuristic found a solution once: 40929.6 at 57.6 s. Proposals took 1.5–3 s each in the solve, and 10–12 infeasible ones came first. The follow-up makes this reliable.
+
+## Follow-up: cuts from the quadratic form, and any MILP solution while there is no incumbent
+
+1. **`milpbound.form_tangents` (`bnb._OA_FORM`).**
+   - A quadratic problem without a cut pool (m400, the k-means and 2-player models) takes the heuristic's cuts from its lifted quadratic form, `[f, g, h] = E (x, w) + c`. Each product `w = x_a x_b` is replaced by the McCormick plane active at the point, or by the tangent or secant of a square, chosen by the sign of its coefficient.
+   - These are valid convex minorants of the rows, like `relax`'s, computed in numpy: build 0.1 s, against a 54k-equation trace and 10–20 s of XLA compile on m400.
+   - Because nothing is compiled, the heuristic runs right after the root dives when they find no incumbent, before root OBBT and probing.
+   - Plain linearizations, which are not valid for nonconvex rows, were tried first. They found a first feasible point sooner, but then cut off the optimum (the MILP became infeasible at 58014.8).
+   - On a degree-3 polynomial form it returns None and the generic program is used.
+2. **`milpbound.PROPOSE_GAP_NOINC` = 1.0.** While the cutoff is +inf, HiGHS stops at its first MILP solution; after that, the 1% gap as before.
+   - Offline from m400's root box, the first feasible proposal comes at 4.3–4.6 s (0.2–0.5 s per MILP), against 15–22 s with the 1% gap.
+   - The optimum comes at 6.5 s if the gap stays at 1.0, and at about 12.5 s with the switch back to 1%.
+
+**m400, cold, three runs:** a first incumbent (41886.4) at 25 s each time, and the optimum (40262.39) in all three by the time limit; final duals 3257–3884. Still `time_limit`: the bound is now what is missing.
 
 ## m47_bcp8 (MINLP, 168 variables, 9 binaries)
 
@@ -53,16 +69,38 @@ The primal problem is hard in itself, not a gap in our heuristics: it needs eith
 
 ## Checks
 
-All cold, 60 s. Raw rows: `benchmarks/results/s2c_noinc_cold.csv` and `s2c_int50_{base,noinc}_cold.csv`.
+All cold, 60 s. Raw rows: `benchmarks/results/s2c_noinc_cold.csv`, `s2c_form_cold.csv` (form cuts, before the gap change), `s2c_form2_cold.csv` (everything), `s2c_int50_{base,noinc,form2}_cold.csv`.
 
-- **Stage 2b** (`--jobs 1`): 10 → 10 solved, the same models. m400 gains the optimal incumbent; m441's incumbent improves 0.3921 → 0.3289 (optimum 0.3289). No solved model is slower by more than 0.8 s. Most are 2–5 s faster, which is run-to-run variation: they have an incumbent after their root dives and do not take the new path.
-- **int50** (`--jobs 2 --threads-per-job 2`, base and new arms back to back): 47 → 47 solved, no wrong answers. Only tln4 differs by more than 10 s (58.6 → 48.3 s).
-- **start50:** continuous models only; the heuristic requires binaries, so nothing changes.
-- **Tests:** test_milpbound, test_integer, test_compile_gate, test_incumbent, test_bigm and test_cut_pool pass.
+**Stage 2b** (`--jobs 1`), incumbent of the unsolved models:
+
+| model (optimum) | `main` | three rules | everything |
+|---|---|---|---|
+| m400 (40262.39) | none | 40262.39 (lucky run) | 40262.39 |
+| m420 (1.0836) | 1.6405 | 1.6405 | 1.2564 |
+| m426 (0.3299) | 0.5144 | 0.5144 | 0.4181 |
+| m441 (0.3289) | 0.3921 | 0.3289 | 0.3289 |
+| m472, max (361.67) | 140.0 | 138.6 | 139.0 (252.4 in the run before the gap change) |
+| m421, m422, m473 | unchanged | unchanged | unchanged |
+
+- The same 10 models are solved in every arm.
+- With everything, m394 is 0.6 s slower than `main` (49.6 against 49.0 s); the rest are 2–11 s faster: m399 43.0 → 32.0 s, m474 43.2 → 36.2 s, m406 36.2 → 31.6 s.
+- The quadratic models without a cut pool no longer trace and compile the heuristic's 30–90k-equation program, so the gains on m399 and m474 are compile CPU saved. The others are partly run-to-run variation.
+
+**int50** (`--jobs 2 --threads-per-job 2`, the `main`-equivalent arm and the new one run back to back):
+- Three rules: 47 → 47 solved, no wrong answers; only tln4 differs by more than 10 s (58.6 → 48.3 s).
+- Everything: 47 → 47, no wrong answers, no model more than 10 s apart.
+
+**start50:** continuous models only; the heuristic requires binaries, so nothing changes.
+
+**Tests:**
+- test_milpbound has a new test: form-tangent cuts lie below their rows on random boxes, and `propose` runs with them.
+- test_milpbound, test_integer, test_compile_gate, test_incumbent, test_bigm, test_cut_pool and test_quadratic pass.
 
 ## What is left
 
-- **m400's bound.** After the incumbent, the search needs about 26 s. It is a hull model whose root relaxation is 0 (as for every CLay model here), so branching and node throughput decide.
-- **Fewer infeasible proposals.** Each early proposal costs a 1–2 s MILP for a no-good cut on one full assignment. Two options:
-  - Detect infeasibility on the `W` part alone: a local solve with `Z` relaxed, then a no-good cut on `W` only. This is a heuristic cut, allowed because `propose` never reports a bound.
-  - A cheaper OA program without a cut pool (issue step 5), which would also start the heuristic earlier.
+- **The bound.** m400, m420 and m441 now have their optimal or near-optimal incumbents; the dual is what keeps them open.
+  - m400 needs about 26 s of search after the incumbent (warm). It is a hull model whose root relaxation is 0, as for every CLay model here.
+  - On m441, node bounds with 12–24 binaries fixed are close to SCIP's root bounds on the same boxes; with 6 fixed, about half of SCIP's (0.062 against 0.135).
+- **Symmetry: not a lever here.** The k-means models already order their centroids (`c(k-1,'1') ≤ c(k,'1')`), so their formulations have no relabelling symmetry left.
+- **m472.** The incumbent swings between 139 and 252 from run to run; optimum 361.67.
+- **Not useful:** no-goods over only the binaries of the rows a failed completion violates. With the binaries fixed, those rows hold only continuous variables, so the set is empty.
