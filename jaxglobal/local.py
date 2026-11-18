@@ -149,6 +149,12 @@ def _color_columns(rows, cols, n):
     return color, int(color.max()) + 1 if n else 0
 
 
+def _jit(fn):
+    return jax.jit(fn) if not COMPILE_OPTIONS else jax.jit(fn, compiler_options=dict(COMPILE_OPTIONS))
+
+
+# Experimental, None by default: XLA options for the local solver's callbacks (``_Callbacks``)
+COMPILE_OPTIONS = None
 _MAX_COLOR_SHARE = 0.5  # compressed derivatives when they need at most this share of n directions
 
 
@@ -174,18 +180,18 @@ class _Callbacks:
         self.m = m
         self._jrows, self._jcols = (np.asarray(v, np.int64) for v in struct.jacobianstructure())
         self._hrows, self._hcols = (np.asarray(v, np.int64) for v in struct.hessianstructure())
-        self._f, self._grad = jax.jit(f), jax.jit(jax.grad(f))
+        self._f, self._grad = _jit(f), _jit(jax.grad(f))
         lag = (lambda x, lam, s: s * f(x) + jnp.dot(lam, c(x))) if m else (lambda x, s: s * f(x))
         self._jac_seed = self._hess_seed = None
         if m:
-            self._c = jax.jit(c)
+            self._c = _jit(c)
             color, k = _color_columns(self._jrows, self._jcols, n)
             if 0 < k <= _MAX_COLOR_SHARE * n:
                 SJ = jnp.asarray(np.eye(k)[color].T)  # (k, n): column j in direction color[j]
-                self._jac = jax.jit(lambda x: jax.vmap(lambda s: jax.jvp(c, (x,), (s,))[1])(SJ))
+                self._jac = _jit(lambda x: jax.vmap(lambda s: jax.jvp(c, (x,), (s,))[1])(SJ))
                 self._jac_seed = color[self._jcols]
             else:
-                self._jac = jax.jit(jax.jacfwd(c) if n < m else jax.jacrev(c))
+                self._jac = _jit(jax.jacfwd(c) if n < m else jax.jacrev(c))
         # the Hessian's full pattern (it is stored as the lower triangle) colored the same way
         full_r, full_c = np.r_[self._hrows, self._hcols], np.r_[self._hcols, self._hrows]
         color, k = _color_columns(full_r, full_c, n)
@@ -196,10 +202,10 @@ class _Callbacks:
             def hv(x, *a):
                 return jax.vmap(lambda s: jax.jvp(lambda xx: grad_lag(xx, *a), (x,), (s,))[1])(SH)
 
-            self._hess = jax.jit(hv)
+            self._hess = _jit(hv)
             self._hess_seed = color[self._hcols]
         else:
-            self._hess = jax.jit(jax.hessian(lag))
+            self._hess = _jit(jax.hessian(lag))
 
     def precompile(self, x0):
         """Compile every callback at ``x0`` in a background thread (returns its future).

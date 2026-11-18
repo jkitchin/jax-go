@@ -345,7 +345,24 @@ _GATE_TRACE_S = 1.0  # ...but not behind a bound kernel traced (or loaded from t
 # the root bound came earlier, but root probing ran on the slower kernel. Empty: no tiers.
 _FAST_COMPILE = {}
 _TIER_TRACE_S = 3.0
+# Experimental, off by default: XLA options for the kernels named in _LIGHT_KERNELS ("dive",
+# "obbt", "pool_cuts", "screen"), which are called far less than the bound kernel; their compiles
+# compete with its compile for the CPU on a cold cache.
+_LIGHT_COMPILE = {}
+_LIGHT_KERNELS = ()
+_TIER_EARLY = False  # open the tier gate once the fast executable is compiled, not at the search's start
 _LIVE = threading.local()  # ``gates``: the ``_Gate``s of the running ``minimize`` on this thread
+
+
+def _light(name):
+    """The XLA compile options of kernel ``name`` (``_LIGHT_COMPILE``), or None: XLA's defaults."""
+    return dict(_LIGHT_COMPILE) if _LIGHT_COMPILE and name in _LIGHT_KERNELS else None
+
+
+def _jit(fn, name):
+    """``jax.jit(fn)``, with kernel ``name``'s compile options (``_light``)."""
+    opts = _light(name)
+    return jax.jit(fn) if opts is None else jax.jit(fn, compiler_options=opts)
 
 
 def _live_gates():
@@ -536,8 +553,12 @@ class _Precompiled:
                 self.traced_seconds = time.perf_counter() - t
                 if tier is not None and _FAST_COMPILE and self.traced_seconds >= _TIER_TRACE_S:
                     self.better[key] = kcache.track(tier.submit(lowered.compile))
-                    return submit(functools.partial(lowered.compile, compiler_options=dict(_FAST_COMPILE)))
-                return submit(lowered.compile)
+                    fast = submit(functools.partial(lowered.compile, compiler_options=dict(_FAST_COMPILE)))
+                    if _TIER_EARLY:
+                        fast.add_done_callback(tier.open)
+                    return fast
+                opts = _light(self.name)
+                return submit(lowered.compile if opts is None else functools.partial(lowered.compile, compiler_options=opts))
 
             self.ready[key] = kcache.track(tracer.submit(build))
         return self.ready[key]
@@ -787,13 +808,13 @@ class _Kernels:
         self.pool_cuts = None
         if constrained and not lifted and cut_pool:
             self.bound_pool = _Precompiled(jax.jit(jax.vmap(node, in_axes=(0, 0, None, None, None))), "bound_pool")
-            self.pool_cuts = jax.jit(jax.vmap(make_pool_cuts(f, ineq, eq, univariate=univariate, alphabb=alphabb,
-                                                             multivariate=multivariate, safe=safe, exact=exact),
-                                              in_axes=(0, None, None)))  # fmt: skip
+            self.pool_cuts = _jit(jax.vmap(make_pool_cuts(f, ineq, eq, univariate=univariate, alphabb=alphabb,
+                                                          multivariate=multivariate, safe=safe, exact=exact),
+                                           in_axes=(0, None, None)), "pool_cuts")  # fmt: skip
         self.obbt = _Precompiled(jax.jit(jax.vmap(node_obbt, in_axes=(0, 0, None))), "obbt") if obbt else None
         self._problem, self._opts, self._fingerprints, self._nonlinear, self._structure = (f, ineq, eq), opts, {}, {}, {}
         self._quadratic, self._use_quadratic, self._qlock = {}, bool(quadratic) and not lifted, threading.Lock()
-        self.viol = jax.jit(jax.vmap(violation))
+        self.viol = _jit(jax.vmap(violation), "screen")
         self.dive = None
         if idx.size and fbbt:
             # its own FBBT (own tape and interpreter caches): this kernel is traced on the
@@ -830,7 +851,7 @@ class _Kernels:
                 return jax.lax.fori_loop(p0, p1, step, (blo, bhi, failed))
 
             self.dive = _Precompiled(jax.jit(jax.vmap(dive, in_axes=(0, 0, 0, None, 0, None, None))), "dive")
-        self.fvals = jax.jit(jax.vmap(f))
+        self.fvals = _jit(jax.vmap(f), "screen")
         self.fns = [fn for fn in (f, ineq, eq) if fn is not None]
         self.hessians = [_hessian(fn) for fn in self.fns]
 
@@ -1929,7 +1950,7 @@ def _minimize(
         if ok:
             pool["exe"] = done
         else:
-            pool["exe"] = kcache.track(tracer.submit(lambda: later.submit(K.pool_cuts.trace(pts, vec, vec).lower().compile)))
+            pool["exe"] = kcache.track(tracer.submit(lambda: later.submit(functools.partial(K.pool_cuts.trace(pts, vec, vec).lower().compile, compiler_options=_light("pool_cuts")))))
             with _CACHE_LOCK:
                 if not hasattr(K, "_pool_exe"):
                     K._pool_exe = {}
