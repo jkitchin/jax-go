@@ -37,6 +37,7 @@ import jax.numpy as jnp
 import jax.scipy.linalg
 import numpy as np
 
+from .fbbt import batched_init
 from .lp import EPS, reduce_ranges
 from .relax import SAFE_K
 from .symmetry import SEARCH_SECONDS, automorphisms
@@ -72,6 +73,16 @@ N_SEP = 1  # make_quadratic_bounder: rounds of pool separation (each one more IP
 # bounds per node, and was not better on the benchmark sets, docs/ANALYSIS-node-speed.md)
 ROUND_STALL = -1.0
 IPM_PC = True  # _ipm: Mehrotra predictor-corrector steps (False: fixed sigma)
+# _ipm's normal equations by block elimination (``_blocks``, ``_factor``) where the lifted LP's columns
+# split into small groups coupled only through a few separator columns (the hull / big-M models)
+BLOCK_SOLVE = True
+BLOCK_MIN_N = 64  # ... with at least this many columns
+BLOCK_GAIN = 3.0  # ... and an estimated flop count at most 1 / this of the dense Cholesky's
+# make_quadratic_bounder: Kelley round k also adds the square tangents at x + d (u - l) / 2^k for each d
+# in this tuple (x: the LP point). Off by default: (-0.05, 0.05) halved the nodes of the k-means hull
+# model m441 (solved in 175 s / 1807 nodes against 198 s / 4443) and helped m426, m391, ex1252a in
+# 40-iteration screens, but took 4x the nodes on m406 and a lower bound on m394 (docs/ANALYSIS-nodelp.md)
+KELLEY_SPREAD = ()
 # _eigen_cuts: rows (v.x)^2 = sum_ij v_i v_j w_ij along the eigenvectors v of each row's quadratic part
 MAX_EIG_SUPPORT = 16  # a row's (connected) quadratic block is used only up to this many variables
 MAX_EIG_PAIRS = 400_000  # budget of (nonzero, nonzero) pairs of the eigen rows (the IPM's normal-matrix scatter)
@@ -144,6 +155,21 @@ class QuadraticForm(NamedTuple):
     sec_col: np.ndarray = np.zeros(0, np.int64)
     sec_cw: np.ndarray = np.zeros(0)
     sec_cx: np.ndarray = np.zeros(0)
+    # big-M coefficient tightening (``with_bigm``): inequality row bm_row (index into g) has the
+    # binary variable bm_col with coefficient bm_coef, at position bm_at among the nonzeros of the
+    # g block (``_layout``'s static values); the row's other nonzeros are bm_ocol / bm_oval
+    # (padded with column 0, value 0)
+    bm_row: np.ndarray = np.zeros(0, np.int64)
+    bm_col: np.ndarray = np.zeros(0, np.int64)
+    bm_coef: np.ndarray = np.zeros(0)
+    bm_at: np.ndarray = np.zeros(0, np.int64)
+    bm_ocol: np.ndarray = np.zeros((0, 1), np.int64)
+    bm_oval: np.ndarray = np.zeros((0, 1))
+    # ... except squares of variables, a w_ii + b x_i, kept together (their range is that of
+    # a x_i^2 + b x_i): factor bm_qvar, coefficients bm_qa, bm_qb (padded with 0)
+    bm_qvar: np.ndarray = np.zeros((0, 1), np.int64)
+    bm_qa: np.ndarray = np.zeros((0, 1))
+    bm_qb: np.ndarray = np.zeros((0, 1))
 
 
 def _eigen_cuts(Q, n, max_support=None, max_pairs=None):
@@ -591,6 +617,99 @@ def polynomial_form(f, ineq, eq, n, degree=MAX_DEGREE, max_columns=MAX_COLUMNS, 
                           max_poly_columns=max_poly_columns, sym_seconds=sym_seconds)
 
 
+def with_bigm(Q, n, ints):
+    """``Q`` with the big-M rows of its inequalities marked (``bm_*`` fields): every row ``g``
+    with an integer variable among its columns (the one of largest coefficient). On a box where
+    that variable is in [0, 1], ``_lp`` tightens its coefficient to what the box allows
+    (``_bigm``). None or ``Q`` unchanged when there is nothing to mark."""
+    if Q is None:
+        return Q
+    ints = np.asarray(ints, np.int64).reshape(-1)
+    if not ints.size:
+        return Q
+    isint = np.zeros(Q.E.shape[1], bool)
+    isint[ints[ints < n]] = True
+    g = Q.E[1:1 + Q.n_g]
+    r_nz, c_nz = np.nonzero(g)
+    pos = {(int(r), int(c)): k for k, (r, c) in enumerate(zip(r_nz, c_nz))}
+    sq = {n + p: int(a) for p, (a, b_) in enumerate(Q.pairs) if a == b_ and a < n}  # square column -> factor
+    rows, cols, coefs, ats, others = [], [], [], [], []
+    for r in range(g.shape[0]):
+        nz = np.flatnonzero(g[r])
+        cand = nz[isint[nz]]
+        if not cand.size or cand.size == nz.size:
+            continue
+        j = int(cand[np.argmax(np.abs(g[r, cand]))])
+        rows.append(r)
+        cols.append(j)
+        coefs.append(float(g[r, j]))
+        ats.append(pos[(r, j)])
+        lin = {int(c): float(g[r, c]) for c in nz if c != j}
+        quad = []
+        for c in list(lin):
+            if c >= n and c in sq and sq[c] != j:
+                i = sq[c]
+                quad.append((i, lin.pop(c), lin.pop(i, 0.0)))
+        others.append((list(lin.items()), quad))
+    if not rows:
+        return Q
+    W = max(1, max(len(o[0]) for o in others))
+    Wq = max(1, max(len(o[1]) for o in others))
+    oc, ov = np.zeros((len(rows), W), np.int64), np.zeros((len(rows), W))
+    qv, qa, qb = np.zeros((len(rows), Wq), np.int64), np.zeros((len(rows), Wq)), np.zeros((len(rows), Wq))
+    for k, (lin, quad) in enumerate(others):
+        for t, (c, v) in enumerate(lin):
+            oc[k, t], ov[k, t] = c, v
+        for t, (i, a, b_) in enumerate(quad):
+            qv[k, t], qa[k, t], qb[k, t] = i, a, b_
+    return Q._replace(bm_row=np.asarray(rows, np.int64), bm_col=np.asarray(cols, np.int64),
+                      bm_coef=np.asarray(coefs), bm_at=np.asarray(ats, np.int64), bm_ocol=oc, bm_oval=ov,
+                      bm_qvar=qv, bm_qa=qa, bm_qb=qb)
+
+
+def _bigm(Q, vlo, vhi, b_g):
+    """Tightened coefficients and right-hand sides of the marked big-M rows (``with_bigm``) on the
+    box of columns ``[vlo, vhi]``. A row ``a.v + m y <= r`` (``r = b_g`` of the row, ``y`` binary)
+    holds at every point of the box with ``y`` in {0, 1} iff ``a.v + m' y <= r'`` does, where, with
+    ``U`` the largest value of ``a.v`` over the box (rounded up):
+
+    * ``m > 0``: ``y = 0`` leaves ``a.v <= r``, implied by the box when ``U < r``; with
+      ``d = min(r - U, m)``: ``m' = m - d``, ``r' = r - d`` (at ``y = 1`` the row is unchanged,
+      at ``y = 0`` it reads ``a.v <= r - d``, and ``r - d >= U``);
+    * ``m < 0``: ``y = 1`` leaves ``a.v <= r - m``; with ``d = min(r - m - U, -m)``: ``m' = m + d``,
+      ``r' = r``.
+
+    So the rows are valid wherever the original ones are, for integral ``y``, and the LP relaxation
+    (fractional ``y``) is tighter: the classic coefficient tightening of MIP presolve, per box.
+    Rows whose binary is not within [0, 1] on the box, or with an unbounded ``U``, are unchanged."""
+    j, m = jnp.asarray(Q.bm_col), jnp.asarray(Q.bm_coef, vlo.dtype)
+    oc, ov = jnp.asarray(Q.bm_ocol), jnp.asarray(Q.bm_oval, vlo.dtype)
+    r = b_g[jnp.asarray(Q.bm_row)]
+    terms = jnp.maximum(ov * vlo[oc], ov * vhi[oc])
+    U = jnp.sum(terms, axis=1)
+    vmag = jnp.maximum(jnp.abs(vlo), jnp.abs(vhi))
+    mag = jnp.sum(jnp.abs(ov) * vmag[oc], axis=1) + jnp.abs(r)
+    qi, qa, qb = jnp.asarray(Q.bm_qvar), jnp.asarray(Q.bm_qa, vlo.dtype), jnp.asarray(Q.bm_qb, vlo.dtype)
+    if Q.bm_qvar.size:  # a x^2 + b x over [l, u]: its largest value at l, u or the (clipped) vertex
+        ql, qu = vlo[qi], vhi[qi]
+        xv = jnp.clip(-qb / jnp.where(qa != 0, 2 * qa, 1.0), ql, qu)
+
+        def q(x):
+            return qa * x * x + qb * x
+
+        U = U + jnp.sum(jnp.maximum(jnp.maximum(q(ql), q(qu)), q(xv)), axis=1)
+        qm = jnp.maximum(jnp.abs(ql), jnp.abs(qu))
+        mag = mag + jnp.sum(jnp.abs(qa) * qm * qm + jnp.abs(qb) * qm, axis=1)
+    W = ov.shape[1] + 3 * qa.shape[1]
+    U = U + SAFE_K * EPS * (W + 3) * mag
+    ok = (vlo[j] >= 0.0) & (vhi[j] <= 1.0) & jnp.isfinite(U) & jnp.isfinite(r)
+    d = jnp.where(m > 0, jnp.clip(r - U, 0.0, m), jnp.clip(r - m - U, 0.0, -m))
+    d = jnp.where(ok, d, 0.0)
+    m_new = jnp.where(m > 0, m - d, m + d)
+    r_new = jnp.where(m > 0, r - d, r)
+    return m_new, r_new
+
+
 def _binary_cuts(col, n, ints):
     """Valid rows for the columns that are products of binary variables.
 
@@ -828,6 +947,8 @@ class _Layout(NamedTuple):
     sep_row: int = 0  # first row of the pool slots
     sep_at: int = 0  # first pattern entry (and value) of the pool slots
     eig_types: int = 0  # eigen tangent rows per tangent vector (``_eigen_cuts``): 3, then n_tan Kelley tangents
+    blocks: object = None  # ``_Blocks`` of the normal matrix (``_blocks``), or None: dense Cholesky
+    spread: int = 1  # square tangent slots per Kelley round: at the LP point and at ``KELLEY_SPREAD`` around it
 
 
 def _sep_size(Q, n_sep):
@@ -854,8 +975,9 @@ def _layout(Q, n, n_tan, cutoff_row, n_sep=0):
         cols.append(c)
         vals.append(B[r, c])
         m += B.shape[0]
+    spread = 1 + len(KELLEY_SPREAD)
     if n_tan:  # square tangents at LP points: values (w, x_i) per round
-        for t in range(n_tan):
+        for t in range(n_tan * spread):
             rows += [m + ar] * 2
             cols += [n + ar, I]
             m += P
@@ -888,8 +1010,205 @@ def _layout(Q, n, n_tan, cutoff_row, n_sep=0):
         vals.append(Q.E[0, c])
         m += 1
     static = np.concatenate(vals) if vals else np.zeros(0)
-    return _Layout(_pattern(rows, cols, m), static, n_tan, cutoff_row, n_sep if K else 0, K, sep_row, sep_at,
-                   eig_types)
+    pat = _pattern(rows, cols, m)
+    pool = None
+    if K:  # the pool slots take their columns at run time: any pool row may land in one
+        pool = np.where(Q.pool_vals != 0.0, Q.pool_cols, -1)
+    return _Layout(pat, static, n_tan, cutoff_row, n_sep if K else 0, K, sep_row, sep_at, eig_types,
+                   _blocks(pat, Q.E.shape[1], pool, skip=(sep_at, sep_at + n_sep * K * Q.pool_cols.shape[1]) if K else None),
+                   spread)
+
+
+class _Blocks(NamedTuple):
+    """A symmetric permutation of the normal matrix to the arrow form ``[[D, B], [B', C]]``: ``D``
+    block diagonal (``nb`` blocks of ``bs`` columns, padded), ``C`` the separator."""
+
+    sep: np.ndarray  # (ns,) separator columns
+    blk: np.ndarray  # (nb, bs) the columns of each block (padding: column 0, ``valid`` False)
+    valid: np.ndarray  # (nb, bs)
+    # with a static pattern, the normal matrix is assembled in place, packed as [D (nb bs bs), B
+    # (nb bs ns), C (ns ns)]: the slot of each (ordered) pair of nonzeros of a row (``pat.pa``,
+    # ``pat.pb``; T, the packed size: dropped, the transposed pair holds it), of each column's
+    # diagonal entry, and the two columns of each slot (N: none)
+    dest: np.ndarray = None
+    ddest: np.ndarray = None
+    ent: np.ndarray = None  # (2, T)
+
+
+def _blocks(pat, N, pool=None, skip=None):
+    """``_Blocks`` for the normal matrix ``A' D A + diag`` of the pattern ``pat`` on ``N`` columns,
+    or None when the dense Cholesky is about as cheap (``BLOCK_SOLVE``, ``BLOCK_MIN_N``,
+    ``BLOCK_GAIN``). Two columns are coupled when some row holds both; ``pool`` ((C, W) columns,
+    -1: none) adds the rows that may be written into the pattern entries ``skip`` (start, end) at
+    run time. The separator is chosen greedily: the column of most couplings in the largest
+    connected component of the rest moves to it (later a few at a time), up to half the columns,
+    and the step of least estimated flops of the block elimination is kept (components packed into
+    blocks of the largest one's size, first fit decreasing).
+    Any symmetric permutation of a positive definite matrix factors, so the choice only changes
+    the cost (``_ipm``)."""
+    if not BLOCK_SOLVE or N < BLOCK_MIN_N:
+        return None
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+
+    keep = np.ones(pat.rows.size, bool)
+    if skip is not None:
+        keep[skip[0]:skip[1]] = False
+    ok = keep[pat.pa] & keep[pat.pb]
+    ca, cb = [pat.cols[pat.pa][ok]], [pat.cols[pat.pb][ok]]
+    if pool is not None and pool.size:
+        W = pool.shape[1]
+        pa, pb = np.repeat(pool, W, axis=1).reshape(-1), np.tile(pool, (1, W)).reshape(-1)
+        use = (pa >= 0) & (pb >= 0)
+        ca.append(pa[use])
+        cb.append(pb[use])
+    ca, cb = np.concatenate(ca), np.concatenate(cb)
+    off = ca != cb
+    G = coo_matrix((np.ones(int(off.sum())), (ca[off], cb[off])), shape=(N, N)).tocsr()
+    G.data[:] = 1.0
+    G.sum_duplicates()
+    G.data[:] = 1.0
+
+    def packed(sizes, lab, free):
+        """Blocks of size max(sizes): components first fit decreasing; lists of columns."""
+        bs = int(sizes.max())
+        cols = [np.flatnonzero(free)[lab == k] for k in range(sizes.size)]
+        bins, room = [], []
+        for k in np.argsort(-sizes, kind="stable"):
+            for i, r in enumerate(room):
+                if r >= sizes[k]:
+                    bins[i].append(cols[k])
+                    room[i] -= sizes[k]
+                    break
+            else:
+                bins.append([cols[k]])
+                room.append(bs - sizes[k])
+        return bs, [np.concatenate(b) for b in bins]
+
+    dense = N ** 3 / 3.0
+    best, best_cost = None, dense / BLOCK_GAIN
+    inS = np.zeros(N, bool)
+    while True:
+        free = ~inS
+        ns = int(inS.sum())
+        if ns ** 3 / 3.0 >= best_cost or 2 * ns > N:
+            break
+        sub = G[free][:, free]
+        nc, lab = connected_components(sub, directed=False)
+        sizes = np.bincount(lab, minlength=nc)
+        bs, bins = packed(sizes, lab, free)
+        nb = len(bins)
+        cost = nb * bs ** 3 / 3.0 + nb * bs * bs * ns + nb * bs * ns * ns + ns ** 3 / 3.0
+        if cost < best_cost:
+            best_cost, best = cost, (np.flatnonzero(inS), bs, bins)
+        big = np.flatnonzero(lab == np.argmax(sizes))
+        deg = np.asarray(sub[big].sum(1)).ravel()
+        step = max(1, ns // 16)  # (a few at a time once the separator is large: bounded setup time)
+        inS[np.flatnonzero(free)[big[np.argsort(-deg, kind="stable")[:step]]]] = True
+    if best is None:
+        return None
+    sep, bs, bins = best
+    nb, ns = len(bins), sep.size
+    blk = np.zeros((nb, bs), np.int64)
+    valid = np.zeros((nb, bs), bool)
+    for i, b in enumerate(bins):
+        blk[i, :b.size] = b
+        valid[i, :b.size] = True
+    if skip is not None:  # columns set at run time: the matrix is assembled dense, then gathered
+        return _Blocks(sep.astype(np.int64), blk, valid)
+    kb, ib = np.full(N, -1), np.zeros(N, np.int64)  # block and slot of each column (-1: separator)
+    kb[blk[valid]] = np.nonzero(valid)[0]
+    ib[blk[valid]] = np.nonzero(valid)[1]
+    sp = np.zeros(N, np.int64)
+    sp[sep] = np.arange(ns)
+    oB, oC = nb * bs * bs, nb * bs * ns
+    oC += oB
+
+    def slot(a, b):
+        ka, kb_ = kb[a], kb[b]
+        d = np.full(a.size, -1)
+        both = (ka >= 0) & (ka == kb_)
+        d[both] = ka[both] * bs * bs + ib[a[both]] * bs + ib[b[both]]
+        bsep = (ka >= 0) & (kb_ < 0)
+        d[bsep] = oB + ka[bsep] * bs * ns + ib[a[bsep]] * ns + sp[b[bsep]]
+        ss = (ka < 0) & (kb_ < 0)
+        d[ss] = oC + sp[a[ss]] * ns + sp[b[ss]]
+        assert not np.any((ka >= 0) & (kb_ >= 0) & (ka != kb_)), "columns of two blocks share a row"
+        return d
+
+    T = oC + ns * ns
+    ent = np.full((2, T), N, np.int64)
+    cb = np.where(valid, blk, N)
+    ent[0, :oB] = np.repeat(cb.reshape(-1), bs)
+    ent[1, :oB] = np.tile(cb, (1, bs)).reshape(-1)
+    ent[0, oB:oC] = np.repeat(cb.reshape(-1), ns)
+    ent[1, oB:oC] = np.tile(sep, nb * bs)
+    ent[0, oC:] = np.repeat(sep, ns)
+    ent[1, oC:] = np.tile(sep, ns)
+    cols = np.arange(N)
+    dest = slot(pat.cols[pat.pa], pat.cols[pat.pb])
+    return _Blocks(sep.astype(np.int64), blk, valid, np.where(dest < 0, T, dest), slot(cols, cols), ent)
+
+
+def _factor(Ms, blocks):
+    """``solve(r) = Ms^-1 r`` for the symmetric positive definite ``Ms``: one dense Cholesky, or
+    with ``blocks`` that of its arrow form (``_Blocks``, ``_arrow``). A breakdown gives NaN, as the
+    dense factorization does."""
+    if blocks is None:
+        fac = jax.scipy.linalg.cho_factor(Ms, lower=True)
+        return lambda r: jax.scipy.linalg.cho_solve(fac, r)
+    sep, blk, valid = jnp.asarray(blocks.sep), jnp.asarray(blocks.blk), jnp.asarray(blocks.valid)
+    vm = valid[:, :, None] & valid[:, None, :]
+    D = jnp.where(vm, Ms[blk[:, :, None], blk[:, None, :]], 0.0)
+    B = jnp.where(valid[:, :, None], Ms[blk[:, :, None], sep[None, None, :]], 0.0)
+    return _arrow(D, B, Ms[sep[:, None], sep[None, :]], blocks)
+
+
+def _assemble(blocks, w, dg, N):
+    """Jacobi-scaled normal matrix ``A' W A + diag(dg)`` packed in ``blocks``' arrow form
+    (``w``: the weight of each pair of nonzeros, ``_ipm``'s ``vv (y / s)``), as ``(dm, solve)``
+    with ``solve(r) = Ms^-1 r`` for ``Ms = M / dm dm'``, ``dm = sqrt(diag M)``."""
+    nb, bs = blocks.blk.shape
+    ns = blocks.sep.size
+    oB, oC = nb * bs * bs, nb * bs * (bs + ns)
+    T = oC + ns * ns
+    ddest = jnp.asarray(blocks.ddest)
+    buf = jnp.zeros(T, w.dtype).at[jnp.asarray(blocks.dest)].add(w, mode="drop").at[ddest].add(dg)
+    dm = jnp.sqrt(buf[ddest])
+    dmx = jnp.concatenate([dm, jnp.ones(1, dm.dtype)])  # (column N: a padding slot, left as it is)
+    buf = buf / (dmx[jnp.asarray(blocks.ent[0])] * dmx[jnp.asarray(blocks.ent[1])])
+    return dm, _arrow(buf[:oB].reshape(nb, bs, bs), buf[oB:oC].reshape(nb, bs, ns), buf[oC:].reshape(ns, ns),
+                      blocks)
+
+
+def _arrow(D, B, C, blocks):
+    """``solve`` for the symmetric positive definite matrix with diagonal blocks ``D`` (nb, bs,
+    bs; zero where padded), block-separator coupling ``B`` (nb, bs, ns) and separator block ``C``
+    in ``blocks``' layout: per block ``D_k = L_k L_k'``, ``X_k = L_k^-1 B_k``, and the Cholesky
+    factor of the separator's Schur complement ``C - sum_k X_k' X_k``."""
+    sep, blk, valid = jnp.asarray(blocks.sep), jnp.asarray(blocks.blk), jnp.asarray(blocks.valid)
+    bs = blocks.blk.shape[1]
+    D = D + jnp.where(~valid, 1.0, 0.0)[:, :, None] * jnp.eye(bs)
+    Lb = jnp.linalg.cholesky(D)
+    tri = jax.scipy.linalg.solve_triangular
+    ns = blocks.sep.size
+    if ns:
+        X = tri(Lb, B, lower=True)
+        S = C - jnp.einsum("kij,kil->jl", X, X)
+        fs = jax.scipy.linalg.cho_factor(S, lower=True)
+
+    def solve(r):
+        rb = jnp.where(valid, r[blk], 0.0)
+        yb = tri(Lb, rb[..., None], lower=True)[..., 0]
+        z = jnp.zeros_like(r)
+        if ns:
+            zs = jax.scipy.linalg.cho_solve(fs, r[sep] - jnp.einsum("kij,ki->j", X, yb))
+            yb = yb - jnp.einsum("kij,j->ki", X, zs)
+            z = z.at[sep].set(zs)
+        zb = tri(Lb, yb[..., None], lower=True, trans="T")[..., 0]
+        return z.at[jnp.where(valid, blk, r.size)].set(zb, mode="drop")
+
+    return solve
 
 
 def _binary_ok(Q, lo, hi):
@@ -960,7 +1279,7 @@ def _lp(Q, L, lo, hi, tol, safe, cutoff=None):
     b = [rhs.reshape(-1), jnp.asarray(tol - g), th - h, th + h, rt, rt,
          jnp.where(ok, jnp.asarray(Q.cut_rhs, lo.dtype), jnp.inf)]  # fmt: skip
     if L.n_tan:
-        b.append(jnp.full(L.n_tan * P, jnp.inf))
+        b.append(jnp.full(L.n_tan * L.spread * P, jnp.inf))
     T2 = len(Q.qr_g)
     if T2:  # (a.x + c')(x_k - l_k) <= 0 and (a.x + c')(u_k - x_k) <= 0 with c' = c - tol (g <= tol)
         cq = jnp.asarray(c[1 + Q.qr_g]) - tol
@@ -1006,7 +1325,7 @@ def _lp(Q, L, lo, hi, tol, safe, cutoff=None):
     tan_at = 12 * P + n_static
     pieces = [mc_vals, jnp.asarray(L.static_vals[:n_static])]
     if L.n_tan:
-        pieces.append(jnp.zeros(L.n_tan * 2 * P))
+        pieces.append(jnp.zeros(L.n_tan * L.spread * 2 * P))
     if T2:
         pieces.append(qr_vals)
     if L.K:
@@ -1015,6 +1334,11 @@ def _lp(Q, L, lo, hi, tol, safe, cutoff=None):
     if L.cutoff_row:
         pieces.append(jnp.asarray(L.static_vals[n_static:]))
     vals = jnp.concatenate(pieces)
+    if Q.bm_row.size:  # big-M rows: coefficients tightened to the box (``_bigm``)
+        g0 = 4 * P  # first g row; its values start after the 12 P McCormick values
+        m_new, r_new = _bigm(Q, vlo, vhi, b[g0:g0 + Q.n_g])
+        vals = vals.at[12 * P + jnp.asarray(Q.bm_at)].set(m_new)
+        b = b.at[g0 + jnp.asarray(Q.bm_row)].set(r_new)
     R, C = L.pattern.rows, L.pattern.cols
     absAv = _segsum(jnp.abs(vals) * vmag[C], R, L.pattern.m)
 
@@ -1029,24 +1353,28 @@ def _lp(Q, L, lo, hi, tol, safe, cutoff=None):
         # a.(w_k - l_k x) = 0, which McCormick also implies. Rounded, these equalities can be
         # inconsistent by a few ulps. The weak-duality certificate of that empty LP then
         # diverges and prunes a box that holds feasible points.
-        q0 = t0 + L.n_tan * P
+        q0 = t0 + L.n_tan * L.spread * P
         qm = EPS * (N + 3) * (jnp.abs(b[q0:q0 + 2 * T2]) + abs(tol) + absAv[q0:q0 + 2 * T2])
         b = b.at[q0:q0 + 2 * T2].add(qm)
 
     # first eigen Kelley row and value (blocks after the pool slots, ``_layout``)
-    ek_row = t0 + L.n_tan * P + 2 * T2 + L.n_sep * L.K + Q.n_sec + 3 * Q.n_eig
-    ek_at = tan_at + L.n_tan * 2 * P + 2 * len(Q.qr_row) + L.n_sep * L.K * Q.pool_cols.shape[1] \
+    ek_row = t0 + L.n_tan * L.spread * P + 2 * T2 + L.n_sep * L.K + Q.n_sec + 3 * Q.n_eig
+    ek_at = tan_at + L.n_tan * L.spread * 2 * P + 2 * len(Q.qr_row) + L.n_sep * L.K * Q.pool_cols.shape[1] \
         + len(Q.sec_row) + 3 * len(Q.eig_row)
 
     def tangents(vals, b, x, k):
-        """Tangents ``-w + 2 p x_i <= p^2`` at ``p = x_i`` for the squares, and ``-s + 2 p t <= p^2``
-        at ``p = t`` for the eigenvectors (``_eigen_cuts``), as round ``k``'s rows."""
-        p = jnp.clip(x[I], li, ui)
-        tv = jnp.stack([jnp.where(sq, -1.0, 0.0), jnp.where(sq, 2 * p, 0.0)]).reshape(-1)
-        tb = jnp.where(sq, p * p, 0.0)
-        tb = margin(tb, jnp.where(sq, vmag[n:] + 2 * jnp.abs(p) * vmag[I], 0.0))
-        vals = jax.lax.dynamic_update_slice(vals, tv, (tan_at + k * 2 * P,))
-        b = jax.lax.dynamic_update_slice(b, jnp.where(sq, tb, jnp.inf), (t0 + k * P,))
+        """Tangents ``-w + 2 p x_i <= p^2`` at ``p = x_i`` for the squares (and at ``p = x_i + d
+        (u_i - l_i) / 2^k`` for ``d`` in ``KELLEY_SPREAD``), and ``-s + 2 p t <= p^2`` at ``p = t``
+        for the eigenvectors (``_eigen_cuts``), as round ``k``'s rows."""
+        x0 = jnp.clip(x[I], li, ui)
+        for j, d in enumerate((0.0,) + tuple(KELLEY_SPREAD)):
+            p = jnp.clip(x0 + d * (ui - li) * 0.5 ** k, li, ui)
+            tv = jnp.stack([jnp.where(sq, -1.0, 0.0), jnp.where(sq, 2 * p, 0.0)]).reshape(-1)
+            tb = jnp.where(sq, p * p, 0.0)
+            tb = margin(tb, jnp.where(sq, vmag[n:] + 2 * jnp.abs(p) * vmag[I], 0.0))
+            slot = k * L.spread + j
+            vals = jax.lax.dynamic_update_slice(vals, tv, (tan_at + slot * 2 * P,))
+            b = jax.lax.dynamic_update_slice(b, jnp.where(sq, tb, jnp.inf), (t0 + slot * P,))
         if L.eig_types:
             pe = jnp.clip(_segsum(ecx * x[ec], Q.eig_row, K_e), eta, etb)
             ev = -ecw + 2.0 * pe[er] * ecx
@@ -1080,8 +1408,8 @@ def _separate(Q, L, cols, vals, b, v, k, vlo, vhi, ok, tol, safe):
     # row blocks: McCormick, g, h+, h-, RLT+, RLT-, binary cuts, tangents, bound-factor RLT
     # (2 T2 rows, 2 nnz values), then the pool slots (``_layout``)
     T2, nq = len(Q.qr_g), len(Q.qr_row)
-    at0 = 12 * P + n_static + L.n_tan * 2 * P + 2 * nq  # first value (and pattern entry) of the slots
-    row0 = 4 * P + Q.n_g + 2 * Q.n_h + 2 * len(Q.rlt_var) + Q.cut_rhs.size + L.n_tan * P + 2 * T2
+    at0 = 12 * P + n_static + L.n_tan * L.spread * 2 * P + 2 * nq  # first value (and pattern entry) of the slots
+    row0 = 4 * P + Q.n_g + 2 * Q.n_h + 2 * len(Q.rlt_var) + Q.cut_rhs.size + L.n_tan * L.spread * P + 2 * T2
     assert (at0, row0) == (L.sep_at, L.sep_row), "pool slots moved: _layout and _separate disagree"
     at, r0 = at0 + k * K * W, row0 + k * K
     cols = jax.lax.dynamic_update_slice(cols, c_new.astype(cols.dtype), (at,))
@@ -1139,7 +1467,7 @@ def _certificate(pat, vals, b, y, cvec, safe):
 
 
 def _ipm(c, pat, vals, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10, target=jnp.inf, gap_tol=1e-9,
-         settled=None, pc=None):
+         settled=None, pc=None, blocks=None):
     """``lp.ipm`` for ``min c.u, A u <= b, 0 <= u <= 1`` with ``A`` in the sparse pattern
     ``pat``: the box rows enter the normal matrix as a diagonal, the others through the pairs of
     nonzeros of each row. Returns ``(u, y_best, best_cert)`` (``y`` of the ``A`` rows).
@@ -1173,6 +1501,17 @@ def _ipm(c, pat, vals, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10, target=j
         r = jnp.where(dv < 0, -v / jnp.where(dv < 0, dv, -1.0), jnp.inf)
         return jnp.min(r)
 
+    def normal(y, s, yh, sh, yl, sl):
+        """``(dm, solve)``: the normal matrix ``M`` of the iterate, Jacobi-scaled (the
+        factorization survives a wider spread of y / s), ``dm = sqrt(diag M)``, and ``solve(r) =
+        (M / dm dm')^-1 r``; packed in place when ``blocks`` allows (``_assemble``)."""
+        w, dg = vv * (y / s)[rpa], yh / sh + yl / sl + 1e-12
+        if blocks is not None and blocks.dest is not None:
+            return _assemble(blocks, w, dg, N)
+        M = jnp.zeros(N * N).at[key].add(w).reshape(N, N) + jnp.diag(dg)
+        dm = jnp.sqrt(jnp.diag(M))
+        return dm, _factor(M / dm[:, None] / dm[None, :], blocks)
+
     def done(st):
         z, s, y, sh, yh, sl, yl, best, yb, k, stuck = st
         zc = jnp.clip(z, 0.0, 1.0)
@@ -1188,13 +1527,10 @@ def _ipm(c, pat, vals, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10, target=j
         rp, rph, rpl = Av(z) + s - b, z + sh - 1.0, sl - z
         rd = c + ATy(y) + yh - yl
         mu = (s @ y + sh @ yh + sl @ yl) / (m + 2 * N)
-        M = jnp.zeros(N * N).at[key].add(vv * (y / s)[rpa]).reshape(N, N)
-        M = M + jnp.diag(yh / sh + yl / sl + 1e-12)
         t, th, tl = ((sigma * mu - s * y + y * rp) / s, (sigma * mu - sh * yh + yh * rph) / sh,
                      (sigma * mu - sl * yl + yl * rpl) / sl)  # fmt: skip
-        dm = jnp.sqrt(jnp.diag(M))  # Jacobi scaling: the factorization survives a wider spread of y/s
-        Ms = M / dm[:, None] / dm[None, :]
-        dz = jax.scipy.linalg.cho_solve(jax.scipy.linalg.cho_factor(Ms, lower=True), (-rd - (ATy(t) + th - tl)) / dm) / dm
+        dm, fac = normal(y, s, yh, sh, yl, sl)
+        dz = fac((-rd - (ATy(t) + th - tl)) / dm) / dm
         ds, dsh, dsl = -rp - Av(dz), -rph - dz, -rpl + dz
         dy, dyh, dyl = ((sigma * mu - s * y - y * ds) / s, (sigma * mu - sh * yh - yh * dsh) / sh,
                         (sigma * mu - sl * yl - yl * dsl) / sl)  # fmt: skip
@@ -1215,14 +1551,11 @@ def _ipm(c, pat, vals, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10, target=j
         rd = c + ATy(y) + yh - yl
         mt = m + 2 * N
         mu = (s @ y + sh @ yh + sl @ yl) / mt
-        M = jnp.zeros(N * N).at[key].add(vv * (y / s)[rpa]).reshape(N, N)
-        M = M + jnp.diag(yh / sh + yl / sl + 1e-12)
-        dm = jnp.sqrt(jnp.diag(M))
-        fac = jax.scipy.linalg.cho_factor(M / dm[:, None] / dm[None, :], lower=True)
+        dm, fac = normal(y, s, yh, sh, yl, sl)
 
         def direction(rc, rch, rcl):
             t, th, tl = (rc + y * rp) / s, (rch + yh * rph) / sh, (rcl + yl * rpl) / sl
-            dz = jax.scipy.linalg.cho_solve(fac, (-rd - (ATy(t) + th - tl)) / dm) / dm
+            dz = fac((-rd - (ATy(t) + th - tl)) / dm) / dm
             ds, dsh, dsl = -rp - Av(dz), -rph - dz, -rpl + dz
             return dz, ds, dsh, dsl, (rc - y * ds) / s, (rch - yh * dsh) / sh, (rcl - yl * dsl) / sl
 
@@ -1258,7 +1591,8 @@ def _ipm(c, pat, vals, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10, target=j
     ones = jnp.ones(N)
     c0 = cert(y0)
     st = (z0, s0, y0, ones, ones, ones, ones, jnp.where(jnp.isnan(c0), -jnp.inf, c0), y0, 0, jnp.array(False))
-    z, _, _, _, _, _, _, best, yb, _, _ = jax.lax.while_loop(lambda st: ~done(st), body_pc if pc else body, st)
+    z, _, _, _, _, _, _, best, yb, _, _ = jax.lax.while_loop(lambda st: ~done(st), body_pc if pc else body,
+                                                             batched_init(st, s0, c0))
     return z, yb, best
 
 
@@ -1397,7 +1731,7 @@ def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False, n_s
             A, bu = _unit(pk, vals, b, vlo, scale, safe)
             target = (prune_at - f0) / cn + 1e-9 * (1 + jnp.abs(prune_at) / cn)  # unit-space value that prunes
             z, y, val = _ipm(chat, pk, A, bu, jnp.where(active, ipm_iters, 0), target=target, settled=settled,
-                             cert=lambda y: _certificate(pk, A, bu, y, chat, safe)[0])  # fmt: skip
+                             cert=lambda y: _certificate(pk, A, bu, y, chat, safe)[0], blocks=L.blocks)  # fmt: skip
             lb = jnp.where(jnp.isnan(val) | ~finite | ~active, -jnp.inf, lower(val))
             best = jnp.maximum(best, lb)
             _, r = _certificate(pk, A, bu, y, chat, safe)
@@ -1439,10 +1773,12 @@ def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False, n_s
     return bound
 
 
-def make_quadratic_obbt(Q, rounds=2, ipm_iters=40, tol=0.0, safe=False):
+def make_quadratic_obbt(Q, rounds=2, ipm_iters=40, tol=0.0, safe=False, variables=None):
     """Return ``obbt(lo, hi, cutoff) -> (lo', hi', infeasible)``: each variable minimized and
     maximized over the lifted LP with ``f <= cutoff`` (2n LPs, one ``vmap``), the facets
-    rebuilt on the tightened box between rounds. The new bounds are certificates."""
+    rebuilt on the tightened box between rounds. The new bounds are certificates.
+    ``variables``: indices of the variables to tighten, or a function of n giving them (None: all;
+    the others keep their bounds)."""
     layouts = {}
 
     def obbt(lo, hi, cutoff=jnp.inf):
@@ -1451,6 +1787,9 @@ def make_quadratic_obbt(Q, rounds=2, ipm_iters=40, tol=0.0, safe=False):
             layouts[n] = _layout(Q, n, 0, True)
         L = layouts[n]
         pat = L.pattern
+        sel = variables(n) if callable(variables) else variables
+        idx = np.arange(n) if sel is None else np.asarray(sel, dtype=np.int64)
+        m = idx.size
         empty = jnp.array(False)
         for _ in range(rounds):
             vlo, vhi, vals, b, _ = _lp(Q, L, lo, hi, tol, safe, cutoff=cutoff)
@@ -1460,20 +1799,22 @@ def make_quadratic_obbt(Q, rounds=2, ipm_iters=40, tol=0.0, safe=False):
             scale = _scale(vlo, vhi, safe)
             A, bu = _unit(pat, vals, b, vlo, scale, safe)
             N = vlo.size
-            C = jnp.concatenate([jnp.eye(n, N), -jnp.eye(n, N)])
+            E = jnp.eye(n, N)[idx]
+            C = jnp.concatenate([E, -E])
 
             def solve(cvec, A=A, bu=bu):
-                _, _, val = _ipm(cvec, pat, A, bu, ipm_iters, cert=lambda y: _certificate(pat, A, bu, y, cvec, safe)[0])
+                _, _, val = _ipm(cvec, pat, A, bu, ipm_iters, cert=lambda y: _certificate(pat, A, bu, y, cvec, safe)[0],
+                                 blocks=L.blocks)
                 return val
 
             B = jax.vmap(solve)(C)
-            ulo = jnp.where(jnp.isfinite(B[:n]), jnp.maximum(B[:n], 0.0), 0.0)
-            uhi = jnp.where(jnp.isfinite(B[n:]), jnp.minimum(-B[n:], 1.0), 1.0)
+            ulo = jnp.where(jnp.isfinite(B[:m]), jnp.maximum(B[:m], 0.0), 0.0)
+            uhi = jnp.where(jnp.isfinite(B[m:]), jnp.minimum(-B[m:], 1.0), 1.0)
             empty |= finite & jnp.any(ulo > uhi + 1e-9)
-            s = scale[:n]
-            nlo = jnp.where(finite, jnp.maximum(lo, vlo[:n] + s * (ulo - 1e-9)), lo)
-            nhi = jnp.where(finite, jnp.minimum(hi, vlo[:n] + s * (uhi + 1e-9)), hi)
-            lo, hi = jnp.minimum(nlo, nhi), jnp.maximum(nlo, nhi)
+            s, v0 = scale[:n][idx], vlo[:n][idx]
+            nlo = jnp.where(finite, jnp.maximum(lo[idx], v0 + s * (ulo - 1e-9)), lo[idx])
+            nhi = jnp.where(finite, jnp.minimum(hi[idx], v0 + s * (uhi + 1e-9)), hi[idx])
+            lo, hi = lo.at[idx].set(jnp.minimum(nlo, nhi)), hi.at[idx].set(jnp.maximum(nlo, nhi))
         return lo, hi, empty
 
     return obbt

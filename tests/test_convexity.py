@@ -37,6 +37,7 @@ RULES = {
     "one_pos": (lambda x: x[0] ** 2.5 / x[1], "cv"),
     "one_pos_int": (lambda x: x[0] ** 3 / (x[1] * x[2]), "cv"),
     "concave_mono": (lambda x: x[0] ** 0.3 * x[1] ** 0.5, "cc"),
+    "perspective": (lambda x: x[0] ** 2 / (0.001 + 0.999 * x[1]) + x[2] ** 2 / (0.001 + x[1]) - 3.0 * x[0], "cv"),
     "affine_atoms": (lambda x: (x[0] + 2 * x[1] + 0.5) ** 1.5 * (x[2] + 1.5) ** -0.5, "cv"),
     "norm": (lambda x: jnp.sqrt(0.01 + x[0] ** 2 + (x[1] - x[2]) ** 2 + 3 * x[2] ** 2), "cv"),
     "norm_of_cvx": (lambda x: jnp.sqrt(jnp.exp(x[0]) ** 2 + (x[1] - x[2]) ** 2), "cv"),
@@ -191,10 +192,18 @@ def test_conditions_fail_on_nonpositive_boxes():
     lo, hi = np.array([0.0, 1.0, 1.0]), np.array([2.0, 2.0, 2.0])
     assert _flags(RULES["nsig"][0], lo, hi)[1] is False
     assert _flags(RULES["sqrt"][0], lo, hi)[2] is True
+    # x^2 / y: the numerator's atom may be 0 (exponent >= 1), the denominator's may not
+    persp = RULES["perspective"][0]
+    assert _flags(persp, np.array([0.0, 0.0, 0.0]), np.ones(3))[1] is True
+    assert _flags(persp, np.array([-0.5, 0.0, 0.0]), np.ones(3))[1] is False
+    assert _flags(lambda x: x[0] ** 2 / x[1], np.array([0.0, 0.0, 0.0]), np.ones(3))[1] is False
+    # exponents in (0, 1) still need a positive atom (infinite slope at 0)
+    assert _flags(lambda x: x[0] ** 0.5 * x[1] ** 0.5, np.array([0.0, 1.0, 1.0]), np.full(3, 2.0))[2] is False
     # odd power: convex only where x0 + x1 >= 0
     f = RULES["odd_pow"][0]
-    # (lo exactly 0 is refused: the interval of a two-term atom carries a rounding margin)
-    assert _flags(f, np.array([0.0, 0.0, 0.0]), np.ones(3))[1] is False
+    # (x0 + x1 >= 0 exactly at lo = 0: the monomial's closure rule takes the atom's lower bound 0)
+    assert _flags(f, np.array([0.0, 0.0, 0.0]), np.ones(3))[1] is True
+    assert _flags(f, np.array([-1e-9, 0.0, 0.0]), np.ones(3))[1] is False
     assert _flags(f, np.array([0.5, 0.0, 0.0]), np.ones(3))[1] is True
     assert _flags(f, np.array([-1.0, 0.0, 0.0]), np.ones(3))[1] is False
 

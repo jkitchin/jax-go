@@ -1,0 +1,2 @@
+solver,name,status,time,primal,dual,nodes,message,load,threads,peak_rss_mb
+jaxglobal,m421_kClus_3_20_3_BM_1,time_limit,60.31293562800056,2.6711987734964886,1.55904471848553,12031,time_limit,2.82,0,1223

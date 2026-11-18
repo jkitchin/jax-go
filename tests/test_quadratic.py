@@ -395,3 +395,34 @@ def test_rounds_and_steps_keep_bounds_valid(monkeypatch, pc, stall, safe):
             assert l1 == pytest.approx(highs_bound(Q, lo, hi, 1e-6), abs=1e-5 * (1 + abs(l1)))
             checked += 1
     assert checked >= 6
+
+
+@pytest.mark.parametrize("lifted", [True, False])
+def test_obbt_variable_subset(lifted):
+    """OBBT on a subset of the variables (``variables``, as ``_Kernels.obbt_variables`` passes the
+    nonlinear ones): the selected variables get the bounds of the full OBBT, the others keep their
+    box, the optimum is kept, and the kernel's own LPs are smaller (one per selected side)."""
+    from jaxglobal.lp import make_obbt
+
+    f, g, h, lo, hi = haverly1()
+    sel = np.array([3, 4, 7])  # Px, Py, p: the variables in the products
+    cut = -400.0 + 1e-6
+    if lifted:
+        Q = quadratic_form(f, g, h, 8)
+        full = make_quadratic_obbt(Q, tol=1e-6)
+        part = make_quadratic_obbt(Q, tol=1e-6, variables=lambda n: sel)
+    else:
+        full = make_obbt(f, g, h, tol=1e-6)
+        part = make_obbt(f, g, h, tol=1e-6, variables=sel)
+    flo, fhi, fe = jax.jit(full)(jnp.asarray(lo), jnp.asarray(hi), cut)
+    plo, phi, pe = jax.jit(part)(jnp.asarray(lo), jnp.asarray(hi), cut)
+    flo, fhi, plo, phi = map(np.asarray, (flo, fhi, plo, phi))
+    assert not fe and not pe
+    rest = np.setdiff1d(np.arange(8), sel)
+    np.testing.assert_array_equal(plo[rest], lo[rest])
+    np.testing.assert_array_equal(phi[rest], hi[rest])
+    assert np.all(plo <= HAVERLY_X + 1e-9) and np.all(HAVERLY_X <= phi + 1e-9)
+    if lifted:  # (the facets depend only on the product variables, all selected: the same LPs)
+        np.testing.assert_allclose(plo[sel], flo[sel], rtol=0, atol=1e-6 * 300)
+        np.testing.assert_allclose(phi[sel], fhi[sel], rtol=0, atol=1e-6 * 300)
+    assert np.any(phi[sel] - plo[sel] < hi[sel] - lo[sel])  # (it tightens something)

@@ -38,6 +38,13 @@ UA = {"User-Agent": "jaxglobal-benchmark/0.1"}
 FIELDS = ["name", "nvars", "ncons", "probtype", "objsense", "primalbound", "dualbound", "gap", "convex",
           "nbinvars", "nintvars", "id", "title", "url"]  # fmt: skip
 LINEAR = {"LP", "MILP", "MIP"}
+# Instances left out of every list: not useful for global optimization as written. The heat-exchanger
+# network models m75/m76 define lmtd = (dt1 - dt2) / log(dt1 / (dt2 + 1e-6)) with no upper bound on
+# lmtd and only lower bounds on dt; at the pole dt1 -> dt2 + 1e-6 the area and the cost go to 0, so the
+# infimum is not attained (a feasible point below minlp.org's best known value exists; see
+# docs/ANALYSIS-unbounded.md on claude/stage2b-unbounded). The published values are local solutions.
+EXCLUDE = {75: "ill-posed for global optimization: lmtd pole, infimum not attained",
+           76: "ill-posed for global optimization: lmtd pole, infimum not attained"}
 TYPES = "lp|mip|rmip|nlp|dnlp|minlp|rminlp|qcp|miqcp|rmiqcp|mcp|cns|mpec|emp"  # "option <type> = <solver>;"
 
 
@@ -155,12 +162,19 @@ def main():
     ap.add_argument("--max-cons", type=int, default=60)
     ap.add_argument("--above", type=int, default=0, help="only instances with more variables or constraints than this")
     ap.add_argument("--per-problem", type=int, default=0, help="at most this many (the smallest) per minlp.org problem")
+    ap.add_argument("--ids", default="", help="comma-separated minlp.org instance ids to keep (after the other filters)")
     ap.add_argument("--out", default="instances.csv", help="instance list to write (skipped ones to skipped_<out>)")
     a = ap.parse_args()
     (HERE / "src").mkdir(exist_ok=True)
     (HERE / "nl").mkdir(exist_ok=True)
     rows, skipped = [], []
+    ids = {int(i) for i in a.ids.split(",") if i.strip()}
     for r in select(listing(), a.max_vars, a.max_cons, a.above, a.per_problem):
+        if ids and r["id"] not in ids:
+            continue
+        if r["id"] in EXCLUDE:
+            skipped.append(dict(id=r["id"], title=r["title"], reason=EXCLUDE[r["id"]]))
+            continue
         models = [(f, loc) for f, loc in r["inputs"] if f.lower().endswith((".gms", ".mps"))]
         if len(models) != 1:
             skipped.append(dict(id=r["id"], title=r["title"], reason=f"inputs {[f for f, _ in r['inputs']]}: not one .gms/.mps model"))

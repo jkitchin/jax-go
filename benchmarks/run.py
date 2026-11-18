@@ -44,7 +44,9 @@ import re
 import shutil
 import subprocess
 import sys
+import signal
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -58,7 +60,10 @@ EXTRA.update(json.loads(os.environ.get("JAXGLOBAL_OPTS", "{}")))  # extra minimi
 # "load" (1-min load average when the run started) was added for the SCIP-gap re-baseline; CSVs
 # written before it have no such column and are appended to with their own header
 # "threads" (--threads-per-job, 0: no cap) was added the same way
-FIELDS = ["solver", "name", "status", "time", "primal", "dual", "nodes", "message", "load", "threads"]
+# "peak_rss_mb" (the solver process's peak resident memory, from wait4's rusage) was added with the
+# "oom" / "killed" statuses (a solver process that died of a signal: see _run)
+FIELDS = ["solver", "name", "status", "time", "primal", "dual", "nodes", "message", "load", "threads", "peak_rss_mb"]
+MEM_LIMIT_MB = 0  # --mem-limit-gb: kill a solver process above this resident memory (0: no limit)
 THREADS = 0  # per-process CPU thread cap set by main() (--threads-per-job); 0: none
 _THREAD_VARS = ("NPROC", "RAYON_NUM_THREADS", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
 TAG = "JAXGLOBAL-RESULT "  # marks the worker's result line among solver log output
@@ -249,15 +254,82 @@ def _env():
     return {**cap, **os.environ, "PYTHONWARNINGS": "ignore"}
 
 
-def _run(cmd, tl, cwd=None):
-    """stdout+stderr as text, or a result dict if the process hung or failed to start."""
+_RUN_INFO = threading.local()  # peak RSS of the last _run on this thread (solve() records it)
+
+
+def _rss_mb(pid):
+    """Resident memory (MB) of ``pid`` and its descendants, from /proc (0 if unreadable)."""
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=tl * 1.5 + 60, cwd=cwd, env=_env())
-    except subprocess.TimeoutExpired:
-        return dict(status="time_limit", time=tl, message="killed")
+        out = subprocess.run(["ps", "-o", "rss=", "--ppid", str(pid), "-p", str(pid)], capture_output=True,
+                             text=True, timeout=5).stdout  # fmt: skip
+        return sum(int(v) for v in out.split()) / 1024
+    except Exception:
+        return 0.0
+
+
+def _run(cmd, tl, cwd=None):
+    """stdout+stderr as text, or a result dict if the process hung, failed to start or died of a signal.
+
+    The process's peak resident memory (``wait4``'s ``ru_maxrss``, MB; the larger of that and
+    the polled RSS of the process with its children) goes to ``_RUN_INFO.peak_rss_mb``. A
+    process killed by a signal the runner did not send is recorded as ``oom`` for SIGKILL
+    (what the kernel's OOM killer sends; with ``--mem-limit-gb`` the runner kills above the
+    limit itself and records ``oom`` too) and ``killed`` for any other signal, with the
+    signal and the peak RSS in the message (formerly a bare ``error``)."""
+    _RUN_INFO.peak_rss_mb = ""
+    try:
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=cwd, env=_env())
     except OSError as e:
         return dict(status="error", message=str(e))
-    return p.stdout + p.stderr
+    bufs = {}
+
+    def read(name, fh):
+        bufs[name] = fh.read()
+
+    readers = [threading.Thread(target=read, args=(k, fh), daemon=True) for k, fh in (("out", p.stdout), ("err", p.stderr))]
+    for t in readers:
+        t.start()
+    why, peak, done = [None], [0.0], threading.Event()
+
+    def watch():  # timeout, the memory limit, and the polled peak RSS
+        t_end = time.time() + tl * 1.5 + 60
+        while not done.wait(0.5):
+            rss = _rss_mb(p.pid)
+            peak[0] = max(peak[0], rss)
+            if MEM_LIMIT_MB and rss > MEM_LIMIT_MB:
+                why[0] = f"memory limit {MEM_LIMIT_MB:.0f} MB exceeded ({rss:.0f} MB)"
+            elif time.time() > t_end:
+                why[0] = "timeout"
+            else:
+                continue
+            try:
+                p.kill()
+            except OSError:
+                pass
+            return
+
+    w = threading.Thread(target=watch, daemon=True)
+    w.start()
+    _, wstatus, ru = os.wait4(p.pid, 0)
+    p.returncode = os.waitstatus_to_exitcode(wstatus)
+    done.set()
+    for t in readers:
+        t.join()
+    w.join()
+    peak_mb = max(ru.ru_maxrss / 1024, peak[0])  # ru_maxrss is in KB on Linux
+    _RUN_INFO.peak_rss_mb = f"{peak_mb:.0f}"
+    text = bufs.get("out", "") + bufs.get("err", "")
+    if why[0] == "timeout":
+        return dict(status="time_limit", time=tl, message="killed")
+    if p.returncode < 0:
+        sig = -p.returncode
+        name = signal.Signals(sig).name if sig in signal.Signals._value2member_map_ else str(sig)
+        if why[0] is not None:
+            return dict(status="oom", message=f"killed by the runner: {why[0]}")
+        status = "oom" if sig == signal.SIGKILL else "killed"
+        return dict(status=status, message=f"{name} (not sent by the runner; peak RSS {peak_mb:.0f} MB) "
+                                           + text.strip()[-120:])  # fmt: skip
+    return text
 
 
 def _read(path):
@@ -311,6 +383,7 @@ def solve(solver, inst, tl):
     except Exception as e:  # a crashing adapter must not stop the run
         r = dict(status="error", message=repr(e)[:200])
     r.setdefault("time", time.perf_counter() - t0)
+    r.setdefault("peak_rss_mb", getattr(_RUN_INFO, "peak_rss_mb", ""))
     return {k: r.get(k, "") for k in FIELDS} | dict(solver=solver, name=name, load=load, threads=THREADS)
 
 
@@ -326,9 +399,12 @@ def main():
     ap.add_argument("--instances", default="instances.csv", help="instance list in --lib (not minlplib), e.g. instances_stage2.csv")
     ap.add_argument("--threads-per-job", type=int, default=None,
                     help="CPU threads per solver process (default: cpu_count // jobs when jobs > 1, else no cap; 0: no cap)")
+    ap.add_argument("--mem-limit-gb", type=float, default=0.0,
+                    help="kill a solver process whose resident memory exceeds this (status oom; 0: no limit)")
     ap.add_argument("--worker", help=argparse.SUPPRESS)
     a = ap.parse_args()
-    global LIB, INSTANCES, THREADS
+    global LIB, INSTANCES, THREADS, MEM_LIMIT_MB
+    MEM_LIMIT_MB = 1024 * max(0.0, a.mem_limit_gb)
     LIB, INSTANCES = HERE / a.lib, a.instances
     if a.threads_per_job is None:
         a.threads_per_job = max(1, (os.cpu_count() or 1) // a.jobs) if a.jobs > 1 else 0
@@ -354,7 +430,7 @@ def main():
         with open(out) as fh:
             rd = csv.DictReader(fh)
             done = {(r["solver"], r["name"]) for r in rd}
-            fields = rd.fieldnames or FIELDS  # an older CSV keeps its columns (no "load", "threads")
+            fields = rd.fieldnames or FIELDS  # an older CSV keeps its columns (no "load", "threads", "peak_rss_mb")
     else:
         with open(out, "w", newline="") as fh:
             csv.DictWriter(fh, FIELDS).writeheader()

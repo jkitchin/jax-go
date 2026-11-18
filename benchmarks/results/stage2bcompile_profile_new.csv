@@ -1,0 +1,343 @@
+instance,mode,load_1_5_15,category,item,seconds,note
+m34_convex2,cold,"8.67, 8.97, 10.08",total,minimize_wall,60.635,time_limit
+m34_convex2,cold,"8.67, 8.97, 10.08",total,import_jax_jaxglobal,0.532,not in minimize
+m34_convex2,cold,"8.67, 8.97, 10.08",total,read_nl,0.002,not in minimize
+m34_convex2,cold,"8.67, 8.97, 10.08",stage,pre_domain,0.089,
+m34_convex2,cold,"8.67, 8.97, 10.08",stage,bound_domain,0.000,
+m34_convex2,cold,"8.67, 8.97, 10.08",stage,setup,0.388,
+m34_convex2,cold,"8.67, 8.97, 10.08",stage,cut_pool,0.666,
+m34_convex2,cold,"8.67, 8.97, 10.08",stage,kernels,0.117,
+m34_convex2,cold,"8.67, 8.97, 10.08",stage,pseudo_boolean,0.000,
+m34_convex2,cold,"8.67, 8.97, 10.08",stage,start_compile,0.002,
+m34_convex2,cold,"8.67, 8.97, 10.08",stage,start_dive_compile,0.000,
+m34_convex2,cold,"8.67, 8.97, 10.08",stage,nonlinear,0.412,
+m34_convex2,cold,"8.67, 8.97, 10.08",stage,quadratic,0.000,
+m34_convex2,cold,"8.67, 8.97, 10.08",stage,make_local,1.656,
+m34_convex2,cold,"8.67, 8.97, 10.08",stage,root_bound,22.370,
+m34_convex2,cold,"8.67, 8.97, 10.08",stage,root_incumbent,5.585,
+m34_convex2,cold,"8.67, 8.97, 10.08",stage,root_dives,9.801,
+m34_convex2,cold,"8.67, 8.97, 10.08",stage,root_enum,0.000,
+m34_convex2,cold,"8.67, 8.97, 10.08",stage,root_obbt,0.000,
+m34_convex2,cold,"8.67, 8.97, 10.08",stage,probe,8.927,
+m34_convex2,cold,"8.67, 8.97, 10.08",stage,milp_root,0.000,
+m34_convex2,cold,"8.67, 8.97, 10.08",stage,oa_primal,2.525,
+m34_convex2,cold,"8.67, 8.97, 10.08",stage,search,8.099,
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_setup,jax_compile,0.164,calls=0
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_setup,jax_trace,0.130,calls=0
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_setup,jax_lower,0.029,calls=0
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_cut_pool,jax_compile,0.284,calls=0
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_cut_pool,jax_trace,0.191,calls=0
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_cut_pool,jax_lower,0.018,calls=0
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_kernels,jax_trace,0.056,calls=0
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_nonlinear,K.nonlinear,0.412,calls=1
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_nonlinear,K.structure,0.412,calls=1
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_nonlinear,jax_trace,0.154,calls=0
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_make_local,make_local,1.648,calls=1
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_make_local,jax_compile,0.429,calls=0
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_make_local,jax_lower,0.043,calls=0
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_root_bound,wait:bound_pool,19.966,calls=1
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_root_bound,run:bound_pool,2.371,calls=1 boxes=16
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_root_bound,jax_compile,0.012,calls=0
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_root_incumbent,local_solve,5.432,calls=2 #1 starts=1;#2 starts=5
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_root_incumbent,jax_trace,0.126,calls=0
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_root_dives,local_solve,6.026,calls=4 #3 starts=16;#4 starts=8;#5 starts=64
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_root_dives,run:dive,2.240,calls=6 boxes=16;boxes=16;boxes=16
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_root_dives,jax_compile,1.507,calls=0
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_probe,local_solve,1.633,calls=2 #7 starts=1;#8 starts=5
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_search,run:bound_pool,4.551,calls=4 boxes=16;boxes=16;boxes=16
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_search,local_solve,2.831,calls=8 #9 starts=2;#10 starts=2;#11 starts=1
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_search,jax_compile,0.339,calls=0
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_search,jax_lower,0.022,calls=0
+m34_convex2,cold,"8.67, 8.97, 10.08",main_in_search,jax_trace,0.005,calls=0
+m34_convex2,cold,"8.67, 8.97, 10.08",main_jax,jax_trace,0.780,union
+m34_convex2,cold,"8.67, 8.97, 10.08",main_jax,jax_lower,0.115,union
+m34_convex2,cold,"8.67, 8.97, 10.08",main_jax,jax_compile,2.734,union
+m34_convex2,cold,"8.67, 8.97, 10.08",background,K.quadratic,0.000,ends at 15.9s; overlaps 
+m34_convex2,cold,"8.67, 8.97, 10.08",background,jax_trace@jaxglobal-trace,25.965,"ends at 28.4s; overlaps root_bound 21.2, root_incumbent 2.7, make_local 1.7, nonlinear 0.4"
+m34_convex2,cold,"8.67, 8.97, 10.08",background,jax_lower@jaxglobal-trace,2.073,"ends at 29.4s; overlaps root_bound 1.2, root_incumbent 0.9"
+m34_convex2,cold,"8.67, 8.97, 10.08",background,jax_compile@jaxglobal-trace,9.216,"ends at 22.9s; overlaps root_bound 9.1, make_local 0.2"
+m34_convex2,cold,"8.67, 8.97, 10.08",background,jax_trace@jaxglobal-local,1.912,ends at 8.2s; overlaps root_bound 1.9
+m34_convex2,cold,"8.67, 8.97, 10.08",background,jax_lower@jaxglobal-local,0.408,ends at 8.3s; overlaps root_bound 0.4
+m34_convex2,cold,"8.67, 8.97, 10.08",background,jax_trace@jaxglobal-screen,0.579,ends at 4.0s; overlaps root_bound 0.6
+m34_convex2,cold,"8.67, 8.97, 10.08",background,jax_lower@jaxglobal-screen,0.075,ends at 4.1s; overlaps root_bound 0.1
+m34_convex2,cold,"8.67, 8.97, 10.08",background,jax_compile@jaxglobal-local,2.832,ends at 8.5s; overlaps root_bound 2.8
+m34_convex2,cold,"8.67, 8.97, 10.08",background,jax_compile@jaxglobal-screen,2.944,ends at 6.9s; overlaps root_bound 2.9
+m34_convex2,cold,"8.67, 8.97, 10.08",background,trace_lower:bound_pool[b=16],9.433,"ends at 10.7s; overlaps root_bound 7.4, make_local 1.7, nonlinear 0.4"
+m34_convex2,cold,"8.67, 8.97, 10.08",background,trace_lower:dive[b=16],3.272,ends at 15.9s; overlaps root_bound 3.3
+m34_convex2,cold,"8.67, 8.97, 10.08",background,jax_compile@jaxglobal-compile,22.830,"ends at 33.5s; overlaps root_bound 17.4, root_incumbent 11.2, root_dives 2.4"
+m34_convex2,cold,"8.67, 8.97, 10.08",background,compile:bound_pool[b=16],12.628,ends at 23.3s; overlaps root_bound 12.6
+m34_convex2,cold,"8.67, 8.97, 10.08",background,K.nonlinear,0.000,ends at 23.5s; overlaps 
+m34_convex2,cold,"8.67, 8.97, 10.08",background,trace_lower:obbt[b=1],13.533,"ends at 29.4s; overlaps root_bound 9.8, root_incumbent 3.7"
+m34_convex2,cold,"8.67, 8.97, 10.08",background,compile:dive[b=16],8.083,"ends at 31.4s; overlaps root_incumbent 5.6, root_bound 2.4, root_dives 0.1"
+m34_convex2,cold,"8.67, 8.97, 10.08",background,wait:bound_pool,0.000,ends at 45.1s; overlaps 
+m34_convex2,cold,"8.67, 8.97, 10.08",background,run:bound_pool,27.524,ends at 48.3s; overlaps probe 27.5
+m34_convex2,cold,"8.67, 8.97, 10.08",background,jax_trace@jaxglobal-oa,2.493,ends at 58.5s; overlaps oa_primal 2.4
+m34_convex2,cold,"8.67, 8.97, 10.08",background,jax_lower@jaxglobal-oa,0.469,ends at 58.5s; overlaps search 0.5
+m34_convex2,cold,"8.67, 8.97, 10.08",background,jax_compile@jaxglobal-oa,5.454,ends at 58.6s; overlaps search 5.4
+m34_convex2,cold,"8.67, 8.97, 10.08",path,use_interpreter,,who=fbbt.interpreted args=[] rows=1102 result=True
+m34_convex2,cold,"8.67, 8.97, 10.08",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=1102 result=True"
+m34_convex2,cold,"8.67, 8.97, 10.08",path,use_interpreter,,"who=lp._joint args=[['min_rows', 0]] rows=1102 result=True"
+m34_convex2,cold,"8.67, 8.97, 10.08",path,alphabb_jacfwd_fallback,,eqns=1101
+m34_convex2,cold,"8.67, 8.97, 10.08",path,use_interpreter,,"who=use_relax_interpreter>use_relax_interpreter args=[['min_rows', 0]] rows=61 result=True"
+m34_convex2,cold,"8.67, 8.97, 10.08",path,use_relax_interpreter,,rule=rows n=100 rows=61 ops=1263005 result=False
+m34_convex2,cold,"8.67, 8.97, 10.08",path,use_interpreter,,"who=use_relax_interpreter>use_relax_interpreter args=[['min_rows', 0]] rows=801 result=True"
+m34_convex2,cold,"8.67, 8.97, 10.08",path,use_relax_interpreter,,rule=rows n=100 rows=801 ops=16584705 result=True
+m34_convex2,cold,"8.67, 8.97, 10.08",path,use_interpreter,,"who=use_relax_interpreter>use_relax_interpreter args=[['min_rows', 0]] rows=240 result=True"
+m34_convex2,cold,"8.67, 8.97, 10.08",path,use_relax_interpreter,,rule=rows n=100 rows=240 ops=4969200 result=False
+m34_convex2,cold,"8.67, 8.97, 10.08",info,n,,100
+m34_convex2,cold,"8.67, 8.97, 10.08",info,n_int,,60
+m34_convex2,cold,"8.67, 8.97, 10.08",info,free,,0
+m34_convex2,cold,"8.67, 8.97, 10.08",info,status,,time_limit
+m34_convex2,cold,"8.67, 8.97, 10.08",info,nodes,,27
+m34_convex2,cold,"8.67, 8.97, 10.08",info,fun,,2748014.554722512
+m34_convex2,cold,"8.67, 8.97, 10.08",info,lower_bound,,2647523.226479795
+m34_convex2,cold,"8.67, 8.97, 10.08",info,message,,
+m34_convex2,cold,"8.67, 8.97, 10.08",info,rows,,1102
+m34_convex2,cold,"8.67, 8.97, 10.08",info,quadratic,,False
+m34_convex2,cold,"8.67, 8.97, 10.08",info,structure,,True
+m34_convex2,cold,"8.67, 8.97, 10.08",info,load_gate,,gate=off load1=8.67
+m34_convex2,cold,"8.67, 8.97, 10.08",bucket,kernel wait: trace+lower,7.336,
+m34_convex2,cold,"8.67, 8.97, 10.08",bucket,kernel wait: XLA compile,12.774,
+m34_convex2,cold,"8.67, 8.97, 10.08",bucket,kernel wait: other,0.000,
+m34_convex2,cold,"8.67, 8.97, 10.08",bucket,bound_domain,0.000,
+m34_convex2,cold,"8.67, 8.97, 10.08",bucket,structure/nonlinear/quadratic,0.412,
+m34_convex2,cold,"8.67, 8.97, 10.08",bucket,make_local,1.656,
+m34_convex2,cold,"8.67, 8.97, 10.08",bucket,root bound: kernel run (first LP),0.000,
+m34_convex2,cold,"8.67, 8.97, 10.08",bucket,root local solves + incumbent,5.585,
+m34_convex2,cold,"8.67, 8.97, 10.08",bucket,root dives + enum,9.657,
+m34_convex2,cold,"8.67, 8.97, 10.08",bucket,root OBBT: kernel run,0.000,
+m34_convex2,cold,"8.67, 8.97, 10.08",bucket,probing: run,8.927,
+m34_convex2,cold,"8.67, 8.97, 10.08",bucket,search,8.099,
+m34_convex2,cold,"8.67, 8.97, 10.08",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.595,
+m34_convex2,cold,"8.67, 8.97, 10.08",bucket,root bound: other,22.370,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",total,minimize_wall,60.622,time_limit
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",total,import_jax_jaxglobal,0.481,not in minimize
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",total,read_nl,0.003,not in minimize
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",stage,pre_domain,0.087,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",stage,bound_domain,10.186,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",stage,setup,0.000,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",stage,cut_pool,1.453,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",stage,kernels,0.232,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",stage,pseudo_boolean,0.000,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",stage,start_compile,0.020,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",stage,start_dive_compile,0.000,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",stage,nonlinear,0.422,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",stage,quadratic,0.000,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",stage,make_local,1.224,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",stage,root_bound,17.585,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",stage,root_incumbent,2.584,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",stage,root_dives,13.133,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",stage,root_enum,0.000,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",stage,root_obbt,0.000,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",stage,probe,4.565,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",stage,milp_root,0.000,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",stage,oa_primal,2.152,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",stage,search,6.980,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_bound_domain,bound_domain,10.185,calls=1
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_bound_domain,jax_compile,5.043,calls=0
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_bound_domain,domain_used_variables,2.331,calls=3
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_bound_domain,jax_trace,0.412,calls=0
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_bound_domain,jax_lower,0.267,calls=0
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_cut_pool,jax_compile,1.050,calls=0
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_cut_pool,jax_trace,0.123,calls=0
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_cut_pool,jax_lower,0.062,calls=0
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_kernels,K.quadratic,0.116,calls=1
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_kernels,jax_trace,0.106,calls=0
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_nonlinear,K.nonlinear,0.422,calls=1
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_nonlinear,K.structure,0.422,calls=1
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_nonlinear,jax_trace,0.244,calls=0
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_make_local,make_local,1.223,calls=1
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_make_local,jax_compile,0.333,calls=0
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_make_local,jax_lower,0.020,calls=0
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_root_bound,wait:bound_pool,16.971,calls=1
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_root_bound,run:bound_pool,0.568,calls=1 boxes=16
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_root_bound,jax_compile,0.034,calls=0
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_root_incumbent,local_solve,2.036,calls=2 #1 starts=1;#2 starts=4
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_root_incumbent,jax_trace,0.520,calls=0
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_root_dives,local_solve,8.521,calls=5 #3 starts=11;#4 starts=8;#5 starts=7
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_root_dives,jax_compile,3.523,calls=0
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_root_dives,run:dive,1.012,calls=5 boxes=16;boxes=16;boxes=16
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_root_dives,jax_lower,0.025,calls=0
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_probe,local_solve,0.959,calls=2 #8 starts=1;#9 starts=4
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_search,local_solve,4.662,calls=2 #10 starts=2;#11 starts=2
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_search,run:bound_pool,1.414,calls=2 boxes=16;boxes=16
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_search,jax_compile,0.359,calls=0
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_in_search,jax_lower,0.019,calls=0
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_jax,jax_trace,1.473,union
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_jax,jax_lower,0.394,union
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",main_jax,jax_compile,10.343,union
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,jax_trace@jaxglobal-domain,1.084,ends at 1.2s; overlaps bound_domain 1.1
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,jax_lower@jaxglobal-domain,0.212,ends at 1.4s; overlaps bound_domain 0.2
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,jax_compile@jaxglobal-domain,1.731,ends at 2.8s; overlaps bound_domain 1.7
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,K.quadratic,0.000,ends at 26.0s; overlaps 
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,jax_lower@jaxglobal-trace,1.820,"ends at 36.6s; overlaps root_bound 0.9, root_dives 0.9"
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,jax_compile@jaxglobal-trace,4.779,"ends at 30.4s; overlaps root_bound 4.7, make_local 0.1"
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,jax_trace@jaxglobal-local,1.810,ends at 18.2s; overlaps root_bound 1.8
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,jax_lower@jaxglobal-local,0.354,ends at 18.3s; overlaps root_bound 0.4
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,jax_trace@jaxglobal-screen,0.373,ends at 14.1s; overlaps root_bound 0.4
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,jax_lower@jaxglobal-screen,0.130,ends at 14.2s; overlaps root_bound 0.1
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,jax_compile@jaxglobal-local,3.420,ends at 19.3s; overlaps root_bound 3.4
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,jax_compile@jaxglobal-screen,2.527,ends at 16.7s; overlaps root_bound 2.5
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,jax_trace@jaxglobal-trace,22.739,"ends at 35.7s; overlaps root_bound 16.6, root_incumbent 2.6, root_dives 1.9, make_local 1.2, nonlinear 0.4"
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,trace_lower:bound_pool[b=16],8.992,"ends at 21.0s; overlaps root_bound 7.3, make_local 1.2, nonlinear 0.4"
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,trace_lower:dive[b=16],3.059,ends at 26.0s; overlaps root_bound 3.1
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,jax_compile@jaxglobal-compile,31.374,"ends at 52.3s; overlaps root_dives 21.1, root_bound 10.8, root_incumbent 5.2, probe 4.6, oa_primal 0.8"
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,compile:bound_pool[b=16],9.682,ends at 30.6s; overlaps root_bound 9.7
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,K.nonlinear,0.000,ends at 31.3s; overlaps 
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,trace_lower:obbt[b=1],10.607,"ends at 36.6s; overlaps root_bound 5.2, root_dives 2.9, root_incumbent 2.6"
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,compile:dive[b=16],6.510,"ends at 37.2s; overlaps root_dives 3.4, root_incumbent 2.6, root_bound 0.6"
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,wait:bound_pool,0.000,ends at 47.1s; overlaps 
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,run:bound_pool,7.851,ends at 50.5s; overlaps probe 7.9
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,jax_trace@jaxglobal-oa,6.282,"ends at 57.8s; overlaps search 4.2, oa_primal 2.1"
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,jax_lower@jaxglobal-oa,1.448,ends at 59.7s; overlaps search 1.4
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,jax_compile@jaxglobal-oa,0.050,ends at 51.6s; overlaps oa_primal 0.1
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",background,compile:obbt[b=1],15.682,"ends at 52.3s; overlaps root_dives 10.3, probe 4.6, oa_primal 0.8"
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",path,use_interpreter,,who=fbbt.interpreted args=[] rows=936 result=True
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=936 result=True"
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",path,use_interpreter,,"who=lp._joint args=[['min_rows', 0]] rows=936 result=True"
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",path,alphabb_jacfwd_fallback,,eqns=90
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",path,alphabb_jacfwd_fallback,,eqns=1029
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",path,use_interpreter,,"who=use_relax_interpreter>use_relax_interpreter args=[['min_rows', 0]] rows=12 result=True"
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",path,use_relax_interpreter,,rule=rows n=90 rows=12 ops=202020 result=False
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",path,use_interpreter,,"who=use_relax_interpreter>use_relax_interpreter args=[['min_rows', 0]] rows=732 result=True"
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",path,use_relax_interpreter,,rule=rows n=90 rows=732 ops=12323220 result=True
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",path,use_interpreter,,"who=use_relax_interpreter>use_relax_interpreter args=[['min_rows', 0]] rows=192 result=True"
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",path,use_relax_interpreter,,rule=rows n=90 rows=192 ops=3232320 result=False
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",info,n,,90
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",info,n_int,,18
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",info,free,,66
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",info,status,,time_limit
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",info,nodes,,7
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",info,fun,,42098.20191022615
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",info,lower_bound,,0.0
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",info,message,,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",info,rows,,936
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",info,quadratic,,False
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",info,structure,,True
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",info,load_gate,,gate=off load1=7.70
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",bucket,kernel wait: trace+lower,7.290,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",bucket,kernel wait: XLA compile,13.040,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",bucket,kernel wait: other,0.000,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",bucket,bound_domain,10.186,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",bucket,structure/nonlinear/quadratic,0.422,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",bucket,make_local,1.224,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",bucket,root bound: kernel run (first LP),0.000,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",bucket,root local solves + incumbent,2.584,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",bucket,root dives + enum,9.773,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",bucket,root OBBT: kernel run,0.000,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",bucket,probing: run,4.565,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",bucket,search,6.980,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.339,
+m410_CLay0203HRS,cold,"7.70, 8.61, 9.88",bucket,root bound: other,17.585,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",total,minimize_wall,60.626,time_limit
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",total,import_jax_jaxglobal,0.556,not in minimize
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",total,read_nl,0.003,not in minimize
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",stage,pre_domain,0.090,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",stage,bound_domain,10.129,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",stage,setup,0.156,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",stage,cut_pool,0.529,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",stage,kernels,0.002,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",stage,pseudo_boolean,0.000,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",stage,start_compile,0.026,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",stage,start_dive_compile,0.000,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",stage,nonlinear,0.516,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",stage,quadratic,0.000,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",stage,make_local,1.089,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",stage,root_bound,10.676,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",stage,root_incumbent,0.327,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",stage,root_dives,11.585,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",stage,root_enum,0.000,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",stage,root_obbt,0.557,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",stage,root_obbt_incumbent,0.178,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",stage,probe,0.210,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",stage,milp_root,0.000,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",stage,oa_primal,4.503,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",stage,search,20.054,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_bound_domain,bound_domain,10.129,calls=1
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_bound_domain,jax_compile,4.903,calls=0
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_bound_domain,domain_used_variables,2.385,calls=3
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_bound_domain,jax_trace,0.483,calls=0
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_bound_domain,jax_lower,0.273,calls=0
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_setup,jax_trace,0.073,calls=0
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_cut_pool,jax_compile,0.231,calls=0
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_cut_pool,jax_trace,0.127,calls=0
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_cut_pool,jax_lower,0.011,calls=0
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_nonlinear,K.nonlinear,0.516,calls=1
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_nonlinear,K.structure,0.516,calls=1
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_nonlinear,jax_trace,0.281,calls=0
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_make_local,make_local,1.074,calls=1
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_make_local,jax_compile,0.337,calls=0
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_make_local,jax_lower,0.030,calls=0
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_root_bound,wait:bound,10.597,calls=1
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_root_bound,run:bound,0.056,calls=1 boxes=16
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_root_bound,jax_compile,0.021,calls=0
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_root_incumbent,local_solve,0.259,calls=2 #1 starts=1;#2 starts=3
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_root_incumbent,jax_trace,0.064,calls=0
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_root_dives,local_solve,5.188,calls=5 #3 starts=6;#4 starts=8;#5 starts=44
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_root_dives,run:dive,3.609,calls=6 boxes=16;boxes=16;boxes=16
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_root_dives,jax_compile,0.037,calls=0
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_root_dives,jax_lower,0.011,calls=0
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_root_obbt,run:obbt,0.512,calls=1 boxes=1
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_root_obbt,run:bound,0.043,calls=1 boxes=16
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_root_obbt_incumbent,local_solve,0.175,calls=2 #8 starts=1;#9 starts=3
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_search,local_solve,3.634,calls=15 #10 starts=1;#11 starts=4;#12 starts=1
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_search,run:bound,0.605,calls=5 boxes=16;boxes=16;boxes=16
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_search,jax_compile,0.311,calls=0
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_in_search,jax_lower,0.020,calls=0
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_jax,jax_trace,1.093,union
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_jax,jax_lower,0.346,union
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",main_jax,jax_compile,5.839,union
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,jax_trace@jaxglobal-domain,1.034,ends at 1.1s; overlaps bound_domain 1.0
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,jax_lower@jaxglobal-domain,0.217,ends at 1.3s; overlaps bound_domain 0.2
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,jax_compile@jaxglobal-domain,1.642,ends at 2.7s; overlaps bound_domain 1.6
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,K.quadratic,0.000,ends at 19.1s; overlaps 
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,jax_trace@jaxglobal-local,2.759,ends at 19.0s; overlaps root_bound 2.8
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,jax_lower@jaxglobal-local,0.535,ends at 19.2s; overlaps root_bound 0.5
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,jax_trace@jaxglobal-screen,0.587,ends at 13.3s; overlaps root_bound 0.6
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,jax_compile@jaxglobal-local,4.185,ends at 20.1s; overlaps root_bound 4.2
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,jax_lower@jaxglobal-screen,0.228,ends at 13.5s; overlaps root_bound 0.2
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,jax_compile@jaxglobal-screen,3.178,ends at 16.6s; overlaps root_bound 3.2
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,jax_trace@jaxglobal-trace,8.313,"ends at 20.8s; overlaps root_bound 6.7, make_local 1.1, nonlinear 0.5"
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,jax_lower@jaxglobal-trace,1.597,ends at 20.9s; overlaps root_bound 1.6
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,trace_lower:bound[b=16],4.567,"ends at 15.5s; overlaps root_bound 2.9, make_local 1.1, nonlinear 0.5"
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,trace_lower:dive[b=16],3.580,ends at 19.1s; overlaps root_bound 3.6
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,K.nonlinear,0.000,ends at 19.1s; overlaps 
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,trace_lower:obbt[b=1],1.860,ends at 20.9s; overlaps root_bound 1.9
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,jax_compile@jaxglobal-compile,11.263,"ends at 26.7s; overlaps root_bound 7.7, root_dives 6.0, root_incumbent 0.3"
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,compile:bound[b=16],7.675,ends at 23.2s; overlaps root_bound 7.7
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,compile:dive[b=16],3.145,"ends at 26.3s; overlaps root_dives 2.8, root_incumbent 0.3, root_bound 0.1"
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,compile:obbt[b=1],3.202,ends at 26.7s; overlaps root_dives 3.2
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,wait:bound,0.004,ends at 60.1s; overlaps 
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,run:bound,37.833,"ends at 60.2s; overlaps search 37.3, probe 0.5"
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,jax_trace@jaxglobal-oa,2.831,"ends at 46.4s; overlaps oa_primal 2.8, search 0.1"
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,jax_lower@jaxglobal-oa,0.365,ends at 46.4s; overlaps oa_primal 0.3
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",background,jax_compile@jaxglobal-oa,7.057,"ends at 46.6s; overlaps search 5.9, oa_primal 1.2"
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",path,use_interpreter,,who=fbbt.interpreted args=[] rows=1110 result=True
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",path,use_interpreter,,"who=structure.structure args=[['min_rows', 0]] rows=1110 result=True"
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",path,use_interpreter,,"who=lp._joint args=[['min_rows', 0]] rows=1110 result=True"
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",info,n,,85
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",info,n_int,,55
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",info,free,,20
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",info,status,,time_limit
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",info,nodes,,3985
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",info,fun,,8092.500000001077
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",info,lower_bound,,5897.496975130823
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",info,message,,incumbent repaired from violation 1e-06 to 0 (f 8092.496406 -> 8092.5)
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",info,rows,,1110
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",info,quadratic,,True
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",info,structure,,True
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",info,load_gate,,gate=off load1=6.99
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",bucket,kernel wait: trace+lower,2.910,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",bucket,kernel wait: XLA compile,10.434,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",bucket,kernel wait: other,0.010,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",bucket,bound_domain,10.129,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",bucket,structure/nonlinear/quadratic,0.516,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",bucket,make_local,1.089,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",bucket,root bound: kernel run (first LP),0.056,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",bucket,root local solves + incumbent,0.505,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",bucket,root dives + enum,8.828,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",bucket,root OBBT: kernel run,0.557,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",bucket,probing: run,0.210,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",bucket,search,20.054,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",bucket,"setup other (pre_domain, setup, kernels, start_compile)",0.274,
+m394_CLay0305BM,cold,"6.99, 8.23, 9.66",bucket,root bound: other,0.024,

@@ -13,7 +13,6 @@ m49_bcp6,118,134,MINLP,max,0.9609,,,,7,0,49,Stabilizing controller design and th
 m50_bcp5,90,103,MINLP,max,0.9519,,,,6,0,50,Stabilizing controller design and the Belgian chocolate problem : Controller of degree 5,https://www.minlp.org/library/problem/index.php?i=57
 m60_GMA_ethanol_model_BigM,37,72,MINLP,min,157.59,,,,24,0,60,Optimization of metabolic networks in biotechnology : Big-M,https://www.minlp.org/library/problem/index.php?i=81
 m61_GMA_ethanol_model_CH,61,80,MINLP,min,157.59,,,,24,0,61,Optimization of metabolic networks in biotechnology : Convex hull,https://www.minlp.org/library/problem/index.php?i=81
-m76_General_Model_Case1,112,120,MINLP,min,300734.33,,,,12,0,76,Mixed-Integer Nonlinear Programming Models for Optimal Simultaneous Synthesis of Heat Exchangers Network : Example1,https://www.minlp.org/library/problem/index.php?i=93
 m77_Specilized_Model_Case2_NLP_Improvement,76,90,MINLP,min,634979.34,,,,16,0,77,Mixed-Integer Nonlinear Programming Models for Optimal Simultaneous Synthesis of Heat Exchangers Network : Example2,https://www.minlp.org/library/problem/index.php?i=93
 m78_Specilized_Model_Case1,56,64,MINLP,min,154997.34,,,,12,0,78,Mixed-Integer Nonlinear Programming Models for Optimal Simultaneous Synthesis of Heat Exchangers Network : Example1,https://www.minlp.org/library/problem/index.php?i=93
 m126_generalizedpooling_lee1,49,82,MIQCP,min,-4640,,,,9,0,126,Generalized Pooling Problem : Lee 1,https://www.minlp.org/library/problem/index.php?i=123

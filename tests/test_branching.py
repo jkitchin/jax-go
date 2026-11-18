@@ -197,3 +197,120 @@ def test_gap_weights():
     # box 0: gaps x0^2 -> 1, x0*x1 -> 2; per variable 3, 2, 0
     assert np.allclose(w[0], [1.0, 0.5 * 2 / 3, 0.0])
     assert np.allclose(w[1], [1.0, 0.5, -1.0])
+
+
+def test_gap_scores_polynomial_form():
+    """On a polynomial form a product's factor can be a product column (x0 * (x1^2)): the
+    factor's value is the exact product at the point, its bounds the interval product, and the
+    product's gap counts for every variable of the monomial. A quadratic form is unchanged."""
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from jaxglobal.bnb import _gap_scores, _mccormick_gap
+
+    lo = np.array([[0.5, -1.0], [1.0, 2.0]])
+    hi = np.array([[2.0, 2.0], [3.0, 2.5]])
+    x = np.array([[1.0, 0.5], [2.0, 2.25]])
+    Q = SimpleNamespace(pairs=np.array([[1, 1], [0, 2]]))  # column 2 = x1^2, column 3 = x0 * x1^2
+    g = _gap_scores(Q, lo, hi, x)
+    sq = _mccormick_gap(x[:, 1], x[:, 1], lo[:, 1], hi[:, 1], lo[:, 1], hi[:, 1], True)
+    l2 = np.where(lo[:, 1] * hi[:, 1] <= 0, 0.0, np.minimum(lo[:, 1] ** 2, hi[:, 1] ** 2))  # [0, 4] and [4, 6.25]
+    u2 = np.maximum(lo[:, 1] ** 2, hi[:, 1] ** 2)
+    cub = _mccormick_gap(x[:, 0], x[:, 1] ** 2, lo[:, 0], hi[:, 0], l2, u2, False)
+    assert np.all(cub > 0) and np.all(sq > 0)
+    assert np.allclose(g[:, 0], cub) and np.allclose(g[:, 1], sq + cub)
+    # a quadratic form: the same as the pairwise sum
+    Q2 = SimpleNamespace(pairs=np.array([[0, 1], [1, 1]]))
+    g2 = _gap_scores(Q2, lo, hi, x)
+    xy = _mccormick_gap(x[:, 0], x[:, 1], lo[:, 0], hi[:, 0], lo[:, 1], hi[:, 1], False)
+    assert np.allclose(g2[:, 0], xy) and np.allclose(g2[:, 1], xy + sq)
+
+
+def _assignment_model(items=10, link=True, assign=True, quad=False):
+    """``items`` points x_i in [0, 10], each placed left (b_i0: x_i <= 4) or right (b_i1: x_i >= 6)
+    by big-M rows; minimize sum (x_i - 5 - 0.1 i)^2. Variables: x (items), then b (2 items)."""
+    import jax.numpy as jnp
+    import numpy as np
+
+    n = 3 * items
+    lo, hi = np.zeros(n), np.r_[np.full(items, 10.0), np.ones(2 * items)]
+    c = 5.0 + 0.1 * np.arange(items)
+
+    # (written one scalar at a time: the lifted quadratic form reads scalar tapes)
+    def f(v):
+        return sum((v[i] - c[i]) ** 2 for i in range(items))
+
+    def ineq(v):
+        if not link:
+            return jnp.stack([v[items + i] - 1.0 for i in range(items)])
+        if quad:  # the same disjunction as convex quadratic rows: (x - 2)^2 <= 4, (x - 8)^2 <= 4
+            return jnp.stack([(v[i] - 2.0) ** 2 - 4.0 - 100.0 * (1 - v[items + i]) for i in range(items)]
+                             + [(v[i] - 8.0) ** 2 - 4.0 - 100.0 * (1 - v[2 * items + i]) for i in range(items)])
+        return jnp.stack([v[i] - 4.0 - 10.0 * (1 - v[items + i]) for i in range(items)]
+                         + [6.0 - v[i] - 10.0 * (1 - v[2 * items + i]) for i in range(items)])
+
+    def eq(v):
+        return jnp.stack([v[items + i] + v[2 * items + i] - 1.0 for i in range(items)])
+
+    return f, ineq, eq, lo, hi, np.arange(items, n)
+
+
+@pytest.mark.parametrize("items, link, assign, quad, want", [(10, True, True, False, 1.0), (9, True, True, False, 0.0),
+                                                             (10, False, True, False, 0.0), (10, True, False, False, 0.0),
+                                                             (10, True, True, True, 1e-300)])
+def test_assignment_bigm_rule(items, link, assign, quad, want):
+    """Disjunctive assignment models (_assignment_bigm): at least _ASSIGN_MIN binaries, nearly all
+    of them both in a ``sum b = 1`` row and in a row that switches a continuous variable; the
+    result is the share of binaries switching a linear row (a tiny positive value when none do)."""
+    import numpy as np
+
+    from jaxglobal import bnb
+    from jaxglobal.quadratic import quadratic_form
+
+    f, ineq, eq, lo, hi, ints = _assignment_model(items, link, assign, quad)
+    Q = quadratic_form(f, ineq, eq if assign else None, lo.size)
+    imask = np.zeros(lo.size, bool)
+    imask[ints] = True
+    assert bnb._assignment_bigm(Q, lo.size, imask, lo, hi) == want
+    assert bnb._assignment_bigm(None, lo.size, imask, lo, hi) == 0.0
+    lo2 = lo.copy()
+    lo2[ints[0]] = -1.0  # a general integer: not a binary model
+    assert bnb._assignment_bigm(Q, lo.size, imask, lo2, hi) == 0.0
+
+
+def test_assignment_bigm_solve():
+    """The default rule (pseudocost here) solves a small big-M assignment model."""
+    import numpy as np
+
+    f, ineq, eq, lo, hi, ints = _assignment_model(10)
+    r = minimize(f, lo, hi, ineq=ineq, eq=eq, integer=ints, time_limit=120)
+    assert r.status == "optimal" and r.verified
+    # x_i = 4 (i < 5: c_i <= 5.4 is nearer 4) or 6
+    c = 5.0 + 0.1 * np.arange(10)
+    want = np.sum(np.minimum((4 - c) ** 2, (6 - c) ** 2))
+    assert abs(r.fun - want) < 1e-4
+    # n_kelley=None resolved to _ASSIGN_KELLEY for this model (the kernels' options say so)
+    from jaxglobal import bnb
+
+    ks = [dict(k[4]) for k in bnb._CACHE if isinstance(k, tuple) and k[0] == "kernels" and k[1] is f]
+    assert ks and all(o["n_kelley"] == bnb._ASSIGN_KELLEY for o in ks)
+
+
+@pytest.mark.parametrize("seed", [True, False])
+def test_probe_seeded_pseudocosts(monkeypatch, seed):
+    """Root probing's side bounds seed the pseudocosts (``_PC_PROBE``); either way the big-M
+    assignment model and an integer test problem solve to optimality."""
+    import numpy as np
+
+    from jaxglobal import bnb
+
+    monkeypatch.setattr(bnb, "_PC_PROBE", seed)
+    f, ineq, eq, lo, hi, ints = _assignment_model(10)
+    r = minimize(f, lo, hi, ineq=ineq, eq=eq, integer=ints, branch_var="pseudocost", time_limit=120)
+    c = 5.0 + 0.1 * np.arange(10)
+    assert r.status == "optimal" and r.verified
+    assert abs(r.fun - np.sum(np.minimum((4 - c) ** 2, (6 - c) ** 2))) < 1e-4
+    sh = next(p for p in PROBLEMS if p.name == "shubert")
+    r = solve(sh, integer=[0, 1], branch_var="pseudocost")
+    assert r.status == "optimal" and r.verified

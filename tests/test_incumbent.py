@@ -174,13 +174,14 @@ def test_polish_batches_fit_the_budget(monkeypatch):
         return wrapped
 
     monkeypatch.setattr(bnb, "make_local", recording)
+    monkeypatch.setattr(bnb, "_OA", False)  # (its completions carry their own, larger caps)
     bnb.clear_cache()
     f = lambda v: -(v[0] + v[1]) - v[2]  # noqa: E731
     g = lambda v: jnp.stack([v[0] + v[1] + v[2] - 3.5, v[0] - v[1] - 1.0])  # noqa: E731
     r = minimize(f, [0, 0, 0], [5, 5, 1], ineq=g, integer=[0, 1], max_iter=500)
     assert r.status == "optimal" and abs(r.fun + 3.5) <= 1e-6
     assert calls and calls[0][0] <= bnb._POLISH_FIRST
-    assert all(0 < m <= bnb._POLISH_CHUNK and 0 < cap <= bnb._POLISH_MIN + 1.0 for m, cap in calls)
+    assert all(0 < m <= bnb._POLISH_CHUNK and 0 < cap <= bnb._POLISH_MIN + bnb._POLISH_FRAC * r.time + 1.0 for m, cap in calls), calls
 
 
 def test_integer_rows_read():
@@ -291,3 +292,75 @@ def test_relaxation_minimizers_solved_in_their_boxes(monkeypatch, safe):
         assert np.all(lo <= L) and np.all(H <= hi)
         sub |= bool(np.any((L > lo) | (H < hi)))
     assert sub
+
+
+@needs_pounce
+@pytest.mark.parametrize("node_local", [True, False])
+def test_integer_node_local_solves(monkeypatch, node_local):
+    """With integer variables (``_NODE_LOCAL``) the search's local solves start at the most
+    promising boxes' LP points and solve the continuous relaxation in those boxes: some solve then
+    has an integer variable free on a proper sub-range of its root range (never with the option
+    off, where relaxations are solved in the root box and roundings with all integers fixed).
+    Either way the optimum is found (Haverly's pooling problem with integral source flows)."""
+    from jaxglobal import bnb
+
+    from test_constrained import haverly1
+
+    f, g, h, lo, hi = haverly1()
+    ii = np.array([0, 1, 2])
+    calls = []
+    orig = bnb.make_local
+
+    def recording(*a, **k):
+        solve = orig(*a, **k)
+
+        def wrapped(X0, LO=None, HI=None, options=None):
+            if LO is not None:
+                calls.append((np.array(X0), np.array(LO), np.array(HI)))
+            return solve(X0, LO, HI, options=options)
+
+        return wrapped
+
+    monkeypatch.setattr(bnb, "make_local", recording)
+    monkeypatch.setattr(bnb, "_NODE_LOCAL", node_local)
+    bnb.clear_cache()
+    # (without OBBT the root does not close the gap: about 2000 nodes)
+    r = minimize(f, lo, hi, ineq=g, eq=h, integer=ii, rel_tol=1e-4, obbt=False, time_limit=300)
+    assert r.status == "optimal" and r.verified
+    assert abs(r.fun + 400.0) <= 1e-4 * 400.0 and r.nodes > 1
+    sub = False
+    for X0, L, H in calls:
+        assert np.all(L <= X0 + 1e-12) and np.all(X0 <= H + 1e-12)
+        free = L[:, ii] < H[:, ii]
+        sub |= bool(np.any(free & ((L[:, ii] > lo[ii]) | (H[:, ii] < hi[ii]))))
+    assert sub == node_local
+
+
+@needs_pounce
+def test_slightly_infeasible_local_solves_retried(monkeypatch):
+    """A local solve that ends slightly infeasible (here: every solve without ``mu_init``, pushed
+    2e-4 past the constraint) at a promising value is solved again with the ``_WARM`` options
+    (``retry_warm``), and that re-solve's point becomes the incumbent."""
+    from jaxglobal import bnb
+
+    seen = []
+    orig = bnb.make_local
+
+    def sloppy(*a, **k):
+        solve = orig(*a, **k)
+
+        def wrapped(X0, LO=None, HI=None, options=None):
+            X = np.asarray(solve(X0, LO, HI, options=options))
+            warm = bool(options) and "mu_init" in options
+            seen.append(warm)
+            return X if warm else X + 1e-4  # x + y <= 2 active at the optimum: violation 2e-4
+
+        return wrapped
+
+    monkeypatch.setattr(bnb, "make_local", sloppy)
+    bnb.clear_cache()
+    f = lambda v: (v[0] - 2.0) ** 2 + (v[1] - 2.0) ** 2 + jnp.sin(3.0 * v[0])  # noqa: E731
+    g = lambda v: jnp.atleast_1d(v[0] + v[1] - 2.0)  # noqa: E731
+    r = minimize(f, np.zeros(2), np.full(2, 3.0), ineq=g, rel_tol=1e-6, time_limit=120)
+    assert r.status == "optimal" and r.verified
+    assert any(seen)  # some solve was retried with the warm options

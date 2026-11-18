@@ -22,7 +22,12 @@ finite bounds without changing the problem:
 3. If variables are still unbounded, a few local solves look for a feasible
    point. Its value ``UB`` is a valid cutoff, so FBBT with ``f <= UB`` keeps
    every point that could be optimal; for example ``min x^2 + y^2`` bounds
-   both variables once any feasible point is known.
+   both variables once any feasible point is known. LP bounds over a linear
+   relaxation (``LinearRelaxation``) with that cutoff come next, then, for what
+   is still free, FBBT on the two halves of one bounded variable at a time
+   (``split_bounds``): the hull of the two results keeps every point, and sees
+   disjunctions such as ``(1 - u) p + (1 + u) q <= C`` that bound ``p`` on one
+   half and ``q`` on the other.
 
 What remains infinite after that is reported to the caller. All steps only
 remove points that are infeasible or worse than a known feasible point (or,
@@ -45,6 +50,9 @@ from .fbbt import joint_tape, make_fbbt
 _POOL = []  # one compiler thread, created on first use
 _SETTLE_ROUNDS = 5  # rounds of monotone caps + FBBT in bound_domain
 _LP_ROUNDS = 4  # rounds of LP bounds + FBBT in bound_domain
+# bound_domain reads the dependence structure, the affine coefficients and the row bounds of the monotone
+# caps from the scalar program in NumPy (``_scalar_program``) where it can, instead of eager JAX sweeps
+_NUMPY_STRUCTURE = True
 # Tapes of at most this many nodes: the structural sweeps below (dependency masks, row upper bounds, the
 # Jacobian) run as one jitted program. Applied eagerly, each primitive is its own small XLA compile
 # (~100 of them, ~1 s, on a 3-variable model); on larger tapes eager wins, because one program's compile
@@ -77,15 +85,8 @@ def used_variables(f, ineq, eq, n):
     return used
 
 
-def _row_structure(f, ineq, eq, n):
-    """Per tape output row ``[f, ineq..., eq...]``: ``(dep, nl, kind)`` or None if unknown.
-
-    ``dep[r, j]``: row r depends on x_j; ``nl[r, j]``: nonlinearly (as in
-    ``lp._nonlinear_vars``: sums, differences, negations and products with or
-    quotients by constants keep a variable linear, anything else makes it
-    nonlinear). A row affine in x_j therefore has a constant coefficient on it.
-    ``kind`` is 0 for the objective, 1 for an inequality, 2 for an equality.
-    """
+def _scalar_program(f, ineq, eq, n):
+    """The joint tape of ``[f, ineq, eq]`` as a scalar program (``fbbt_interp.scalarize``), or None."""
     from .fbbt import _has_tracer
     from .fbbt_interp import scalarize
 
@@ -93,7 +94,27 @@ def _row_structure(f, ineq, eq, n):
         tape = joint_tape(f, ineq, eq, np.zeros(n))
     if _has_tracer(tape):
         return None
-    prog = scalarize(tape, n)
+    return scalarize(tape, n)
+
+
+def _linear(name, const_a, const_b):
+    """Whether an operation keeps a variable's dependence affine (as in ``lp._nonlinear_vars``)."""
+    return name in ("add", "add_any", "sub", "neg") or (name == "mul" and (const_a or const_b)) or \
+        (name == "div" and const_b)  # fmt: skip
+
+
+def _row_structure(f, ineq, eq, n, prog=None):
+    """Per tape output row ``[f, ineq..., eq...]``: ``(dep, nl, kind)`` or None if unknown.
+
+    ``dep[r, j]``: row r depends on x_j; ``nl[r, j]``: nonlinearly (as in
+    ``lp._nonlinear_vars``: sums, differences, negations and products with or
+    quotients by constants keep a variable linear, anything else makes it
+    nonlinear). A row affine in x_j therefore has a constant coefficient on it.
+    ``kind`` is 0 for the objective, 1 for an inequality, 2 for an equality.
+    ``prog``: the problem's ``_scalar_program`` if already built.
+    """
+    if prog is None:
+        prog = _scalar_program(f, ineq, eq, n)
     if prog is None:
         return None
     S = len(prog.const_val)
@@ -105,8 +126,7 @@ def _row_structure(f, ineq, eq, n):
     for o, a, b, out in zip(prog.op, prog.a, prog.b, prog.out):
         name = prog.opcodes[o][0]
         dep[out] = dep[a] | dep[b]
-        if name in ("add", "add_any", "sub", "neg") or (name == "mul" and (const[a] or const[b])) or \
-                (name == "div" and const[b]):  # fmt: skip
+        if _linear(name, const[a], const[b]):
             nl[out] = nl[a] | nl[b]
         else:
             nl[out] = dep[a] | dep[b]
@@ -118,6 +138,135 @@ def _row_structure(f, ineq, eq, n):
         N.append(nl[s])
         K.append(np.full(len(s), k))
     return np.concatenate(D), np.concatenate(N), np.concatenate(K)
+
+
+def _out_slots(prog):
+    return np.concatenate([np.atleast_1d(np.asarray(s)).ravel() for s in prog.outs])
+
+
+def _linear_coefs(prog, cols):
+    """Coefficients of the variables ``cols`` in every output row ``[f, ineq..., eq...]``,
+    (rows, len(cols)): exact (constant) where the row is affine in the variable, NaN where it is
+    nonlinear in it (``_row_structure``'s ``nl``), 0 where it does not depend on it."""
+    n, cols = prog.n, np.asarray(cols, np.int64)
+    cv = np.asarray(prog.const_val, np.float64)
+    const = ~np.isnan(cv)
+    const[:n] = False
+    C = np.zeros((len(cv), len(cols)))
+    C[cols, np.arange(len(cols))] = 1.0
+    dep = np.zeros((len(cv), len(cols)), bool)
+    dep[cols, np.arange(len(cols))] = True
+    for o, a, b, out in zip(prog.op, prog.a, prog.b, prog.out):
+        name = prog.opcodes[o][0]
+        dep[out] = dep[a] | dep[b]
+        if name in ("add", "add_any"):
+            C[out] = C[a] + C[b]
+        elif name == "sub":
+            C[out] = C[a] - C[b]
+        elif name == "neg":
+            C[out] = -C[a]
+        elif name == "mul" and const[b]:
+            C[out] = C[a] * cv[b]
+        elif name == "mul" and const[a]:
+            C[out] = C[b] * cv[a]
+        elif name == "div" and const[b]:
+            C[out] = C[a] / cv[b]
+        else:
+            C[out] = np.where(dep[out], np.nan, 0.0)
+    return C[_out_slots(prog)]
+
+
+def _ipow(x, y):
+    try:
+        return x**y
+    except OverflowError:
+        return np.inf if x > 0 or y % 2 == 0 else -np.inf
+    except ZeroDivisionError:
+        return np.inf
+
+
+def _imul(la, ha, lb, hb):
+    p = [0.0 if (u == 0.0 or v == 0.0) else u * v for u in (la, ha) for v in (lb, hb)]
+    return min(p), max(p)
+
+
+def _even_pow(la, ha, y):
+    a, b = _ipow(abs(la), y), _ipow(abs(ha), y)
+    if la >= 0:
+        return a, b
+    if ha <= 0:
+        return b, a
+    return 0.0, max(a, b)
+
+
+def _irecip(la, ha):
+    if la > 0 or ha < 0:
+        return 1.0 / ha, 1.0 / la
+    return -np.inf, np.inf
+
+
+def _iop(name, eqn, la, ha, lb, hb, same):
+    """Interval of one scalar operation, or None if it is not handled here."""
+    if name in ("add", "add_any"):
+        return la + lb, ha + hb
+    if name == "sub":
+        return la - hb, ha - lb
+    if name == "neg":
+        return -ha, -la
+    if name == "mul":
+        return _even_pow(la, ha, 2) if same else _imul(la, ha, lb, hb)
+    if name == "div":
+        if same:
+            return None
+        return _imul(la, ha, *_irecip(lb, hb)) if lb > 0 or hb < 0 else (-np.inf, np.inf)
+    if name == "square":
+        return _even_pow(la, ha, 2)
+    if name == "integer_pow":
+        y = int(eqn.params["y"])
+        if y == 0:
+            return 1.0, 1.0
+        k = abs(y)
+        lo_, hi_ = _even_pow(la, ha, k) if k % 2 == 0 else (_ipow(la, k), _ipow(ha, k))
+        return (lo_, hi_) if y > 0 else _irecip(lo_, hi_)
+    if name == "sqrt":
+        return (np.sqrt(max(la, 0.0)), np.sqrt(ha)) if ha >= 0 else None
+    if name == "exp":
+        return float(np.exp(la)), float(np.exp(ha))
+    if name == "log":
+        return (float(np.log(la)) if la > 0 else -np.inf, float(np.log(ha))) if ha > 0 else None
+    if name == "abs":
+        return (min(abs(la), abs(ha)) if la >= 0 or ha <= 0 else 0.0), max(abs(la), abs(ha))
+    if name == "max":
+        return max(la, lb), max(ha, hb)
+    if name == "min":
+        return min(la, lb), min(ha, hb)
+    return None
+
+
+_IOP_SLACK = 2.0**-50  # relative outward widening of every interval operation in ``_interval_rows``
+
+
+def _interval_rows(prog, lo, hi):
+    """Interval bounds ``(lo, hi)`` of every output row ``[f, ineq..., eq...]`` over the box,
+    from one forward sweep of the scalar program in NumPy (each operation widened outward by
+    ``_IOP_SLACK``), or None if the program has an operation not handled here (``_iop``)."""
+    cv = np.asarray(prog.const_val, np.float64)
+    L, H = cv.copy(), cv.copy()
+    L[:prog.n], H[:prog.n] = lo, hi
+    L, H = L.tolist(), H.tolist()
+    ops = prog.opcodes
+    with np.errstate(all="ignore"):
+        for o, a, b, out in zip(prog.op.tolist(), prog.a.tolist(), prog.b.tolist(), prog.out.tolist()):
+            r = _iop(ops[o][0], ops[o][6], L[a], H[a], L[b], H[b], a == b)
+            if r is None:
+                return None
+            u, v = r
+            if not (u <= v):  # (NaN, or an empty result: let the caller's general path decide)
+                return None
+            L[out] = u - _IOP_SLACK * abs(u) if np.isfinite(u) else u
+            H[out] = v + _IOP_SLACK * abs(v) if np.isfinite(v) else v
+    s = _out_slots(prog)
+    return np.asarray(L)[s], np.asarray(H)[s]
 
 
 def _row_upper_fn(f, ineq, eq, n):
@@ -157,7 +306,7 @@ def _row_upper(f, ineq, eq, lo, hi):
     return _row_upper_fn(f, ineq, eq, np.asarray(lo).size)(lo, hi)
 
 
-def monotone_bounds(f, ineq, eq, lo, hi, integer=None, struct=None):
+def monotone_bounds(f, ineq, eq, lo, hi, integer=None, struct=None, prog=None):
     """Finite bounds for free variables that only ever help by moving toward a bound.
 
     A variable x_j with ``hi_j = inf`` such that (structurally) no equality
@@ -176,27 +325,62 @@ def monotone_bounds(f, ineq, eq, lo, hi, integer=None, struct=None):
     opposite bound infinite) is not applied. Integer caps are rounded outward.
 
     Returns new ``(lo, hi)``; variables that do not qualify are unchanged.
+
+    ``prog`` (the problem's ``_scalar_program``): the coefficients and the row bounds come from it
+    in NumPy (``_linear_coefs``, ``_interval_rows``) instead of a Jacobian and FBBT sweeps traced
+    through JAX, which on an eagerly swept tape compile one small XLA program per primitive and
+    shape (minlp.org m394 / m474: 6-8 s cold); the general path is kept for programs with an
+    operation ``_interval_rows`` does not handle.
     """
     lo, hi = np.array(lo, np.float64), np.array(hi, np.float64)
     n = lo.size
     free_hi, free_lo = ~np.isfinite(hi), ~np.isfinite(lo)
     if not (free_hi.any() or free_lo.any()):
         return lo, hi
-    st = struct if struct is not None else _row_structure(f, ineq, eq, n)
+    st = struct if struct is not None else _row_structure(f, ineq, eq, n, prog=prog)
     if st is None:
         return lo, hi
     dep, nl, kind = st
-    # constant coefficients of the rows affine in x_j: a Jacobian at any point of the box
-    x0 = np.where(np.isfinite(lo) & np.isfinite(hi), 0.5 * (np.where(np.isfinite(lo), lo, 0) + np.where(np.isfinite(hi), hi, 0)),
-                  np.where(np.isfinite(lo), lo + 1.0, np.where(np.isfinite(hi), hi - 1.0, 0.0)))  # fmt: skip
-    used = [fn for fn in (f, ineq, eq) if fn is not None]
-    row_upper = _row_upper_fn(f, ineq, eq, n)
-    jac = jax.jacfwd(lambda x: jnp.concatenate([jnp.atleast_1d(fn(x)) for fn in used]))
-    J = np.asarray((jax.jit(jac) if row_upper.small else jac)(jnp.asarray(x0)))
-    J = J.reshape(-1, n)
+    fast = prog is not None and _interval_rows(prog, lo, hi) is not None
+    if fast:
+        cols = np.flatnonzero(free_hi | free_lo)
+        J = np.zeros((dep.shape[0], n))
+        J[:, cols] = _linear_coefs(prog, cols)
+
+        def row_upper(L, H):
+            r = _interval_rows(prog, L, H)
+            return np.full(dep.shape[0], np.inf) if r is None else r[1]
+
+        row_upper.small = True  # (one cheap sweep per candidate)
+    else:
+        # constant coefficients of the rows affine in x_j: a Jacobian at any point of the box
+        x0 = np.where(np.isfinite(lo) & np.isfinite(hi), 0.5 * (np.where(np.isfinite(lo), lo, 0) + np.where(np.isfinite(hi), hi, 0)),
+                      np.where(np.isfinite(lo), lo + 1.0, np.where(np.isfinite(hi), hi - 1.0, 0.0)))  # fmt: skip
+        used = [fn for fn in (f, ineq, eq) if fn is not None]
+        row_upper = _row_upper_fn(f, ineq, eq, n)
+        jac = jax.jacfwd(lambda x: jnp.concatenate([jnp.atleast_1d(fn(x)) for fn in used]))
+        J = np.asarray((jax.jit(jac) if row_upper.small else jac)(jnp.asarray(x0)))
+        J = J.reshape(-1, n)
     if J.shape[0] != dep.shape[0]:
         return lo, hi
     ints = np.zeros(n, bool) if integer is None else np.asarray(integer, bool)
+
+    def apply(j, side, cap):
+        if side > 0:
+            v = max(cap, lo[j])
+            if np.isfinite(v):
+                hi[j] = np.ceil(v) if ints[j] else v
+        else:
+            v = min(cap, hi[j])
+            if np.isfinite(v):
+                lo[j] = np.floor(v) if ints[j] else v
+
+    def cap_of(j, side, need, R):
+        if not np.all(np.isfinite(R)):
+            return None
+        return np.max(R / -J[need, j]) if side > 0 else np.min(-R / J[need, j])
+
+    pending = []  # (j, side, rows that need x_j) whose cap needs a row bound
     for j in np.flatnonzero(free_hi | free_lo):
         rows = np.flatnonzero(dep[:, j])
         if np.any(kind[rows] == 2) or np.any(nl[rows, j]) or not np.all(np.isfinite(J[rows, j])):
@@ -209,23 +393,40 @@ def monotone_bounds(f, ineq, eq, lo, hi, integer=None, struct=None):
             if np.any(side * a[rk == 0] < 0) or np.any(side * a[rk == 1] > 0):
                 continue  # the objective or some inequality wants x_j to move the other way
             need = rows[(rk == 1) & (a != 0)]
-            if len(need):
+            if not len(need):
+                apply(j, side, -np.inf if side > 0 else np.inf)  # no row needs x_j: the opposite bound will do
+            elif row_upper.small:  # one compiled sweep per candidate, on the box as capped so far
                 L, H = lo.copy(), hi.copy()
                 L[j] = H[j] = 0.0
-                R = row_upper(L, H)[need]
-                if not np.all(np.isfinite(R)):
-                    continue
-                cap = np.max(R / -J[need, j]) if side > 0 else np.min(-R / J[need, j])
+                cap = cap_of(j, side, need, row_upper(L, H)[need])
+                if cap is not None:
+                    apply(j, side, cap)
             else:
-                cap = -np.inf if side > 0 else np.inf  # no row needs x_j: the opposite bound will do
-            if side > 0:
-                v = max(cap, lo[j])
-                if np.isfinite(v):
-                    hi[j] = np.ceil(v) if ints[j] else v
-            else:
-                v = min(cap, hi[j])
-                if np.isfinite(v):
-                    lo[j] = np.floor(v) if ints[j] else v
+                pending.append((j, side, need))
+    # A large tape is swept eagerly, about 1 s per sweep (minlp.org m400: 12 candidates, 12.7 s).
+    # A row's upper bound depends only on the box of the variables in it, so candidates none of
+    # whose rows holds another one's variable share a sweep, all fixed at 0 at once: each gets
+    # exactly the row bounds of its own sweep on that box. Groups are swept in turn, each on the
+    # box as capped by the groups before it (like the loop above, on fewer, larger steps).
+    groups = []  # [members (j, side, need), their variables]
+    for c in pending:
+        j, _, need = c
+        mine = dep[need].any(axis=0)  # the variables of j's rows
+        for g in groups:
+            if not any(mine[v] for v in g[1] if v != j) and not any(dep[nd, j].any() for v, _, nd in g[0] if v != j):
+                g[0].append(c)
+                g[1].add(j)
+                break
+        else:
+            groups.append([[c], {j}])
+    for members, js in groups:
+        L, H = lo.copy(), hi.copy()
+        L[list(js)] = H[list(js)] = 0.0
+        R = row_upper(L, H)
+        for j, side, need in members:
+            cap = cap_of(j, side, need, R[need])
+            if cap is not None:
+                apply(j, side, cap)
     return lo, hi
 
 
@@ -532,7 +733,7 @@ def _period(prog, j):
     return 2 * np.pi / cmin
 
 
-def periodic_bounds(f, ineq, eq, lo, hi, integer=None):
+def periodic_bounds(f, ineq, eq, lo, hi, integer=None, prog=None):
     """Bound free continuous variables that the model sees only periodically (``_period``).
 
     If shifting ``x_j`` by ``T`` changes no output, every feasible point has an equally good
@@ -546,14 +747,8 @@ def periodic_bounds(f, ineq, eq, lo, hi, integer=None):
         free &= ~np.asarray(integer, bool)
     if not free.any():
         return lo, hi
-    from .fbbt import _has_tracer
-    from .fbbt_interp import scalarize
-
-    with jax.ensure_compile_time_eval():
-        tape = joint_tape(f, ineq, eq, np.zeros(lo.size))
-    if _has_tracer(tape):
-        return lo, hi
-    prog = scalarize(tape, lo.size)
+    if prog is None:
+        prog = _scalar_program(f, ineq, eq, lo.size)
     if prog is None:
         return lo, hi
     for j in np.where(free)[0]:
@@ -569,7 +764,7 @@ def periodic_bounds(f, ineq, eq, lo, hi, integer=None):
     return lo, hi
 
 
-def objective_only_bounds(f, ineq, eq, lo, hi):
+def objective_only_bounds(f, ineq, eq, lo, hi, struct=None):
     """Fix free variables that only the objective uses, where it is monotone in them.
 
     If no constraint depends on ``x_j`` (structurally) and ``df/dx_j >= 0`` on the whole box,
@@ -605,9 +800,14 @@ def objective_only_bounds(f, ineq, eq, lo, hi):
 
     if any(p in NONSMOOTH or p == "select_n" for p in all_prims(jaxpr.jaxpr)):
         return lo, hi
-    in_cons = used_variables(lambda x: jnp.zeros(()), ineq, eq, n) if (ineq is not None or eq is not None) \
-        else np.zeros(n, bool)  # fmt: skip
-    cand = free & ~in_cons & used_variables(f, None, None, n)
+    if struct is not None:  # (``_row_structure``: the same structural dependence)
+        dep, _, kind = struct
+        in_cons, in_f = dep[kind > 0].any(axis=0), dep[kind == 0].any(axis=0)
+    else:
+        in_cons = used_variables(lambda x: jnp.zeros(()), ineq, eq, n) if (ineq is not None or eq is not None) \
+            else np.zeros(n, bool)  # fmt: skip
+        in_f = used_variables(f, None, None, n)
+    cand = free & ~in_cons & in_f
     if not cand.any():
         return lo, hi
     x0 = jnp.asarray(np.clip(0.0, lo, hi))
@@ -624,6 +824,79 @@ def objective_only_bounds(f, ineq, eq, lo, hi):
         elif ghi <= 0 and np.isfinite(hi[j]):
             lo[j] = hi[j]
     return lo, hi
+
+
+_SPLIT_ROUNDS = 3  # rounds of split_bounds (+ LP bounds and caps) in bound_domain
+_SPLIT_SECONDS = 20.0  # time for all split_bounds rounds of one bound_domain call, at most
+_SPLIT_MAX_CANDIDATES = 400  # variables split per round, at most
+
+
+def split_bounds(fb, lo, hi, cutoff, integer=None, struct=None, deadline=None):
+    """Finite bounds from FBBT on the two halves of one bounded variable at a time.
+
+    For a bounded variable ``x_c`` split ``[lo_c, hi_c]`` into two halves (integers:
+    ``[lo_c, m]`` and ``[m + 1, hi_c]``) and run FBBT (``fb``, with the objective
+    ``cutoff``) on each. Every point of the box that is feasible with ``f <= cutoff``
+    lies in one half and survives FBBT on it, so it lies in the hull of the two results
+    (an empty half contributes nothing); the hull is intersected into the box. This is
+    a disjunction FBBT cannot see on the whole box: with ``u in [-1, 1]``,
+    ``a = 1 - u``, ``b = 1 + u`` and ``a * p + b * q <= C`` (``p, q >= 0``), neither
+    ``p`` nor ``q`` is bounded (``a`` or ``b`` may be 0), but on ``u <= 0`` ``a >= 1``
+    bounds ``p`` and on ``u >= 0`` ``b >= 1`` bounds ``q``; with ``x = p - q``
+    bounded both are then bounded on each half.
+
+    Candidates (``struct`` from ``_row_structure``): bounded, non-fixed variables that
+    enter nonlinearly a row that also uses a free variable (all bounded variables without
+    ``struct``). Only infinite ends of the result are kept from the hull (finite ends stay
+    as they were; the hull of FBBT would tighten them too, but this runs only to find a box).
+    Returns new ``(lo, hi)``.
+    """
+    lo, hi = np.array(lo, np.float64), np.array(hi, np.float64)
+    n = lo.size
+    free = ~(np.isfinite(lo) & np.isfinite(hi))
+    if not free.any():
+        return lo, hi
+    bnd = ~free & (hi > lo)
+    if struct is not None:
+        dep, nl, _ = struct
+        rows = np.any(dep[:, free], axis=1)
+        cand = bnd & np.any(nl[rows], axis=0)
+    else:
+        cand = bnd
+    ints = np.zeros(n, bool) if integer is None else np.asarray(integer, bool)
+    new_lo, new_hi = lo.copy(), hi.copy()
+    cut = jnp.asarray(cutoff, jnp.float64)
+    for c in np.flatnonzero(cand)[:_SPLIT_MAX_CANDIDATES]:
+        if deadline is not None and time.perf_counter() > deadline:
+            break
+        if ints[c]:
+            m = np.floor(0.5 * (lo[c] + hi[c]))
+            halves = [(lo[c], m), (m + 1.0, hi[c])]
+        else:
+            m = 0.5 * (lo[c] + hi[c])
+            halves = [(lo[c], m), (m, hi[c])]
+        hl, hh = np.full(n, np.inf), np.full(n, -np.inf)
+        for a_, b_ in halves:
+            if a_ > b_:
+                continue
+            L, H = new_lo.copy(), new_hi.copy()
+            L[c], H[c] = a_, b_
+            a, b, empty = fb(jnp.asarray(L), jnp.asarray(H), cut)
+            if bool(empty):
+                continue
+            a, b = np.maximum(L, np.asarray(a)), np.minimum(H, np.asarray(b))
+            hl, hh = np.minimum(hl, a), np.maximum(hh, b)
+        if np.all(hl > hh):
+            continue  # both halves empty: FBBT on the whole box reports the infeasibility
+        upd_lo = ~np.isfinite(new_lo) & np.isfinite(hl)
+        upd_hi = ~np.isfinite(new_hi) & np.isfinite(hh)
+        new_lo = np.where(upd_lo, hl, new_lo)
+        new_hi = np.where(upd_hi, hh, new_hi)
+        if np.all(np.isfinite(new_lo)) and np.all(np.isfinite(new_hi)):
+            break
+    new_lo = np.where(ints & np.isfinite(new_lo), np.floor(new_lo), new_lo)
+    new_hi = np.where(ints & np.isfinite(new_hi), np.ceil(new_hi), new_hi)
+    return new_lo, new_hi
 
 
 def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed=0, deadline=None, integer=None):
@@ -656,21 +929,41 @@ def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed
         lo, hi = np.maximum(lo, np.asarray(a)), np.minimum(hi, np.asarray(b))
         return bool(empty)
 
+    # the scalar program of the joint tape and its row structure, built once (in NumPy where it is
+    # used below: the eager JAX sweeps they replace cost 4-8 s cold on minlp.org's 85-133 variable models)
+    progs, struct = [], []
+
+    def program():
+        if not progs:
+            try:
+                progs.append(_scalar_program(f, ineq, eq, lo.size) if _NUMPY_STRUCTURE else None)
+            except Exception:  # noqa: BLE001 -- the general (JAX) paths below then do the work
+                progs.append(None)
+        return progs[0]
+
+    def structure():
+        if not struct:
+            struct.append(_row_structure(f, ineq, eq, lo.size, prog=program()))
+        return struct[0]
+
+    if _NUMPY_STRUCTURE:
+        program()  # (on the main thread while the FBBT kernel compiles in the background)
     if tighten(np.inf):
         return lo, hi, True, None, np.inf
     free = ~(np.isfinite(lo) & np.isfinite(hi))
     if free.any():
-        unused = free & ~used_variables(f, ineq, eq, lo.size)
+        st = structure() if program() is not None else None
+        used = st[0].any(axis=0) if st is not None else used_variables(f, ineq, eq, lo.size)
+        unused = free & ~used
         pt = np.clip(0.0, lo, hi)
         lo, hi = np.where(unused, pt, lo), np.where(unused, pt, hi)
         if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
             keep = lo.copy(), hi.copy()
-            lo, hi = periodic_bounds(f, ineq, eq, lo, hi, integer=integer)
-            lo, hi = objective_only_bounds(f, ineq, eq, lo, hi)
+            lo, hi = periodic_bounds(f, ineq, eq, lo, hi, integer=integer, prog=program())
+            lo, hi = objective_only_bounds(f, ineq, eq, lo, hi, struct=st)
             if np.any(lo != keep[0]) or np.any(hi != keep[1]):
                 if tighten(np.inf):  # a window keeps a feasible point if there is one: be conservative anyway
                     lo, hi = keep
-    struct = []
 
     def settle(cutoff):
         """Monotone caps (``monotone_bounds``) and FBBT in turn while they bound more variables."""
@@ -678,13 +971,11 @@ def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed
         for _ in range(_SETTLE_ROUNDS):
             if np.all(np.isfinite(lo)) and np.all(np.isfinite(hi)):
                 return
-            if not struct:
-                struct.append(_row_structure(f, ineq, eq, lo.size))
-            if struct[0] is None:
+            if structure() is None:
                 return
             nfree = int(np.sum(~np.isfinite(lo)) + np.sum(~np.isfinite(hi)))
             keep = lo.copy(), hi.copy()
-            lo, hi = monotone_bounds(f, ineq, eq, lo, hi, integer=integer, struct=struct[0])
+            lo, hi = monotone_bounds(f, ineq, eq, lo, hi, integer=integer, struct=structure(), prog=program())
             if int(np.sum(~np.isfinite(lo)) + np.sum(~np.isfinite(hi))) == nfree:
                 return
             if tighten(cutoff):  # the caps keep a feasible point if there is one: be conservative anyway
@@ -728,6 +1019,22 @@ def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed
             settle(cutoff)
         linear(cutoff)
         settle(cutoff)
+        split_end = time.perf_counter() + _SPLIT_SECONDS
+        if deadline is not None:
+            split_end = min(split_end, deadline)
+        for _ in range(_SPLIT_ROUNDS):
+            if np.all(np.isfinite(lo)) and np.all(np.isfinite(hi)):
+                break
+            nfree = int(np.sum(~np.isfinite(lo)) + np.sum(~np.isfinite(hi)))
+            keep = lo.copy(), hi.copy()
+            lo, hi = split_bounds(fb, lo, hi, cutoff, integer=integer, struct=structure(), deadline=split_end)
+            if tighten(cutoff):  # the hull keeps every feasible point: be conservative anyway
+                lo, hi = keep
+                break
+            if int(np.sum(~np.isfinite(lo)) + np.sum(~np.isfinite(hi))) == nfree:
+                break
+            linear(cutoff)
+            settle(cutoff)
         if xf is not None:
             lo, hi = np.minimum(lo, xf), np.maximum(hi, xf)  # keep the incumbent inside
     return lo, hi, False, xf, ff

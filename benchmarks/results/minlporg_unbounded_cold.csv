@@ -1,0 +1,4 @@
+solver,name,status,time,primal,dual,nodes,message,load,threads
+jaxglobal,m6_del_asl_hvar,time_limit,68.99854300300012,1.5364151807429198,1.4425359135856943,69,time_limit,7.22,0
+jaxglobal,m75_General_Model_Case2,unsupported,40.54320908800037,,,,"unbounded variables: no finite bounds found for variables [89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104]",8.17,0
+jaxglobal,m4_del_asl_hfix,optimal,19.01989348799998,1.4737777835634678,1.4737508231740535,1,optimal,14.02,0

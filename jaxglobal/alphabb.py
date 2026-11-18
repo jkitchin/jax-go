@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jax.extend import core as jcore
 
 from .fbbt import Const, _has_tracer, make_tape, tape_cache
@@ -70,6 +71,12 @@ HESSIAN_VOLUME = 200_000
 TAYLOR_BATCH = 16  # boxes per kernel call the memory budget assumes (minimize's batch_sizes)
 TAYLOR_BYTES = 512 * 2**20  # taylor2_bytes(slots, n, TAYLOR_BATCH) allowed
 TAYLOR_BUDGET = TAYLOR_BYTES  # former name (it was slots * n**2)
+# "auto" with a traced Hessian over the size thresholds and an interpreter over TAYLOR_BYTES: the
+# function gets no alphaBB (prepare returns None; its McCormick relaxation alone, which is valid),
+# instead of the traced Hessian anyway. minlp.org m47_bcp8 (n = 168): its inequalities' traced
+# Hessian has 60k live operations (volume 6e7), the equalities' 29k, and the bound kernel was
+# still being traced and compiled after 100 s (docs/ANALYSIS-root-cost.md).
+SKIP_UNAFFORDABLE = True
 
 
 def taylor2_bytes(slots, d, batch=TAYLOR_BATCH):
@@ -102,6 +109,14 @@ def _live_eqns(jaxpr):
                 if isinstance(inner, jcore.Jaxpr):
                     for _ in range(e.params.get("length", 1) if e.primitive.name == "scan" else 1):
                         yield from _live_eqns(inner)
+
+
+def _out_size(tape):
+    """Number of elements of the output of ``tape`` (None unless it has exactly one output)."""
+    if len(tape.outs) != 1:
+        return None
+    (a,) = tape.outs
+    return int(np.size(a.val)) if isinstance(a, Const) else int(np.prod(tape.shapes[a][0], dtype=np.int64))
 
 
 def _has_tracer_consts(closed):
@@ -209,9 +224,15 @@ def make_alphabb(fn, eigen=True, safe=False, interpret="auto"):
                 with jax.ensure_compile_time_eval():
                     run = make_taylor2(tape, n, ictx, n)
                 if run is not None and interpret is not True and taylor2_bytes(run.program.const_val.size, n) > TAYLOR_BYTES:
+                    from .memory import log
+
+                    log.info("alphaBB interval Hessian: the interpreter's %.0f MB > TAYLOR_BYTES %.0f MB: traced Hessian",
+                             taylor2_bytes(run.program.const_val.size, n) / 2**20, TAYLOR_BYTES / 2**20)
                     run = None
             if run is None and closed is None and interpret is True:
                 closed = traced(lo)
+            if run is None and big and interpret == "auto" and SKIP_UNAFFORDABLE:
+                closed = None  # neither Hessian is affordable: no alphaBB for this function
         how = ("interpret", run) if run is not None else ("traced", closed) if closed is not None else (None, None)
         if not local and not (closed is not None and _has_tracer_consts(closed)):
             hessians[id(tape)] = (tape, how)
@@ -222,7 +243,9 @@ def make_alphabb(fn, eigen=True, safe=False, interpret="auto"):
         if not smooth:
             return None
         n = lo.size
-        m = jnp.size(flat(lo))
+        m = _out_size(tape)  # (not ``flat(lo)`` when known: evaluating the function for its size traced it again)
+        if m is None:
+            m = jnp.size(flat(lo))
         path, how = hessian(tape, lo)
         if path == "interpret":
             ids = jnp.asarray(how.program.outs[0])

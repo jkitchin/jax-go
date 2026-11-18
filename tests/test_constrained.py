@@ -192,7 +192,11 @@ def test_nonlinear_vars_pooling():
     want = np.zeros((11, 8), bool)
     want[[1, 7, 10], 3] = want[[2, 7, 10], 4] = want[[1, 2, 7, 10], 7] = True
     assert (nl == want).all()
-    P = 2 * 8 + 1 + 4  # center, axis points, Kelley points
+    # center, axis points of the nonlinear variables 3, 4, 7 (lp.axis_vars), Kelley points
+    from jaxglobal.lp import axis_vars
+
+    assert list(axis_vars(nl, 8)) == [3, 4, 7]
+    P = 2 * 3 + 1 + 4
     keep = _cut_rows((P, 11), nl)
     # every part at the center, 4 (g0, g1) or 6 (h2, -cc h2) axis points, 4 Kelley points
     assert len(keep) == 11 + 2 * (4 + 4) + 2 * (6 + 4)

@@ -131,6 +131,81 @@ def test_free_slacks_make_instances_supported():
         assert not infeasible and np.all(np.isfinite(lo)) and np.all(np.isfinite(hi)), name
 
 
+# ---------------------------------------------------------------- NumPy structure sweeps (domain._interval_rows, ...)
+
+
+def _mixed():
+    """Rows using every operation ``domain._iop`` handles, with linear and nonlinear uses of x3, x4."""
+    f = lambda x: 2.0 * x[3] - x[0] * x[1] + jnp.exp(0.3 * x[2])  # noqa: E731
+
+    def ineq(x):
+        return jnp.stack([
+            x[0] ** 2 - 3.0 * x[1] / 4.0 + jnp.sqrt(x[2] + 1.0) - x[3],
+            x[0] / (x[2] + 2.0) - x[4] + jnp.log(x[1] + 3.0),
+            jnp.abs(x[0] - x[1]) + jnp.maximum(x[2], x[0]) - jnp.minimum(x[1], 0.5) - x[3] - 2.0 * x[4],
+            x[1] ** 3 - x[0] ** -2 * 0.1 - x[4] ** 2,
+            -(x[0] * x[0]) + x[2] * x[3] - 1.0,
+        ])  # fmt: skip
+
+    eq = lambda x: jnp.atleast_1d(x[0] + 2.0 * x[1] - x[2] / 3.0)  # noqa: E731
+    return f, ineq, eq
+
+
+@pytest.mark.parametrize("seed", range(4))
+def test_interval_rows_enclose_row_values(seed):
+    """The NumPy forward sweep's row intervals hold every sampled row value of the box."""
+    from jaxglobal.domain import _interval_rows, _scalar_program
+
+    f, ineq, eq = _mixed()
+    prog = _scalar_program(f, ineq, eq, 5)
+    assert prog is not None
+    rng = np.random.default_rng(seed)
+    a = np.array([0.5, -1.0, 0.0, -2.0, 0.0]) + rng.uniform(0, 0.5, 5)
+    lo, hi = a, a + rng.uniform(0.1, 3.0, 5)
+    L, H = _interval_rows(prog, lo, hi)
+    X = rng.uniform(lo, hi, size=(500, 5))
+    V = np.stack([np.concatenate([np.atleast_1d(np.asarray(fn(jnp.asarray(x)))) for fn in (f, ineq, eq)]) for x in X])
+    assert V.shape[1] == len(L)
+    assert np.all(V >= L - 1e-9 * (1 + np.abs(L))) and np.all(V <= H + 1e-9 * (1 + np.abs(H)))
+    # an infinite end stays sound (and finite rows that do not use it stay finite)
+    hi2 = hi.copy()
+    hi2[4] = INF
+    L2, H2 = _interval_rows(prog, lo, hi2)
+    assert np.all(L2 <= L + 1e-12) and np.all(H2 >= H - 1e-12) and np.isfinite(H2[0])
+
+
+def test_linear_coefs_match_the_jacobian():
+    import jax
+
+    from jaxglobal.domain import _linear_coefs, _row_structure, _scalar_program
+
+    f, ineq, eq = _mixed()
+    prog = _scalar_program(f, ineq, eq, 5)
+    dep, nl, _ = _row_structure(f, ineq, eq, 5, prog=prog)
+    C = _linear_coefs(prog, [3, 4])
+    x = jnp.asarray([0.7, -0.4, 0.3, 1.1, 0.6])
+    J = np.asarray(jax.jacfwd(lambda x: jnp.concatenate([jnp.atleast_1d(fn(x)) for fn in (f, ineq, eq)]))(x))[:, [3, 4]]
+    lin = dep[:, [3, 4]] & ~nl[:, [3, 4]]
+    assert np.allclose(C[lin], J[lin]) and np.all(np.isnan(C[nl[:, [3, 4]]])) and np.all(C[~dep[:, [3, 4]]] == 0.0)
+
+
+@pytest.mark.parametrize("name", ["m3", "clay0203m"])
+def test_numpy_structure_gives_the_same_box(name, monkeypatch):
+    """bound_domain with the NumPy sweeps (``_NUMPY_STRUCTURE``) derives the box the JAX sweeps did."""
+    from jaxglobal import domain
+    from jaxglobal.nl import read_nl
+
+    M = read_nl(DATA / f"{name}.nl", integers="mask")
+    out = []
+    for on in (False, True):
+        monkeypatch.setattr(domain, "_NUMPY_STRUCTURE", on)
+        lo, hi, infeasible, _, _ = bound_domain(M.f, M.ineq, M.eq, M.lo, M.hi, integer=np.asarray(M.integer))
+        assert not infeasible
+        out.append((lo, hi))
+    (l0, h0), (l1, h1) = out
+    assert np.allclose(l0, l1, rtol=1e-9, atol=1e-12) and np.allclose(h0, h1, rtol=1e-9, atol=1e-12)
+
+
 # ---------------------------------------------------------------- LP bounds (domain.LinearRelaxation)
 
 
@@ -442,3 +517,115 @@ def test_assignment_model_solved():
     C = np.random.default_rng(3).uniform(1, 5, (4, 4))
     best = min(sum(C[i, p[i]] for i in range(4)) for p in permutations(range(4))) + 0.01 * 4
     assert abs(r.fun - best) <= 1e-4 * (1 + abs(best)) and r.lower_bound <= best + 1e-6
+
+
+def test_product_with_zero_and_infinite_ends_is_bounded_below():
+    """0 * inf = 0 in the interval product: [0, 1] * [0, inf] is [0, inf], so the cutoff of
+    ``a p + b q`` reaches ``a p`` (it was lost on the whole line)."""
+    from jaxglobal.fbbt import make_fbbt
+    from jaxglobal.relax import MC, mc_mul
+
+    a, b = jnp.array([0.0, -1.0]), jnp.array([1.0, 0.0])
+    p, q = jnp.array([0.0, 0.0]), jnp.array([INF, INF])
+    r = mc_mul(MC(a, b, a, b), MC(p, q, p, q))
+    assert np.asarray(r.lo).tolist() == [0.0, -INF] and np.asarray(r.hi).tolist() == [INF, 0.0]
+    fb = make_fbbt(lambda x: x[0] * x[2] + x[1] * x[3], interpret=False)
+    lo, hi, empty = fb(jnp.array([1.0, 0, 0, 0]), jnp.array([2.0, 1, INF, INF]), 1.0)
+    assert not bool(empty) and float(hi[2]) <= 1.0 + 1e-6 and not np.isfinite(float(hi[3]))
+
+
+def _complementarity():
+    """u in [-1, 1], a = 1 - u, b = 1 + u (eliminated), x = p - q in [-1, 1], p, q >= 0:
+    min 1000 (a p + b q) + (x - 0.5)^2 + 0.3 (u - 0.2)^2. FBBT on the whole box bounds neither p nor q
+    (a or b may be 0). (With the cutoff of the optimum, 0.192 at u = 1, p = 0.5, the LP bounds already
+    pin u = 1; m6_del_asl_hvar is the case where they do not, docs/ANALYSIS-unbounded.md.)"""
+    f = lambda x: 1000 * ((1 - x[0]) * x[1] + (1 + x[0]) * x[2]) + (x[1] - x[2] - 0.5) ** 2 + 0.3 * (x[0] - 0.2) ** 2  # noqa: E731
+    ineq = lambda x: jnp.stack([x[1] - x[2] - 1, x[2] - x[1] - 1])  # noqa: E731
+    return f, ineq, np.array([-1.0, 0, 0]), np.array([1.0, INF, INF])
+
+
+def test_split_bounds_hull_of_halves():
+    from jaxglobal.domain import split_bounds
+    from jaxglobal.fbbt import make_fbbt
+
+    f, ineq, lo, hi = _complementarity()
+    fb = make_fbbt(f, ineq, None, rounds=10)
+    a, b, empty = fb(jnp.asarray(lo), jnp.asarray(hi), 1.0)
+    assert not np.isfinite(float(b[1])) and not np.isfinite(float(b[2]))  # FBBT alone: nothing
+    L, H = split_bounds(fb, lo, hi, 1.0)
+    assert np.all(np.isfinite(H)) and H[1] <= 1.01 and H[2] <= 1.01
+    # every point with f <= 1 stays inside (sampled)
+    rng = np.random.default_rng(0)
+    for _ in range(2000):
+        x = np.array([rng.uniform(-1, 1), *rng.exponential(0.3, 2)])
+        if float(f(jnp.asarray(x))) <= 1.0 and np.all(np.asarray(ineq(jnp.asarray(x))) <= 0):
+            assert np.all(x >= L - 1e-9) and np.all(x <= H + 1e-9)
+
+
+def test_split_bounds_model_solved():
+    f, ineq, lo, hi = _complementarity()
+    r = minimize(f, lo, hi, ineq=ineq, time_limit=60)
+    assert r.status == "optimal"
+    # u = 1 (a = 0), p = 0.5, q = 0: 0.3 * 0.8^2 = 0.192 (p = q = 0 at u = 0.2 costs 0.25)
+    assert abs(r.fun - 0.192) <= 1e-4 and r.lower_bound <= 0.192 + 1e-6
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_batched_caps_on_large_tapes_match_one_at_a_time(seed, monkeypatch):
+    """A tape above ``_JIT_MAX_NODES`` gets its caps from batched eager sweeps (``_row_upper_fn.many``):
+    the same caps as the one-at-a-time compiled sweeps here (each slack's rows need no other cap)."""
+    from jaxglobal import domain
+
+    rng = np.random.default_rng(10 + seed)
+    ny, ns, m = 4, 3, 6
+    A = rng.normal(size=(m, ny))
+    s = rng.uniform(0.5, 2.0, m)
+    slack = rng.integers(0, ns, m)
+    b = rng.normal(size=m)
+
+    def ineq(x):
+        return jnp.stack([sum(A[r, i] * x[i] for i in range(ny)) - s[r] * x[ny + slack[r]] - b[r] for r in range(m)])
+
+    f = lambda x: sum(x[ny + k] for k in range(ns)) + sum(x[i] ** 2 for i in range(ny))  # noqa: E731
+    lo = np.r_[-np.ones(ny), np.zeros(ns), -INF]
+    hi = np.r_[np.ones(ny), np.full(ns, INF), 0.0]
+    # the last variable: x_last <= 0 and -x_last >= x_0 - 2 (a lower cap through a row)
+    g = lambda x: jnp.concatenate([ineq(x), jnp.atleast_1d(x[0] - 2.0 + x[-1])])  # noqa: E731
+    f2 = lambda x: f(x) - x[-1]  # noqa: E731
+    one = monotone_bounds(f2, g, None, lo, hi)
+    monkeypatch.setattr(domain, "_JIT_MAX_NODES", 0)
+    many = monotone_bounds(f2, g, None, lo, hi)
+    for a, c in zip(one, many):
+        np.testing.assert_allclose(a, c, rtol=1e-12)
+    assert np.all(np.isfinite(many[1][ny:ny + ns][np.isin(np.arange(ns), slack)]))
+
+
+@pytest.mark.parametrize("speculate", [True, False])
+def test_speculative_kernels(monkeypatch, speculate):
+    """With unbounded variables and a lifted LP, the kernels are built while ``bound_domain`` runs
+    (``bnb._SPECULATE``) and used: one set of kernels, the same result as without."""
+    from jaxglobal import bnb
+
+    monkeypatch.setattr(bnb, "_SPECULATE", speculate)
+    bnb.clear_cache()
+    futures = []
+    spec = bnb._speculate
+    monkeypatch.setattr(bnb, "_speculate", lambda *a: futures.append(spec(*a)) or futures[-1])
+
+    def f(x):  # x2 = x0 * x1 and x3 = x2 * x0 (cubic) are declared free
+        return (x[0] - 0.7) ** 2 + x[3] + 0.5 * x[2]
+
+    def eq(x):
+        return jnp.stack([x[2] - x[0] * x[1], x[3] - x[2] * x[0]])
+
+    r = minimize(f, [0.0, -1.0, -INF, -INF], [2.0, 1.0, INF, INF], eq=eq, time_limit=120)
+    assert r.status == "optimal"
+    kernels = [k for k in bnb._CACHE if isinstance(k, tuple) and k[0] == "kernels" and k[1] is f]
+    assert len(kernels) == 1
+    # the optimum by grid search: x1 = -1 (x0 > 0), min over x0 of (x0 - 0.7)^2 - x0^2 - 0.5 x0
+    t = np.linspace(0.0, 2.0, 200001)
+    fstar = np.min((t - 0.7) ** 2 - t**2 - 0.5 * t)
+    assert abs(r.fun - fstar) <= 1e-5 * (1 + abs(fstar)) and r.lower_bound <= fstar + 1e-6
+    assert len(futures) == int(speculate)
+    if speculate:  # the lifted LP applies, and the kernels used are the speculative ones
+        assert futures[0].result() == dict(kernels[0][4])

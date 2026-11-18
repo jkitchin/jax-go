@@ -25,7 +25,10 @@ uses it only for large, mostly scalar tapes (see ``use_interpreter``).
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+import sys
+import threading
+from collections import OrderedDict
+from types import FunctionType, SimpleNamespace
 from typing import NamedTuple
 
 import jax
@@ -33,7 +36,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import lax
 
-from .fbbt import BACK, CTX, DOMAIN_FLOOR, INF, SAFE_CTX, Const, _clean, _empty, _meet2, _pad, round_integers, stops_nan
+from .fbbt import BACK, CTX, batched_init, DOMAIN_FLOOR, INF, SAFE_CTX, Const, _clean, _empty, _meet2, _pad, round_integers, stops_nan
 from .relax import MC, RULES, apply_rule, is_mc
 
 # equations that only move elements: the interpreter renumbers slots, no row
@@ -58,11 +61,53 @@ class Program(NamedTuple):
 
 
 def scalarize(tape, n):
-    """The tape as a ``Program``, or None if it has an equation the interpreter does not handle."""
-    # Structural equations and constant folding are evaluated on concrete arrays here. Inside an
-    # enclosing jit/vmap trace JAX would stage them instead (omnistaging), so force eager evaluation.
-    with jax.ensure_compile_time_eval():
-        return _scalarize(tape, n)
+    """The tape as a ``Program``, or None if it has an equation the interpreter does not handle.
+
+    Memoized per tape (``_memo``): the tapes are shared (``fbbt.make_tape``), and the structure
+    analyses, FBBT, the relaxation interpreters and the memory estimates each scalarized them."""
+    def build():
+        # Structural equations and constant folding are evaluated on concrete arrays here. Inside an
+        # enclosing jit/vmap trace JAX would stage them instead (omnistaging), so force eager evaluation.
+        with jax.ensure_compile_time_eval():
+            return _scalarize(tape, n)
+
+    return _memo(tape, ("scalarize", int(n)), build)
+
+
+_MEMO, _MEMO_LOCK, _MEMO_SIZE = OrderedDict(), threading.Lock(), 128
+
+
+def _config(*modules):
+    """The scalar module constants (upper-case names) and functions of ``modules``: part of ``_memo``
+    keys whose builds read them, so that changing one (tests, ``profile_root --set``) builds anew."""
+    out = []
+    for m in modules:
+        for k, v in vars(m).items():
+            if k.isupper() and isinstance(v, (bool, int, float, str, type(None))):
+                out.append((m.__name__, k, v))
+            elif isinstance(v, FunctionType):  # (a function replaced by a test is another object)
+                out.append((m.__name__, k, id(v)))
+    return tuple(out)
+
+
+def _memo(tape, key, build):
+    """``build()`` memoized on ``tape`` (by identity) and ``key``; a tape whose constants are tracers
+    belongs to one trace and is not memoized."""
+    from .fbbt import _has_tracer
+
+    k = (id(tape), key)
+    with _MEMO_LOCK:
+        hit = _MEMO.get(k)
+        if hit is not None and hit[0] is tape:
+            _MEMO.move_to_end(k)
+            return hit[1]
+    out = build()
+    if not _has_tracer(tape):
+        with _MEMO_LOCK:
+            _MEMO[k] = (tape, out)
+            while len(_MEMO) > _MEMO_SIZE:
+                _MEMO.popitem(last=False)
+    return out
 
 
 def _scalarize(tape, n):
@@ -348,8 +393,17 @@ def make_propagate(tape, ineq, eq, n, feas_tol, rounds, safe=False, scheduled=No
     """``fbbt(lo, hi, cutoff) -> (lo, hi, empty)`` by interpreting the scalarized tape, or None.
 
     ``scheduled`` (default: at least ``SCHEDULE_MIN_ROWS`` rows) sweeps step by
-    step instead of row by row.
+    step instead of row by row. Memoized per tape and arguments: the node bound's FBBT and the
+    dive's are separate ``make_fbbt`` instances of the same problem (built in each kernel's trace).
     """
+    from . import fbbt, relax
+
+    key = ("propagate", ineq is None, eq is None, int(n), float(feas_tol), int(rounds), bool(safe), scheduled,
+           tuple(int(i) for i in integer), _config(sys.modules[__name__], fbbt, relax))
+    return _memo(tape, key, lambda: _make_propagate(tape, ineq, eq, n, feas_tol, rounds, safe, scheduled, integer))
+
+
+def _make_propagate(tape, ineq, eq, n, feas_tol, rounds, safe=False, scheduled=None, integer=()):
     prog = scalarize(tape, n)
     if prog is None:
         return None
@@ -405,7 +459,7 @@ def _propagate_steps(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds, integer=(), 
             blk = lax.dynamic_slice_in_dim(V, START[t], BW, 0)
             return V, empty | jnp.any(_empty(blk[:, 0], blk[:, 1]) & VALID_ALL[t])
 
-        return lax.fori_loop(0, T, step, (P, jnp.array(False)))
+        return lax.fori_loop(0, T, step, batched_init((P, jnp.array(False)), P))
 
     def backward(V, cutoff):
         lo, hi = V[:, 0], V[:, 1]
@@ -449,7 +503,7 @@ def _propagate_steps(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds, integer=(), 
                 H = H.at[idx].set(jnp.where(bad, gh, jnp.maximum(gl, gh)))
             return L, H, empty
 
-        L, H, empty = lax.fori_loop(0, T, step, (lo, hi, empty))
+        L, H, empty = lax.fori_loop(0, T, step, batched_init((lo, hi, empty), lo, hi))
         return jnp.stack([L, H], axis=1), empty
 
     def fbbt(lo, hi, cutoff=INF):
@@ -496,7 +550,7 @@ def _rounds(round_, rounds, P0):
         Q, e = round_(k, (P, empty))
         return k + 1, Q, e, _progress(P, Q)
 
-    _, P, empty, _ = lax.while_loop(cond, body, (jnp.array(0), P0, jnp.array(False), jnp.array(True)))
+    _, P, empty, _ = lax.while_loop(cond, body, batched_init((jnp.array(0), P0, jnp.array(False), jnp.array(True)), P0))
     return P, empty
 
 
@@ -519,7 +573,7 @@ def _propagate_rows(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds, integer=()):
             vl, vh, bad = _meet2((vl, vh), (P[0][o], P[1][o]))
             return lo.at[o].set(vl), hi.at[o].set(vh), empty | bad
 
-        return lax.fori_loop(0, K, step, (P[0], P[1], jnp.array(False)))
+        return lax.fori_loop(0, K, step, batched_init((P[0], P[1], jnp.array(False)), P[0], P[1]))
 
     def backward(lo, hi, cutoff):
         empty = jnp.array(False)
@@ -546,7 +600,7 @@ def _propagate_rows(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds, integer=()):
             lo, hi, e2 = update(lo, hi, b, bl, bh, ub)
             return lo, hi, empty | e1 | e2
 
-        return lax.fori_loop(0, K, step, (lo, hi, empty))
+        return lax.fori_loop(0, K, step, batched_init((lo, hi, empty), lo, hi))
 
     def fbbt(lo, hi, cutoff=INF, all_slots=False):
         """With ``all_slots`` the bounds of every scalar slot of ``prog`` are returned, not just x."""
@@ -562,7 +616,7 @@ def _propagate_rows(prog, fwd, bwd, ineq, eq, n, feas_tol, rounds, integer=()):
             bl, bh = bl.at[:n].set(xl), bh.at[:n].set(xh)
             return jnp.where(is_c, cval, bl), jnp.where(is_c, cval, bh), empty | e1 | e2 | e3
 
-        Pl, Ph, empty = lax.fori_loop(0, rounds, round_, (L0, H0, jnp.array(False)))
+        Pl, Ph, empty = lax.fori_loop(0, rounds, round_, batched_init((L0, H0, jnp.array(False)), L0, H0))
         vl, vh, e = forward((Pl, Ph))
         if all_slots:
             return jnp.minimum(vl, vh), jnp.maximum(vl, vh), empty | e

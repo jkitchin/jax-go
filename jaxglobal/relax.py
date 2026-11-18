@@ -299,6 +299,10 @@ def mc_mul(a: MC, b: MC, multivariate: bool = False) -> MC:
     """McCormick product rule (Mitsos, Chachuat & Barton 2009 [mitsos2009mccormick])."""
     xL, xU, yL, yU = a.lo, a.hi, b.lo, b.hi
     prods = jnp.stack([xL * yL, xL * yU, xU * yL, xU * yU])
+    # 0 * inf = 0 in interval arithmetic: [0, 1] * [0, inf] is [0, inf], not the whole line (a NaN
+    # endpoint is read as no information), which lost the cutoff on sums of such products
+    # (docs/ANALYSIS-unbounded.md). Only infinite bounds give NaN here; finite ones are unchanged.
+    prods = jnp.where(jnp.isnan(prods) & ~(jnp.isnan(xL) | jnp.isnan(xU) | jnp.isnan(yL) | jnp.isnan(yU)), 0.0, prods)
     lo, hi = prods.min(0), prods.max(0)
     if _interval_only():
         return MC(lo, hi, lo, hi)

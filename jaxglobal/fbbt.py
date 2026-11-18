@@ -26,6 +26,8 @@ saturation of tanh, erf, ...) are not used, but the result is not rigorous.
 
 from __future__ import annotations
 
+import threading
+from collections import OrderedDict
 from typing import NamedTuple
 
 import jax
@@ -134,7 +136,103 @@ def _dce(nodes, outs):
     return keep[::-1]
 
 
+# ``make_tape`` results shared by every caller in the process, keyed on the function object and the
+# input's shape and dtype (as ``jax.jit`` keys its traces). The relaxers of each kernel (bound, OBBT,
+# cut pool, dive), FBBT, alphaBB, the convexity and structure analyses all built the tapes of the
+# same ``f``, ``ineq``, ``eq`` again, each a full trace of the functions (on .nl models, one Python
+# operation per term): about a fifth of the bound and OBBT kernels' trace time on m410_CLay0203HRS.
+# A tape whose constants are tracers belongs to one trace and is not kept.
+TAPE_CACHE = True
+_TAPES, _TAPES_LOCK, _TAPES_SIZE = OrderedDict(), threading.Lock(), 64
+
+
+def _tape_key(fn, x):
+    try:
+        key = (fn, tuple(int(d) for d in jnp.shape(x)), jnp.dtype(jnp.result_type(x)))
+        hash(key)
+        return key
+    except TypeError:
+        return None
+
+
+def _shared(key, build):
+    """``build()`` memoized in the process-wide tape cache under ``key`` (None: not cached)."""
+    if key is None or not TAPE_CACHE:
+        return build()
+    with _TAPES_LOCK:
+        if key in _TAPES:
+            _TAPES.move_to_end(key)
+            return _TAPES[key]
+    tape = build()
+    if not _has_tracer(tape):
+        with _TAPES_LOCK:
+            tape = _TAPES.setdefault(key, tape)  # (built meanwhile on another thread: keep that one)
+            while len(_TAPES) > _TAPES_SIZE:
+                _TAPES.popitem(last=False)
+    return tape
+
+
+BATCHED_INIT = True  # ``batched_init`` (off: the initial carries as given)
+
+
+def batched_init(init, *refs):
+    """``init`` (a loop's initial carry) unchanged, but batched like ``refs`` under ``vmap``.
+
+    ``vmap`` of a ``while_loop`` traces the body again until it knows which carries are batched:
+    once per round in which an unbatched initial carry (a counter, a flag, a constant start)
+    becomes batched, and once more to batch all carries when the condition is batched. A body
+    containing loops multiplies that: the node bound's Kelley loop holds the IPM's loop, which
+    was batched about nine times. ``scan`` (``fori_loop`` with a static trip count) does the same.
+    Use this only where every carry ends up batched anyway when ``refs`` are (a ``while_loop``
+    whose condition depends on ``refs``; a ``fori_loop`` whose carries all depend on them): every
+    carry is then batched from the start, and the body is traced once. Under ``vmap`` an
+    unbatched carry is broadcast along the batch axis, which is what ``vmap`` of the loop does
+    to it anyway; outside ``vmap`` nothing happens."""
+    if not BATCHED_INIT:
+        return init
+    refs = [jnp.asarray(r) for r in refs]
+    ref = next((r for r in refs if r.size), None)
+    if ref is None:
+        return init
+    for r in refs:  # the first element of each ref: batched like it, the same under every vmap
+        if r is not ref and r.size:
+            ref = _pair(ref, jnp.ravel(r)[0])
+    return jax.tree.map(lambda v: _like(jnp.asarray(v), ref), init)
+
+
+@jax.custom_batching.custom_vmap
+def _like(v, ref):
+    return v
+
+
+@_like.def_vmap
+def _like_vmap(axis_size, in_batched, v, ref):
+    if in_batched[1] and not in_batched[0]:
+        v = jnp.asarray(v)  # (a constant can arrive as a Python scalar)
+        v = jnp.broadcast_to(v, (axis_size,) + v.shape)
+    return v, in_batched[0] or in_batched[1]
+
+
+@jax.custom_batching.custom_vmap
+def _pair(a, b):
+    """``a``, batched where ``a`` or ``b`` is (``batched_init``'s reference)."""
+    return a
+
+
+@_pair.def_vmap
+def _pair_vmap(axis_size, in_batched, a, b):
+    if in_batched[1] and not in_batched[0]:
+        a = jnp.asarray(a)
+        a = jnp.broadcast_to(a, (axis_size,) + a.shape)
+    return a, in_batched[0] or in_batched[1]
+
+
 def make_tape(fn, x):
+    """The flattened tape of ``fn`` on inputs shaped like ``x`` (memoized: ``TAPE_CACHE``)."""
+    return _shared(_tape_key(fn, x), lambda: _make_tape(fn, x))
+
+
+def _make_tape(fn, x):
     closed = jax.make_jaxpr(fn)(x)
     shapes = {0: (x.shape, x.dtype)}
     nodes = []
@@ -1011,7 +1109,8 @@ def _backward(tape, vals, out_bounds, guarded=frozenset(), fbad=None):
 def joint_tape(f, ineq, eq, x):
     """Tape of ``x -> [f, ineq, eq]`` (each as a 1-D array; ``None`` skipped)."""
     used = [fn for fn in (f, ineq, eq) if fn is not None]
-    return make_tape(lambda x: [jnp.atleast_1d(fn(x)) for fn in used], x)
+    key = _tape_key(("joint", f, ineq, eq), x)
+    return _shared(key, lambda: _make_tape(lambda x: [jnp.atleast_1d(fn(x)) for fn in used], x))
 
 
 def output_bounds(tape, ineq, eq, cutoff, feas_tol):
