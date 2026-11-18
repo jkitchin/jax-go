@@ -1153,6 +1153,17 @@ MILP_ROOT_SHARE, MILP_ROOT_SECONDS = 0.25, 60.0  # integer-aware root bound: at 
 # assignments from MILPs over the relaxation's cuts, completed by fixed-integer local solves
 _OA = True
 _OA_SHARE, _OA_SECONDS = 0.15, 30.0  # its time: at most this share of time_limit (in all) and seconds per call
+# While there is no incumbent (the search cannot prune on the objective), the heuristic gets this
+# share instead, this many MILP rounds per call, and its cut program is built right after the root
+# dives (beside root OBBT and probing) instead of after the root stages. minlp.org
+# m400_CLay0304HRcone (36 binaries, a 54k-equation cut program, no cut pool): its root dives find
+# nothing, and the MILPs propose about ten infeasible assignments (four rectangles in one circle; SCIP
+# confirms each) before a feasible one at 1-2 s each; with 15% of 60 s, 8 rounds per call and the
+# build after the root stages it reported no solution, with these the optimum (40262.39, cold, at
+# 46.5 s). Models with an incumbent after the root dives are unaffected. docs/ANALYSIS-noinc.md
+_OA_SHARE_NOINC = 0.5  # (None: _OA_SHARE always)
+_OA_ROUNDS_NOINC = 64  # (None: _OA_ROUNDS)
+_OA_NOINC_START = True
 _OA_EVERY = 0.1  # the search resumes it each time this share of the time limit (at most 600 s) has passed
 _OA_MILP = 0.5  # each MILP of a call gets at most this share of the call's budget
 # MILP rounds per call, within its time budget (32 was tried: on minlp.org m406 the root call's 8 rounds
@@ -2946,7 +2957,8 @@ def _minimize(
         try:
             pts = ([xbest] if np.isfinite(ub) else []) + S0
             oa_state["mb"] = MB.propose(blo, bhi, imask, complete, extra=pts, cutoff=ub, budget=budget, tol=tol(),
-                                        milp_time=_OA_MILP * budget, state=oa_state["mb"], rounds=_OA_ROUNDS)  # fmt: skip
+                                        milp_time=_OA_MILP * budget, state=oa_state["mb"],
+                                        rounds=_OA_ROUNDS if np.isfinite(ub) or _OA_ROUNDS_NOINC is None else _OA_ROUNDS_NOINC)  # fmt: skip
         except Exception:  # noqa: BLE001 -- an optional heuristic: any failure keeps the incumbent
             pass
         finally:
@@ -2960,7 +2972,8 @@ def _minimize(
     def oa_budget():
         """Seconds the next ``oa_primal`` call may take: what is left of ``_OA_SHARE`` of the time
         limit (or of the elapsed time without one), at most ``_OA_SECONDS`` and half the time left."""
-        total = _OA_SHARE * (time_limit if deadline is not None else max(time.perf_counter() - t0, 10.0))
+        share = _OA_SHARE if np.isfinite(ub) or _OA_SHARE_NOINC is None else max(_OA_SHARE, _OA_SHARE_NOINC)
+        total = share * (time_limit if deadline is not None else max(time.perf_counter() - t0, 10.0))
         b = min(total - oa_state["time"], _OA_SECONDS)
         if deadline is not None:
             b = min(b, 0.5 * (deadline - time.perf_counter()))
@@ -3052,6 +3065,10 @@ def _minimize(
             S = np.where((np.arange(len(A)) % 4 == 0)[:, None], rxr, rng.uniform(L, H))
             fixed_solve(L, H, S)
     _mk("root_obbt")
+    if _OA_NOINC_START and imask.any() and not np.isfinite(ub) and np.all(np.isfinite(lb)) and deadline is not None:
+        # no incumbent after the root dives: build the heuristic's cut program now, beside root OBBT
+        # and probing, rather than once they are done (``_OA_NOINC_START``)
+        oa_start()
     # The root OBBT kernel solves two LPs per variable in one call, which cannot be interrupted:
     # skip it when the time left is under _ROOT_OBBT_COST times the slowest bound-kernel call (on
     # minlp.org m49, cold under load, it started with 11.6 s left and ran 30.6 s, 4.3 times the root
