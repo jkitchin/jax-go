@@ -1372,6 +1372,8 @@ _POLISH_MIN, _POLISH_FRAC = 2.0, 0.1  # polish time budget: _POLISH_MIN s plus t
 _POLISH_ROOT_SHARE = 0.05
 _ROOT_LOCAL_SHARE = 0.15
 _NEAR_ZERO_STARTS = 4  # extra random starts for the scaled local solves of a near-zero objective
+_POLISH_RELAX = 0.45  # polish: a local solve with the rows (and bounds) relaxed by this share of feas_tol (None: off;
+# clipping the point back into its box adds up to as much again to a row's violation)
 _STRICT_FRAC = 1e-3  # repair_incumbent: violation (x feas_tol) above which a reported incumbent is repaired
 _REPAIR_SLACK = 100.0  # repair_incumbent: largest accepted rise of f, in units of feas_tol * (1 + |f|)
 _REPAIR_GAP = 100.0  # a repaired incumbent keeps "optimal" only with fun - lower_bound <= this x the gap tolerance
@@ -2550,6 +2552,21 @@ def _minimize(
                 nz = near_zero_options(ub, abs_tol)
                 if cont.any() and nz is not None:  # (the incumbent is already a local solution otherwise)
                     X = np.clip(np.asarray(solve_local(x[None], L[None], H[None], options=nz)), L, H)
+                    F = screen(X)
+                    if F[0] < ub:
+                        ub, xbest = float(F[0]), X[0]
+                if cont.any() and _POLISH_RELAX:
+                    # the incumbent's continuous variables solved again with the rows relaxed by
+                    # _POLISH_RELAX * feas_tol (Ipopt's ``bound_relax_factor``): the search bounds the
+                    # problem relaxed by feas_tol, and on an ill-conditioned one the strictly feasible
+                    # optimum lies above that problem's optimum by more than rel_tol (minlp.org m441:
+                    # 0.3289229 against 0.3288834, 1.2e-4 relative), so the last open box was split
+                    # for 3,250 of 4,693 nodes. The point is screened (violation <= feas_tol), and
+                    # ``repair_incumbent`` reports a strictly feasible one as before.
+                    x = np.where(imask, np.round(xbest), xbest)
+                    L, H = np.where(imask, x, lo), np.where(imask, x, hi)
+                    X = np.clip(np.asarray(solve_local(x[None], L[None], H[None],
+                                                       options={"bound_relax_factor": _POLISH_RELAX * feas_tol})), L, H)  # fmt: skip
                     F = screen(X)
                     if F[0] < ub:
                         ub, xbest = float(F[0]), X[0]
