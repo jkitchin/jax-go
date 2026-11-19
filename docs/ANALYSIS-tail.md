@@ -39,24 +39,37 @@ m441 (k-means, hull reformulation with rotated cones) gets close, but stalls:
 - The point passes `screen` (violation ≤ `feas_tol`), as any candidate must.
 - `repair_incumbent` still reports a strictly feasible point. On m441 it moves 0.3289032 → 0.3289229, within `_REPAIR_SLACK`.
 
-**m441, warm:** 4,693 nodes and 87–95 s → 1,329 nodes and 61.8 s. Cold it still times out: its root takes about 30 s even warm.
+**m441, warm:** 4,693 nodes and 87–95 s → 1,329 nodes and 61.8 s.
+
+**Follow-up: the relaxed solve runs ahead of `polish`'s time budget.** It sits ahead of the polish rounds, once per new incumbent (one local solve). In the first version it was inside the budgeted rounds, and on m441 cold the root's polish had spent its budget before reaching it, so the incumbent stayed strictly feasible and the bound stalled 1.15e-4 short. Now m441 solves cold: 57.6 s and 59.3 s standalone, 60.1 s in the stage-2b run.
 
 ## Checks
 
-All cold, 60 s.
+All cold, 60 s. "first" is the relaxed solve inside the polish budget (commit d613a4a); "final" is the solve run ahead of the budget (this commit).
 
-| set | before | after | notes |
-|---|---|---|---|
-| stage 2b (`--jobs 1`) | 10 | 10 | m394 49.6 → 43.9 s, m410 47.5 → 43.9 s; no solved model more than 1.9 s slower |
-| int50 (`--jobs 2`, 2 threads each) | 47 | **48** | smallinvDAXr4b150-165 solved (55.3 s); no wrong answers |
-| start50 (`--jobs 2`, 2 threads each) | 43 | 42 | kall_circles_c7a: base 59.0 s, new time limit. Rerun alone: 35.3 s base, 35.4 s new, the same nodes. Load at the margin |
+| set | before | first | final | notes |
+|---|---|---|---|---|
+| stage 2b (`--jobs 1`) | 10 | 10 | **11** | m441 solved (60.1 s; the rule allows 61 s); no solved model slower than before by more than 1.6 s |
+| int50 (`--jobs 2`, 2 threads each) | 47 | 48 | 47 | first: smallinvDAXr4b150-165 solved (55.3 s), not repeated; no wrong answers in either |
+| start50 (`--jobs 2`, 2 threads each) | 43 | 42 | 41 | the losses solve in the base arm at 58.4 s (ex6_2_6) and 59.0 s (kall_circles_c7a) |
 
-- **Raw rows:** `s2c_relax_cold.csv`, `s2c_int50_relax_cold.csv`, `s2c_start50_{base,relax}_cold.csv`, `s2c_kc7a_*.csv`.
-- **Arms:** the stage-2b and int50 "before" arms are the earlier runs `s2c_form2_cold.csv` and `s2c_int50_form2_cold.csv`; the start50 arms were run back to back.
-- **Restart:** a container restart interrupted the int50 run after 36 instances; `run.py` resumed it.
+**Rerun alone** (`--jobs 1`), base against final:
+- kall_circles_c7a: 36.4 s against 35.9 s.
+- ex6_2_6: 50.1 s against 50.1 s.
+- Both reach the same primal and dual values in both arms.
+
+The start50 losses are models at the time limit under two concurrent jobs, not the change.
+
+**Raw rows:**
+- `s2c_relax_cold.csv`, `s2c_relax2_cold.csv`
+- `s2c_int50_relax_cold.csv`, `s2c_int50_relax2_cold.csv`
+- `s2c_start50_base_cold.csv`, `s2c_start50_relax_cold.csv`, `s2c_start50_relax2_cold.csv`
+- `s2c_kc7a_*.csv`, `s2c_chk_*.csv`
+
+The stage-2b and int50 "before" arms are the earlier runs `s2c_form2_cold.csv` and `s2c_int50_form2_cold.csv`. A container restart interrupted the first int50 run after 36 instances; `run.py` resumed it.
 
 ## What is left
 
-- **m441, cold.** The root takes about 30 s even warm (make_local 2.9 s, root local solves 3.6 s, root dives 5.4 s, root OBBT 4.2 s, the heuristic 2.8 s). The search then needs about 30 s.
+- **m441's margin.** It solves at 57–60 s cold. The root takes about 30 s even warm; the outer-approximation heuristic at its end spends about 11 s proposing assignments that cannot beat the optimal incumbent the dives found. Capping its rounds at 3 did not help in one run.
 - **m400.** `strong` branching's bound gain (3.3k → 26.7k in 60 s) suggests strong branching restricted to binaries, or to hull models. It needs an int50 A/B; `strong` lost m441's bound entirely.
 - **m420.** Pseudocost's bound is the best (0.96 against 1.084), with reliability's incumbent.

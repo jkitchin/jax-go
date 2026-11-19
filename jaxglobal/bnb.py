@@ -2533,6 +2533,23 @@ def _minimize(
         if not local_solve or not np.isfinite(ub) or ub >= polished["ub"]:
             return
         _sub("polish")
+        if (~imask).any() and _POLISH_RELAX and not _past(deadline):
+            # (once per new incumbent, outside the time budget below: one local solve; on m441
+            # cold the root polish had spent its budget before reaching it)
+            # the incumbent's continuous variables solved again with the rows relaxed by
+            # _POLISH_RELAX * feas_tol (Ipopt's ``bound_relax_factor``): the search bounds the
+            # problem relaxed by feas_tol, and on an ill-conditioned one the strictly feasible
+            # optimum lies above that problem's optimum by more than rel_tol (minlp.org m441:
+            # 0.3289229 against 0.3288834, 1.2e-4 relative), so the last open box was split
+            # for 3,250 of 4,693 nodes. The point is screened (violation <= feas_tol), and
+            # ``repair_incumbent`` reports a strictly feasible one as before.
+            x = np.where(imask, np.round(xbest), xbest)
+            L, H = np.where(imask, x, lo), np.where(imask, x, hi)
+            X = np.clip(np.asarray(solve_local(x[None], L[None], H[None],
+                                               options={"bound_relax_factor": _POLISH_RELAX * feas_tol})), L, H)  # fmt: skip
+            F = screen(X)
+            if F[0] < ub:
+                ub, xbest = float(F[0]), X[0]
         start = time.perf_counter()
         stop = min(start + _POLISH_MIN + _POLISH_FRAC * (start - t0) - polished["time"], t0 + time_limit)
         if root["on"] and deadline is not None and _POLISH_ROOT_SHARE is not None:
@@ -2552,21 +2569,6 @@ def _minimize(
                 nz = near_zero_options(ub, abs_tol)
                 if cont.any() and nz is not None:  # (the incumbent is already a local solution otherwise)
                     X = np.clip(np.asarray(solve_local(x[None], L[None], H[None], options=nz)), L, H)
-                    F = screen(X)
-                    if F[0] < ub:
-                        ub, xbest = float(F[0]), X[0]
-                if cont.any() and _POLISH_RELAX:
-                    # the incumbent's continuous variables solved again with the rows relaxed by
-                    # _POLISH_RELAX * feas_tol (Ipopt's ``bound_relax_factor``): the search bounds the
-                    # problem relaxed by feas_tol, and on an ill-conditioned one the strictly feasible
-                    # optimum lies above that problem's optimum by more than rel_tol (minlp.org m441:
-                    # 0.3289229 against 0.3288834, 1.2e-4 relative), so the last open box was split
-                    # for 3,250 of 4,693 nodes. The point is screened (violation <= feas_tol), and
-                    # ``repair_incumbent`` reports a strictly feasible one as before.
-                    x = np.where(imask, np.round(xbest), xbest)
-                    L, H = np.where(imask, x, lo), np.where(imask, x, hi)
-                    X = np.clip(np.asarray(solve_local(x[None], L[None], H[None],
-                                                       options={"bound_relax_factor": _POLISH_RELAX * feas_tol})), L, H)  # fmt: skip
                     F = screen(X)
                     if F[0] < ub:
                         ub, xbest = float(F[0]), X[0]

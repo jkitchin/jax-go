@@ -1,0 +1,2 @@
+solver,name,status,time,primal,dual,nodes,message,load,threads,peak_rss_mb
+jaxglobal,kall_circles_c7a,optimal,36.42974259199991,2.6628121796249533,2.6626321353724296,29443,optimal,2.97,0,853
