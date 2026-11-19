@@ -73,3 +73,16 @@ The stage-2b and int50 "before" arms are the earlier runs `s2c_form2_cold.csv` a
 - **m441's margin.** It solves at 57–60 s cold. The root takes about 30 s even warm; the outer-approximation heuristic at its end spends about 11 s proposing assignments that cannot beat the optimal incumbent the dives found. Capping its rounds at 3 did not help in one run.
 - **m400.** `strong` branching's bound gain (3.3k → 26.7k in 60 s) suggests strong branching restricted to binaries, or to hull models. It needs an int50 A/B; `strong` lost m441's bound entirely.
 - **m420.** Pseudocost's bound is the best (0.96 against 1.084), with reliability's incumbent.
+
+## Tried after the stage-2b 11/19 run (not kept)
+
+1. **Stopping the outer-approximation heuristic after non-improving proposals** (m441's margin).
+   - On m441 the root call improves the incumbent 0.504 → 0.392. Then its MILPs grow by about 1,130 cut rows per round, and each takes 1.6–2.5 s.
+   - Stopping after 3 non-improving proposals: 59.0 s and 58.8 s cold, against 57.6 s and 59.3 s, no change.
+   - After 2: m441 times out with 2,873 nodes against about 1,330. The different incumbents change the search's path, and the tree grows.
+2. **`strong` branching for m400.** It solves m400 in 95 s cold, against 139 s warm for `width` (5,018 against 14,619 nodes).
+   - Not a default: on int50 it solved 41 against `width`'s 43 (ROADMAP, `branch_*` results).
+   - Not a model-class rule either: in the screen it left m441's bound at 0, and m400 and m441 are both hull models.
+3. **m472 (pooling, 2-player Nash–Cournot).** The heuristic's completions all come back 220–500 (minimization form, against an incumbent of 0 and an optimum of −361.7).
+   - Adding 4 or 8 random continuous starts per assignment changes none of them: the proposed assignments themselves are poor.
+   - Its MILP relaxation of the bilinear pooling terms does not steer toward profitable assignments.
