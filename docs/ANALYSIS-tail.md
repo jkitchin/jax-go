@@ -86,3 +86,9 @@ The stage-2b and int50 "before" arms are the earlier runs `s2c_form2_cold.csv` a
 3. **m472 (pooling, 2-player Nash–Cournot).** The heuristic's completions all come back 220–500 (minimization form, against an incumbent of 0 and an optimum of −361.7).
    - Adding 4 or 8 random continuous starts per assignment changes none of them: the proposed assignments themselves are poor.
    - Its MILP relaxation of the bilinear pooling terms does not steer toward profitable assignments.
+4. **m420 (k-means, big-M): pseudocost branching plus an early optimal incumbent would solve it, but neither half is reachable in 60 s.**
+   - **Seeded experiment.** With SCIP's optimal point seeded as the incumbent (a temporary environment hook, reverted), cold 60 s: `width` reaches a bound of 0.829; `pseudocost` solves in 59.4 s (20,903 nodes).
+   - **Unseeded, `pseudocost`.** Optimal in 78.6–82.2 s (20.9–23.9k nodes), even in a run whose root found the optimum.
+   - **Where the time goes** (profile, `pseudocost`, 100 s limit): the root stages end at 15.5 s, the outer-approximation heuristic's root call takes 16 s (its 15% share), and the search about 42 s. In a 60 s solve that is 15.5 + 9 + 42 s, still over.
+   - **Routing every assignment model to `pseudocost`** (`bnb._ASSIGN_LINEAR` = 1e-300; `s2c_pcassign_cold.csv`): stage 2b goes 11 → 10. m441 is lost (time limit, bound 0.32885). m420's bound rises 0.825 → 1.035 with the incumbent unchanged at 1.2564. The bounds of m421 (1.68 → 1.49), m422 (2.34 → 1.55) and m426 (0.024 → 0) fall, as in ANALYSIS-bigm.
+   - **A narrower rule** — `pseudocost` only where no binary switches a linear row, which would keep m441 on `width` — still loses m421, m422 and m426's bounds, and does not solve m420. Not tried in a full run.
