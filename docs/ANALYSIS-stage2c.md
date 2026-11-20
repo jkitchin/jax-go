@@ -50,7 +50,7 @@ The speed gain carries over to unseen instances of the family the work was tuned
   - m2 peaks at 8.4 GB.
   - m84 and m211 near 5 GB.
 - **Time limit overruns:** m79 returns at 121 s on `main` and 99 s on the branch; m24 at 67 / 71 s. A call or build still runs past the deadline at this size.
-- **SCIP:** solves m2, m29, m269 and m388 in 0.1–14 s. On the rest it has an incumbent within 1e-3 of the best known value on all but m84, m129 and m211.
+- **SCIP:** solves m2, m29, m269 and m388 in 0.1–14 s. On the rest its incumbent is within 1e-3 of the best known value except on m24, m84, m129, m211 and m363.
 
 ## What it says
 
