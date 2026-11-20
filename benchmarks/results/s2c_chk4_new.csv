@@ -1,0 +1,4 @@
+solver,name,status,time,primal,dual,nodes,message,load,threads,peak_rss_mb
+jaxglobal,kriging_peaks-red030,optimal,48.406089628999325,-1.5865879183085931,-1.5867217989215825,589,optimal,3.16,2,1088
+jaxglobal,ex8_5_3,time_limit,60.46741204099999,-0.00413542992736915,-0.0041582347390041125,1037,time_limit,3.16,2,1846
+jaxglobal,kall_circles_c6b,optimal,53.417448929001694,1.9735997026763876,1.973434041314875,26405,optimal,4.00,2,820
