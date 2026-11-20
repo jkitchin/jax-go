@@ -764,7 +764,10 @@ def periodic_bounds(f, ineq, eq, lo, hi, integer=None, prog=None):
     return lo, hi
 
 
-def objective_only_bounds(f, ineq, eq, lo, hi, struct=None):
+_OBJ_ONLY_SECONDS = 5.0  # objective_only_bounds: wall seconds for its per-variable slope intervals, at most
+
+
+def objective_only_bounds(f, ineq, eq, lo, hi, struct=None, deadline=None):
     """Fix free variables that only the objective uses, where it is monotone in them.
 
     If no constraint depends on ``x_j`` (structurally) and ``df/dx_j >= 0`` on the whole box,
@@ -775,6 +778,10 @@ def objective_only_bounds(f, ineq, eq, lo, hi, struct=None):
     (``univariate.NONSMOOTH``), where the derivative's interval bounds the slope everywhere.
     Typical case: heat-exchanger-network models whose area cost sums ``q(i,j,k)`` over a location
     with no exchanger, a variable no constraint mentions (minlp.org m77, m78).
+
+    Each candidate's slope interval is an eager pass over the gradient's relaxation; the loop stops
+    after ``_OBJ_ONLY_SECONDS`` or at ``deadline`` (a variable left free only keeps its bounds). On
+    minlp.org m79 (170 candidates, a 3,556-equation gradient) it took 89 s of a 60 s limit.
     """
     from .relax import relax
     from .univariate import NONSMOOTH
@@ -812,7 +819,12 @@ def objective_only_bounds(f, ineq, eq, lo, hi, struct=None):
         return lo, hi
     x0 = jnp.asarray(np.clip(0.0, lo, hi))
     grad = jax.grad(f)
+    stop = time.perf_counter() + _OBJ_ONLY_SECONDS
+    if deadline is not None:
+        stop = min(stop, deadline)
     for j in np.where(cand)[0]:
+        if time.perf_counter() > stop:
+            break
         try:
             with jax.ensure_compile_time_eval():
                 g = relax(lambda x, j=j: grad(x)[j])(x0, jnp.asarray(lo), jnp.asarray(hi))
@@ -960,7 +972,7 @@ def bound_domain(f, ineq, eq, lo, hi, feas_tol=1e-6, rounds=30, n_starts=6, seed
         if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
             keep = lo.copy(), hi.copy()
             lo, hi = periodic_bounds(f, ineq, eq, lo, hi, integer=integer, prog=program())
-            lo, hi = objective_only_bounds(f, ineq, eq, lo, hi, struct=st)
+            lo, hi = objective_only_bounds(f, ineq, eq, lo, hi, struct=st, deadline=deadline)
             if np.any(lo != keep[0]) or np.any(hi != keep[1]):
                 if tighten(np.inf):  # a window keeps a feasible point if there is one: be conservative anyway
                     lo, hi = keep

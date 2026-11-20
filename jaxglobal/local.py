@@ -155,6 +155,62 @@ def _jit(fn):
 
 # Experimental, None by default: XLA options for the local solver's callbacks (``_Callbacks``)
 COMPILE_OPTIONS = None
+# The Lagrangian Hessian is compiled at LLVM -O0 first; when that compile takes longer than this (s),
+# the -O0 executable is kept, else the Hessian is compiled again with XLA's defaults (None: always
+# the defaults). minlp.org m79 (260 variables, 282 real powers): 165 s at the defaults, inside the
+# first local solve, which neither the deadline nor pounce's max_wall_time can interrupt (the solve
+# returned after 99-121 s of a 60 s limit); 8.9 s at -O0, 0.7 ms per call. Elsewhere the -O0 compile
+# takes 0.1-1.5 s and the default one 0.2-3.6 s (stage-2b and -2c models, cold).
+HESS_SLOW_O0 = 3.0
+
+
+_SLOW_MODULES = {}  # ``_TieredJit``: HLO hash -> whether its -O0 compile took over HESS_SLOW_O0
+
+
+class _TieredJit:
+    """``jax.jit(fn)`` whose first call (or ``warm``) compiles at -O0, and again with XLA's defaults
+    unless the -O0 compile took over ``HESS_SLOW_O0`` s. Falls back to ``jax.jit`` on any failure."""
+
+    def __init__(self, fn):
+        import threading
+
+        self.jitted, self.exe, self.lock = jax.jit(fn), None, threading.Lock()
+
+    def _build(self, args):
+        import hashlib
+        import time
+
+        low = self.jitted.trace(*args).lower()
+        key = hashlib.sha1(low.as_text().encode()).hexdigest()
+        slow = _SLOW_MODULES.get(key)
+        if slow is None:
+            t = time.perf_counter()
+            exe = low.compile(compiler_options={"xla_backend_optimization_level": 0})
+            # (a persistent-cache hit compiles in no time: the verdict is kept per module, for the
+            # process, so a second instance of the same callbacks does not take the slow path)
+            slow = _SLOW_MODULES.setdefault(key, time.perf_counter() - t > HESS_SLOW_O0)
+            if slow:
+                return exe
+        elif slow:
+            return low.compile(compiler_options={"xla_backend_optimization_level": 0})
+        return low.compile()
+
+    def __call__(self, *args):
+        if HESS_SLOW_O0 is None or COMPILE_OPTIONS:
+            return self.jitted(*args)
+        if self.exe is None:
+            with self.lock:
+                if self.exe is None:
+                    try:
+                        self.exe = self._build(args)
+                    except Exception:  # noqa: BLE001 -- jit compiles it as before
+                        self.exe = False
+        if self.exe is False:
+            return self.jitted(*args)
+        try:
+            return self.exe(*args)
+        except Exception:  # noqa: BLE001 -- argument types other than the first call's
+            return self.jitted(*args)
 _MAX_COLOR_SHARE = 0.5  # compressed derivatives when they need at most this share of n directions
 
 
@@ -202,10 +258,10 @@ class _Callbacks:
             def hv(x, *a):
                 return jax.vmap(lambda s: jax.jvp(lambda xx: grad_lag(xx, *a), (x,), (s,))[1])(SH)
 
-            self._hess = _jit(hv)
+            self._hess = _TieredJit(hv) if not COMPILE_OPTIONS else _jit(hv)
             self._hess_seed = color[self._hcols]
         else:
-            self._hess = _jit(jax.hessian(lag))
+            self._hess = _TieredJit(jax.hessian(lag)) if not COMPILE_OPTIONS else _jit(jax.hessian(lag))
 
     def precompile(self, x0):
         """Compile every callback at ``x0`` in a background thread (returns its future).

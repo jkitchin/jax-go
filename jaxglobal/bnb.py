@@ -335,6 +335,7 @@ def _pools():
 # 0.06 s alone; on m34_convex2 the final float64 check (_verify: eager ops) took 22 s next to the
 # OA kernel's trace.
 SWITCH_INTERVAL = 0.001
+_VERIFY_SWITCH = 1e-5  # ``_verify``: the GIL switch interval while it evaluates eagerly (None: unchanged)
 _GATE_COMPILES = True  # hold the compiles not needed for the root bound (``_Gate``); False: compile each once traced
 _GATE_TRACE_S = 1.0  # ...but not behind a bound kernel traced (or loaded from the disk cache) in less than this
 # Optional, off by default (mixed evidence): the root bound kernel is first compiled with these XLA
@@ -1081,10 +1082,19 @@ def _verify(f, ineq, eq, x, fun, lo, hi, feas_tol, integer=None):
     if not np.isfinite(fun):
         return float("inf"), False, ""
     xj = jnp.asarray(x, dtype=jnp.float64)
-    with jax.disable_jit():
-        fx = float(np.sum(np.asarray(f(xj))))
-        g = np.atleast_1d(np.asarray(ineq(xj), dtype=np.float64)) if ineq is not None else np.zeros(0)
-        h = np.atleast_1d(np.asarray(eq(xj), dtype=np.float64)) if eq is not None else np.zeros(0)
+    # (the eager ops retake the GIL thousands of times; a kernel still being traced in the background
+    # held it for up to the switch interval at each: on minlp.org m79 this check ran 6-17 s past the
+    # time limit. A short interval for its duration (``_VERIFY_SWITCH``) lets the main thread back in)
+    switch = sys.getswitchinterval()
+    if _VERIFY_SWITCH:
+        sys.setswitchinterval(min(switch, _VERIFY_SWITCH))
+    try:
+        with jax.disable_jit():
+            fx = float(np.sum(np.asarray(f(xj))))
+            g = np.atleast_1d(np.asarray(ineq(xj), dtype=np.float64)) if ineq is not None else np.zeros(0)
+            h = np.atleast_1d(np.asarray(eq(xj), dtype=np.float64)) if eq is not None else np.zeros(0)
+    finally:
+        sys.setswitchinterval(switch)
     box = max(float(np.max(np.maximum(lo - x, 0.0), initial=0.0)), float(np.max(np.maximum(x - hi, 0.0), initial=0.0)))
     viol = max(box, float(np.max(np.maximum(g, 0.0), initial=0.0)), float(np.max(np.abs(h), initial=0.0)))
     if np.isnan(viol) or np.isnan(fx):
