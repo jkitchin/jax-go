@@ -87,3 +87,28 @@ Same primal and dual values in both arms. The changes are neutral on these model
 - **The bound kernel's trace** (20–43 s) and **first call** (74–207 s) on the 200–400-variable models. Both scale with the dense LP the kernel builds per box. This is the issue's step 6, kernel size: which rows and which relaxations the kernel carries for these models, and whether a sparse or row-limited LP would do.
 - **A primal fallback.** On these models nothing produces a point before the root bound. A time-boxed multistart of the local solver, which now compiles fast, run while the bound kernel builds, would report one.
 - **The feasible-point search in domain bounding** (m24, m363) can take the whole budget. It needs a share of the time limit, not the deadline.
+
+## Follow-up: a primal fallback while the root kernel builds
+
+**Change (`bnb._FALLBACK_SHARE` = 0.25).** While the root bound kernel is still building and there is no incumbent, the main thread, otherwise idle, runs local solves (`local()`): the box center, then rounds of `_FALLBACK_STARTS` = 4 random starts. They stop at the first incumbent, when the kernel is ready, or after 25% of the time limit.
+- **Not before** the main thread has waited `_FALLBACK_DELAY` = 15 s for the kernel. Next to a kernel that is nearly built, the solves only slowed its compile: m34 37 → 42 s, smallinvDAXr5b150-165 52 s → time limit, both with root incumbents of their own.
+- **Not before** the local solver's callbacks and `screen`'s executables are compiled (`solve.ready`, `screen_ready`). A solve before that compiles them on the main thread, beyond the deadline's reach: m303 returned at 93 s and m84 at 118 s. The 25% counts from that point; the wait itself is idle time.
+- **Outside the root's local-solve share** (`_ROOT_LOCAL_SHARE`). Each solve batch gets a share of the time left.
+- **Polish:** a fallback incumbent that the root does not improve on is polished at the root's `update_incumbent` stage, with the root's budget.
+
+**A dropped kernel call blocks later device work** (`bnb._device_busy`). XLA:CPU runs work behind a call still in progress: a tiny eager op dispatched behind a 16 s call took 16.3 s. Once m388 had a fallback incumbent, its final `_verify` waited for the ~200 s first bound call that `_await` had dropped at the deadline, and the solve returned at 258 s.
+- `_await` now remembers the outputs of a dropped call. While one still runs, `minimize` skips `repair_incumbent` and `_verify`, and returns the screened incumbent with `verified=False` and a message saying why.
+- Test: `test_dropped_call_marks_device_busy`.
+
+**Stage 2c** (`stage2c_fb.csv` against `stage2c_root.csv`):
+- **Primals:** **14 of 20** models report one, against 10.
+  - m2 407,600 (optimum 348,337).
+  - m84 **1,062,700**, the best known value; SCIP's incumbent is 1,069,800.
+  - m129 1,122,800 (best known 1,086,000; SCIP 1,418,300).
+  - m348 199.5 (best known 291.5).
+- **Solved:** the same 3, in 48.2 / 43.2 / 45.0 s.
+- **Overruns:** at most 63.9 s (m79, m388).
+
+**Stage 2b, int50, start50** (against `s2c_root_cold.csv`, `s2c_int50_root_cold.csv`, `s2c_start50_root_cold.csv`, same container): 10 → 10, 46 → 46, 40 → 40. No model is slower by more than 10 s; in stage 2b the largest changes are m391 −7.6 s and m399 +4.4 s.
+
+**Tests:** test_compile_gate, test_local_callbacks and test_incumbent pass. The exception is `test_integer_neighbourhood_polish`, which fails with a fresh kernel cache on `main` (9d182d4) and on every commit of this branch, and passes on slower runs: its root polish has a budget that grows with the elapsed time, and the test stops after one iteration. That is pre-existing and left for a separate fix.

@@ -142,3 +142,18 @@ def test_light_compile(monkeypatch):
     monkeypatch.setattr(local, "COMPILE_OPTIONS", O0)
     g = local._jit(lambda x: jnp.sum(x**2))
     assert float(g(jnp.arange(3.0))) == 5.0
+
+
+def test_dropped_call_marks_device_busy():
+    """A kernel call dropped at the deadline (``_await``) is remembered while it still runs: work
+    queued after it on the device would wait for it (``_device_busy``)."""
+    body = lambda i, x: jnp.tanh(x @ x.T / 2000.0)  # noqa: E731
+    f = jax.jit(lambda x: jax.lax.fori_loop(0, 60, body, x))
+    x = jnp.ones((1200, 1200))
+    f(x).block_until_ready()
+    out = f(x)
+    with pytest.raises(bnb._Deadline):
+        bnb._await(out, time.perf_counter() + 1e-3, "slow")
+    assert bnb._device_busy()
+    out.block_until_ready()
+    assert not bnb._device_busy()

@@ -340,7 +340,7 @@ def _pounce_local(f, ineq, eq, lo, hi, options=None, patterns=None):
         prob = from_jax(f, **kw)
     # the same problem with jaxglobal's callbacks (_Callbacks): pounce's sparsity, cheaper calls
     cb = _Callbacks(f, c, lo.size, mi + me, prob.problem_obj)
-    cb.precompile(np.clip(0.5 * (lo + hi), lo, hi))
+    ready = cb.precompile(np.clip(0.5 * (lo + hi), lo, hi))
     prob = pounce.Problem(n=lo.size, m=mi + me, problem_obj=cb, lb=lo, ub=hi, cl=kw.get("cl"), cu=kw.get("cu"))
     # bound_relax_factor 0: Ipopt's default (1e-8) lets a solution sit up to 1e-8 * max(1, |bound|)
     # past a bound; the caller clips it back into the box, which moves the constraint values by
@@ -357,6 +357,7 @@ def _pounce_local(f, ineq, eq, lo, hi, options=None, patterns=None):
         res = pounce.solve_nlp_batch(probs, list(X0), options={**opts, **(options or {})})
         return np.stack([x for x, _ in res])
 
+    solve.ready = ready  # (the callbacks' background compile: a solve before it is done waits for it)
     return solve
 
 

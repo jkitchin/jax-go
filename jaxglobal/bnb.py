@@ -491,11 +491,30 @@ def _await(out, deadline, name, kernel=None):
     while not all(x.is_ready() for x in leaves):
         now = time.perf_counter()
         if now > deadline:
+            with _DROPPED_LOCK:
+                _DROPPED.extend(leaves)  # (``_device_busy``: still running after this returns)
             raise _Deadline(name)
         time.sleep(min(_POLL[1], max(_POLL[0], _POLL[2] * (now - t)), deadline - now + _POLL[0]))
     if kernel is not None:
         kernel.slowest = max(slow or 0.0, time.perf_counter() - t)
     return out
+
+
+# Outputs of kernel calls dropped at the deadline (``_await``). Such a call keeps running on the
+# device, and XLA:CPU runs the next work, eager ops included, behind it: the final float64 check
+# (``_verify``) and the incumbent repair (a local solve) then waited for it. minlp.org m388, whose
+# first bound call takes ~200 s, returned after 258 s of a 60 s limit once it had an incumbent.
+_DROPPED, _DROPPED_LOCK = [], threading.Lock()
+
+
+def _device_busy():
+    """Whether a kernel call dropped at the deadline is still running (and clear the finished)."""
+    with _DROPPED_LOCK:
+        _DROPPED[:] = [x for x in _DROPPED if not x.is_ready()]
+        return bool(_DROPPED)
+
+
+_BUSY_NOTE = "not re-verified in float64: a kernel call dropped at the time limit still occupies the device"
 
 
 class _Precompiled:
@@ -1381,6 +1400,12 @@ _POLISH_MIN, _POLISH_FRAC = 2.0, 0.1  # polish time budget: _POLISH_MIN s plus t
 # solves (polish's included) at most _ROOT_LOCAL_SHARE (None: no such limit)
 _POLISH_ROOT_SHARE = 0.05
 _ROOT_LOCAL_SHARE = 0.15
+# while the root bound kernel builds and there is no incumbent: local solves for a first one, for at
+# most this share of the time limit (None: off), _FALLBACK_STARTS random starts per round after the
+# box center
+_FALLBACK_SHARE = 0.25
+_FALLBACK_STARTS = 4
+_FALLBACK_DELAY = 15.0  # ...after the main thread has waited this long for the kernel
 _NEAR_ZERO_STARTS = 4  # extra random starts for the scaled local solves of a near-zero objective
 _POLISH_RELAX = 0.45  # polish: a local solve with the rows (and bounds) relaxed by this share of feas_tol (None: off;
 # clipping the point back into its box adds up to as much again to a row's violation)
@@ -2073,7 +2098,7 @@ def _minimize(
     from concurrent.futures import ThreadPoolExecutor
 
     _ex = ThreadPoolExecutor(1, thread_name_prefix="jaxglobal-screen")
-    kcache.track(_ex.submit(_warm_screen))
+    screen_ready = kcache.track(_ex.submit(_warm_screen))  # (``_FALLBACK_SHARE`` waits for it)
     _ex.shutdown(wait=False)
 
     def local(starts, options=None, boxes=None):
@@ -3076,19 +3101,68 @@ def _minimize(
         # built early (not behind a small bound kernel: a small problem's root may close the gap,
         # and its heuristic is then never needed); queued behind the OBBT kernel's trace
         oa_start(early=True)
+    if _FALLBACK_SHARE and building and local_solve and deadline is not None and not np.isfinite(ub):
+        # (``_FALLBACK_SHARE``) the main thread would only wait for the bound kernel's build: local
+        # solves from the box center and random points meanwhile, for a first incumbent. On the
+        # larger minlp.org models (200-400 variables) the build takes 20-60 s and the first bound
+        # call longer still, and 10 of 20 stage-2c models ended with no point at all
+        fb_end = time.perf_counter() + _FALLBACK_SHARE * time_limit
+        fb_rng = np.random.default_rng(2)  # (fixed, as the other heuristics' generators)
+        ctr = 0.5 * (lo + hi)
+        root["on"] = False  # (not charged to the root's local-solve share, ``_ROOT_LOCAL_SHARE``)
+        try:
+            k = 0
+            ready = getattr(solve_local_, "ready", None)  # (pounce: the callbacks' background compile)
+            # not before the main thread has waited _FALLBACK_DELAY s for the kernel: next to a kernel
+            # that is nearly built, the solves only slow its compile (minlp.org m34 37 -> 42 s,
+            # smallinvDAXr5b150-165 52 s -> time limit, both with root incumbents of their own)
+            wait_end = min(time.perf_counter() + _FALLBACK_DELAY, deadline)
+            while time.perf_counter() < wait_end and any(bound_kernel.pending(b, lo.size, extra) for b in padded.sizes):
+                time.sleep(0.2)
+            fb_end = time.perf_counter() + _FALLBACK_SHARE * time_limit
+            while not np.isfinite(ub) and any(bound_kernel.pending(b, lo.size, extra) for b in padded.sizes):
+                left = min(fb_end, deadline) - time.perf_counter()
+                if left <= 0.5:
+                    break
+                if (ready is not None and not ready.done()) or not screen_ready.done():
+                    # a solve now would compile the callbacks on this thread, where neither the deadline
+                    # nor pounce's max_wall_time reaches (minlp.org m303: 91 s; the solve returned at 93 s),
+                    # and so would ``screen`` before its executables are built (m84 returned at 118 s);
+                    # the wait is idle time anyway, so the share counts from when they are ready
+                    time.sleep(0.2)
+                    fb_end = time.perf_counter() + _FALLBACK_SHARE * time_limit
+                    continue
+                S = ctr[None] if k == 0 else fb_rng.uniform(lo, hi, (_FALLBACK_STARTS, lo.size))
+                k += 1
+                # (``local`` runs up to four solve batches one after another with integers: relaxation,
+                # roundings, retries, repairs; each gets a share of what is left)
+                x, fx = local(np.where(imask, np.round(S), S), options={"max_wall_time": float(left / (4 if imask.any() else 2))})
+                if fx < ub:
+                    ub, xbest = float(fx), np.asarray(x)
+        except _CompileTimeout:
+            pass
+        finally:
+            root["on"] = True
     try:
         lb, xc, fc, rlo, rhi, rxr = evaluate(lo[None], hi[None])
     except _CompileTimeout as e:  # no bound at all yet: report what is known
         why = "before the root bound" if isinstance(e, _Deadline) else f"while compiling the '{e}' kernel"
         xbest = np.asarray(xbest)
-        maxv, verified, _ = _verify(f, ineq, eq, xbest, ub, lo_user, hi_user, feas_tol, integer=imask)
+        note = ""
+        if np.isfinite(ub) and _device_busy():  # (the check would wait for the dropped call)
+            maxv, verified, note = float("nan"), False, f" ({_BUSY_NOTE})"
+        else:
+            maxv, verified, _ = _verify(f, ineq, eq, xbest, ub, lo_user, hi_user, feas_tol, integer=imask)
         return Result(x=xbest, fun=ub, lower_bound=-np.inf, converged=False, iterations=0, nodes=0,
                       evaluations=evaluations, time=time.perf_counter() - t0, status="time_limit",
-                      message=f"time_limit reached {why}; no bound computed",
+                      message=f"time_limit reached {why}; no bound computed{note}",
                       max_violation=maxv, verified=verified)  # fmt: skip
     _mk("root_incumbent")
     build_s = time.perf_counter() - t_build  # the root bound kernel's build (trace + compile) and first call
     update_incumbent(xc, fc, lb)
+    # an incumbent from the fallback above that the root did not improve on: polished here, with the
+    # root's budget (polish's grows with the elapsed time; a no-op once it is polished)
+    polish()
 
     if need_obbt():
         # compile the root OBBT kernel only now, while the root dives run: a problem whose root
@@ -3512,15 +3586,19 @@ def _minimize(
     if imask.any() and np.isfinite(ub):
         xbest = np.where(imask, np.round(xbest), xbest)
     message = ""
-    if constrained and local_solve and np.isfinite(ub):
+    busy = np.isfinite(ub) and _device_busy()  # (repair and check would wait for the dropped call)
+    if constrained and local_solve and np.isfinite(ub) and not busy:
         xbest, ub, message = repair_incumbent(xbest, ub)
         glb = min(glb, ub)  # (the repair solve may also lower f)
         status, converged, message = _status_after_repair(status, converged, ub, glb, tol(), message)
-    maxv, verified, why = _verify(f, ineq, eq, xbest, ub, lo_user, hi_user, feas_tol, integer=imask)
-    if np.isfinite(ub) and not verified:
-        message = f"incumbent failed float64 verification: {why}"
-        if status == "optimal":
-            status, converged = "unverified", False
+    if busy:
+        maxv, verified, message = float("nan"), False, _BUSY_NOTE
+    else:
+        maxv, verified, why = _verify(f, ineq, eq, xbest, ub, lo_user, hi_user, feas_tol, integer=imask)
+        if np.isfinite(ub) and not verified:
+            message = f"incumbent failed float64 verification: {why}"
+            if status == "optimal":
+                status, converged = "unverified", False
     return Result(
         x=xbest,
         fun=ub,
