@@ -1,0 +1,10 @@
+id,title,reason
+62,Extended Pooling Problem with the Summer Time (EPA) Complex Emissions Constraints : 1,inputs ['EPA_pooling_TC1.zip']: not one .gms/.mps model
+213,Optimal Design of Water Distribution Networks : hanoi,inputs ['hanoi.zip']: not one .gms/.mps model
+427,k-mean clustering: Convex MINLPs Derived from Generalized Disjunctive Programming using Cones : kClus_5_20_3_BM,inputs []: not one .gms/.mps model
+428,k-mean clustering: Convex MINLPs Derived from Generalized Disjunctive Programming using Cones : kClus_5_20_5_BM,inputs []: not one .gms/.mps model
+453,k-mean clustering: Convex MINLPs Derived from Generalized Disjunctive Programming using Cones : kClus_3_10_2_HRS,gams: 
+475,Pooling problems under perfect and imperfect competition : Bental5 NC continuous,inputs []: not one .gms/.mps model
+476,Pooling problems under perfect and imperfect competition : Bental5 NC mixed,inputs []: not one .gms/.mps model
+80,Cutting Stock Optimization Problem for the Production of Carton Board Boxes : 7-orders MINLP,inputs ['MINLP-7-orders.txt']: not one .gms/.mps model
+248,"The optimal design of a three-echelon supply chain with inventories under uncertainty : 3 Supp, 5 DCs, 10 CDZs",gams: --- model.gms(59) 3 Mb 1 Error | *** Error 253 in /tmp/tmp7v38n44h/model.gms | --- model.gms(117) 3 Mb 2 Errors | *** Error 257 in /tmp/tmp7v38n44h/model.gms |     Solve statement not checked because of previous errors | --- model.gms(137) 3 Mb 2 Errors | *** Status: Compilation error(s)
