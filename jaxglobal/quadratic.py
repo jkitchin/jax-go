@@ -1435,7 +1435,9 @@ def _unit(pat, vals, b, vlo, scale, safe):
     mb = jnp.abs(b) + _segsum(jnp.abs(vals) * jnp.abs(vlo)[C], R, pat.m)
     b = b - _segsum(vals * vlo[C], R, pat.m)
     vals = vals * scale[C]
-    nrm = jnp.sqrt(_segsum(vals * vals, R, pat.m))
+    ss = _segsum(vals * vals, R, pat.m)
+    nrm = jnp.sqrt(jnp.where(ss > 0, ss, 1.0))  # (a zero row: sqrt'(0) is inf, its derivative NaN)
+    nrm = jnp.where(ss > 0, nrm, 0.0)
     live = jnp.isfinite(b) & (nrm > 0)
     nrm = jnp.where(live, nrm, 1.0)
     vn = jnp.where(live[R], vals / nrm[R], 0.0)
@@ -1475,12 +1477,14 @@ def _certificate(pat, vals, b, y, cvec, safe):
 NODE_LP = "ipm"
 
 
-HIGHS_WARM = True  # ``_highs_solve_host``: start each LP from the thread's last basis of its shape
+HIGHS_PRESOLVE = None  # ``_highs_slot``: HiGHS's "presolve" option ("off", "on"; None: its default)
+HIGHS_WARM = True
+HIGHS_TARGET = True  # ``_highs_solve_host``: stop the dual simplex once the box is pruned (``objective_bound``)  # ``_highs_solve_host``: start each LP from the thread's last basis of its shape
 _HIGHS_TLS = threading.local()
 
 
 def _highs_slot(N, m):
-    """This thread's ``(Highs, [basis])`` for LPs of ``N`` columns and ``m`` rows."""
+    """This thread's ``(Highs, {slot: basis})`` for LPs of ``N`` columns and ``m`` rows."""
     import highspy
 
     slots = getattr(_HIGHS_TLS, "slots", None)
@@ -1490,21 +1494,25 @@ def _highs_slot(N, m):
         h = highspy.Highs()
         h.setOptionValue("output_flag", False)
         h.setOptionValue("threads", 1)
-        slots[(N, m)] = (h, [None])
+        if HIGHS_PRESOLVE is not None:
+            h.setOptionValue("presolve", HIGHS_PRESOLVE)
+        slots[(N, m)] = (h, {})
     return slots[(N, m)]
 
 
-def _highs_solve_host(c, rows, cols, vals, b, active):
+def _highs_solve_host(c, rows, cols, vals, b, active, target=None):
     """Host side of ``_highs_lp``: ``min c.u, A u <= b, 0 <= u <= 1`` per box (leading axis of the
     batched arguments; ``rows`` is static). Returns ``(u, y)`` with ``y >= 0`` the row duals in
     ``_certificate``'s convention (an infeasible LP: its dual ray, scaled)."""
     import highspy
 
     c, cols, vals, b, active = (np.asarray(a) for a in (c, cols, vals, b, active))
+    target = np.full(1, np.inf) if target is None else np.asarray(target, np.float64)
     batched = c.ndim == 2
     if not batched:
-        c, cols, vals, b, active = c[None], cols[None], vals[None], b[None], active[None]
+        c, cols, vals, b, active, target = c[None], cols[None], vals[None], b[None], active[None], target.reshape(1)
     B = max(a.shape[0] for a in (c, cols, vals, b, active))
+    target = np.broadcast_to(target.reshape(-1), (B,)) if target.size in (1, B) else np.full(B, np.inf)
     c, cols, vals, b = (np.broadcast_to(a, (B,) + a.shape[1:]) for a in (c, cols, vals, b))
     active = np.broadcast_to(active.reshape(active.shape[0], -1)[:, :1], (B, 1))
     N = c.shape[1]
@@ -1515,7 +1523,7 @@ def _highs_solve_host(c, rows, cols, vals, b, active):
         if not bool(np.reshape(active[k], -1)[0]):
             U[k] = 0.5
             continue
-        h, basis = _highs_slot(N, m)
+        h, bases = _highs_slot(N, m)
         lp = highspy.HighsLp()
         lp.num_col_, lp.num_row_ = N, m
         lp.col_cost_ = c[k]
@@ -1533,13 +1541,40 @@ def _highs_solve_host(c, rows, cols, vals, b, active):
         lp.a_matrix_.index_ = r.astype(np.int32)
         lp.a_matrix_.value_ = vv
         h.passModel(lp)
-        if HIGHS_WARM and basis[0] is not None:
-            h.setBasis(basis[0])  # (the last basis of this thread for this LP shape: typically a sibling's)
+        # warm start from this thread's last optimal basis for this LP shape (the previous box of the
+        # batch, or the last box of the previous round). Measured against each slot's own previous
+        # round (the same box, plus tangent rows): 36 against 57 iterations per LP on m426, 94 against
+        # 134 on m407
+        warm = bases.get("last") if HIGHS_WARM else None
+        if warm is not None:
+            h.setBasis(warm)
+        # dual simplex stops once its (monotone) dual objective passes the value that prunes the box
+        # (as the IPM's ``target``): its duals then certify at least that
+        h.setOptionValue("objective_bound", float(target[k]) if HIGHS_TARGET and np.isfinite(target[k]) else highspy.kHighsInf)
         h.run()
         st = h.getModelStatus()
+        if st == highspy.HighsModelStatus.kObjectiveBound:
+            sol = h.getSolution()
+            if sol.dual_valid:
+                U[k] = np.clip(np.asarray(sol.col_value), 0.0, 1.0)
+                Y[k] = np.maximum(-np.asarray(sol.row_dual), 0.0)
+                continue
+        retry = (st not in (highspy.HighsModelStatus.kOptimal, highspy.HighsModelStatus.kInfeasible))
+        for strategy in (("cold", None), ("ipm", "ipm")) if retry else ():
+            # (a failed solve: cold, then HiGHS's interior point with crossover; else the box keeps
+            # the trivial certificate, y = 0, until it is split)
+            h.passModel(lp)
+            h.setOptionValue("objective_bound", highspy.kHighsInf)
+            if strategy[1]:
+                h.setOptionValue("solver", strategy[1])
+            h.run()
+            st = h.getModelStatus()
+            if strategy[1]:
+                h.setOptionValue("solver", "choose")
+            if st in (highspy.HighsModelStatus.kOptimal, highspy.HighsModelStatus.kInfeasible):
+                break
         if st == highspy.HighsModelStatus.kOptimal:
-            basis[0] = h.getBasis()
-        if st == highspy.HighsModelStatus.kOptimal:
+            bases["last"] = h.getBasis()
             sol = h.getSolution()
             U[k] = np.clip(np.asarray(sol.col_value), 0.0, 1.0)
             Y[k] = np.maximum(-np.asarray(sol.row_dual), 0.0)
@@ -1559,14 +1594,20 @@ def _highs_solve_host(c, rows, cols, vals, b, active):
     return (U, Y, INF) if batched else (U[0], Y[0], INF[0])
 
 
-def _highs_lp(c, pat, vals, b, active):
+def _highs_lp(c, pat, vals, b, active, target=jnp.inf):
     """``(u, y, infeasible)`` of the unit-space LP by HiGHS on the host (``NODE_LP = "highs"``);
     ``infeasible``: ``y`` is a dual ray whose weak-duality value is positive."""
     N, m = c.shape[0], pat.m
     rows = np.asarray(pat.rows)
     shapes = (jax.ShapeDtypeStruct((N,), c.dtype), jax.ShapeDtypeStruct((m,), c.dtype), jax.ShapeDtypeStruct((), jnp.bool_))
-    return jax.pure_callback(lambda c_, cols_, v_, b_, a_: _highs_solve_host(c_, rows, cols_, v_, b_, a_),
-                             shapes, c, jnp.asarray(pat.cols), vals, b, active, vmap_method="expand_dims")
+    # (the solver's outputs carry no derivative, and none is needed: the caller's bound is
+    # ``_certificate`` at these duals, a JAX expression in the LP data, whose derivative with the
+    # duals held fixed is the LP value's (the envelope theorem: dV = dc.u + y.(db - dA u), at a
+    # nondegenerate optimum). ``stop_gradient`` keeps autodiff from reaching the callback.)
+    sg = jax.lax.stop_gradient
+    return jax.pure_callback(lambda c_, cols_, v_, b_, a_, t_: _highs_solve_host(c_, rows, cols_, v_, b_, a_, t_),
+                             shapes, sg(c), jnp.asarray(pat.cols), sg(vals), sg(b), active, sg(jnp.asarray(target, c.dtype)),
+                             vmap_method="expand_dims")
 
 
 def _ipm(c, pat, vals, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10, target=jnp.inf, gap_tol=1e-9,
@@ -1834,7 +1875,7 @@ def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False, n_s
             A, bu = _unit(pk, vals, b, vlo, scale, safe)
             target = (prune_at - f0) / cn + 1e-9 * (1 + jnp.abs(prune_at) / cn)  # unit-space value that prunes
             if NODE_LP == "highs":
-                z, y, ray = _highs_lp(chat, pk, A, bu, active)
+                z, y, ray = _highs_lp(chat, pk, A, bu, active, target)
                 val = _certificate(pk, A, bu, y, chat, safe)[0]
                 # a ray with a positive certificate proves the LP infeasible (scaled up, the bound
                 # grows without limit); checked here in JAX, with the certificate's own rounding terms
