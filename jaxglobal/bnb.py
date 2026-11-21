@@ -1407,6 +1407,10 @@ _ROOT_LOCAL_SHARE = 0.15
 _FALLBACK_SHARE = 0.25
 _FALLBACK_STARTS = 4
 _FALLBACK_DELAY = 15.0  # ...after the main thread has waited this long for the kernel
+# ...on problems of at least this many variables: on a small one a slow kernel build means a loaded
+# machine, and the fallback's point displaced the root's (tests/test_nonfinite_incumbent.py under
+# pytest -n auto, cold: f = 4.7e-7 instead of 0)
+_FALLBACK_N = 100
 _NEAR_ZERO_STARTS = 4  # extra random starts for the scaled local solves of a near-zero objective
 _POLISH_RELAX = 0.45  # polish: a local solve with the rows (and bounds) relaxed by this share of feas_tol (None: off;
 # clipping the point back into its box adds up to as much again to a row's violation)
@@ -3119,7 +3123,8 @@ def _minimize(
         # built early (not behind a small bound kernel: a small problem's root may close the gap,
         # and its heuristic is then never needed); queued behind the OBBT kernel's trace
         oa_start(early=True)
-    if _FALLBACK_SHARE and building and local_solve and deadline is not None and not np.isfinite(ub):
+    if _FALLBACK_SHARE and building and local_solve and deadline is not None and not np.isfinite(ub) \
+            and lo.size >= _FALLBACK_N:  # fmt: skip
         # (``_FALLBACK_SHARE``) the main thread would only wait for the bound kernel's build: local
         # solves from the box center and random points meanwhile, for a first incumbent. On the
         # larger minlp.org models (200-400 variables) the build takes 20-60 s and the first bound
