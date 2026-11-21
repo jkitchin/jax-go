@@ -45,6 +45,7 @@ from .fbbt import make_fbbt
 from .lifted import make_lifted_bounder
 from .lp import make_constrained_bounder, make_obbt, make_pool_cuts, pool_parts, reduce_ranges
 from .pseudoboolean import EPS, objective_polynomial, solve_binary_polynomial
+from .quadratic import MAX_COLUMNS
 from .quadratic import (binary_only, make_quadratic_bounder, make_quadratic_obbt, polynomial_form, quadratic_form,
                         with_bigm)
 from .structure import structure
@@ -1432,10 +1433,18 @@ def _auto_branch_var(imask):
     return "width" if np.asarray(imask).any() else "pseudocost"
 
 
+# the lifted quadratic LP is used up to max(quadratic.MAX_COLUMNS, this * n) columns: on a large problem
+# the alternative, the reduced-space kernel, is far costlier than the IPM's N x N solve. minlp.org
+# m388_fullspace3 (414 variables, 594 columns): first bound call ~200 s reduced-space, 2 s lifted; m129
+# (394, 694). The small dense smallinvDAX models (31 variables, 496 columns) keep the reduced space.
+_QUAD_COLS_PER_VAR = 2
+
+
 def _quadratic_form(f, ineq, eq, n):
     """``quadratic.quadratic_form`` of the problem (kept in the kernel cache: ``minimize`` reads
     it before it builds the kernels, see ``_assignment_bigm``, and the kernels reuse it)."""
-    return _cached(("quadratic_form", f, ineq, eq, n), lambda: quadratic_form(f, ineq, eq, n))
+    return _cached(("quadratic_form", f, ineq, eq, n),
+                   lambda: quadratic_form(f, ineq, eq, n, max_columns=max(MAX_COLUMNS, _QUAD_COLS_PER_VAR * n)))
 
 
 def _kernel_opts(*, n_fw, n_kelley, fbbt, fbbt_rounds, dbbt, obbt, obbt_rounds, univariate, alphabb, multivariate,

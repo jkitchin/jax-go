@@ -112,3 +112,22 @@ Same primal and dual values in both arms. The changes are neutral on these model
 **Stage 2b, int50, start50** (against `s2c_root_cold.csv`, `s2c_int50_root_cold.csv`, `s2c_start50_root_cold.csv`, same container): 10 → 10, 46 → 46, 40 → 40. No model is slower by more than 10 s; in stage 2b the largest changes are m391 −7.6 s and m399 +4.4 s.
 
 **Tests:** test_compile_gate, test_local_callbacks and test_incumbent pass. The exception is `test_integer_neighbourhood_polish`, which fails with a fresh kernel cache on `main` (9d182d4) and on every commit of this branch, and passes on slower runs: its root polish has a budget that grows with the elapsed time, and the test stops after one iteration. That is pre-existing and left for a separate fix.
+
+## Follow-up: the lifted quadratic LP up to 2n columns
+
+m388 and m129 are quadratic (MIQCP), but their lifted forms have 594 and 694 columns, over `quadratic.MAX_COLUMNS` (400). They got the reduced-space kernel, whose first bound call on m388 takes about 200 s.
+
+**Change.** `bnb._quadratic_form` allows `max(MAX_COLUMNS, _QUAD_COLS_PER_VAR * n)` columns, with `_QUAD_COLS_PER_VAR` = 2.
+
+**Which models change.** Across stage 2b, stage 2c, int50 and start50, only these two. The smallinvDAX models (31 variables, 496 columns) stay reduced-space. Note that `quadratic.MAX_COLUMNS` is a default argument, so setting the module constant later changes nothing; the override has to be passed in the call.
+
+**m388:**
+- A bound call for 16 boxes takes 1.5–2 s.
+- Root bound −1601.9 (optimum −1338.25).
+- The root stages leave no time to search: make_local 10 s, root local solves 14 s with no incumbent, probing 10 s.
+
+**Stage 2c** (`stage2c_qcols.csv` against `stage2c_fb.csv`):
+- **Finite bounds:** 10 → 12 models (m129 605,793 against SCIP's 684,752 at 60 s; m388 −1601.9).
+- **Primals:** 14 → 15.
+- **Solved:** the same 3.
+- **m348:** returned at 68.4 s in this run, from the fallback path, run-to-run.
