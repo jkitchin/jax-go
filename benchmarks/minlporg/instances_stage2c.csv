@@ -1,0 +1,21 @@
+name,nvars,ncons,probtype,objsense,primalbound,dualbound,gap,convex,nbinvars,nintvars,id,title,url
+m2_concbased,360,319,MINLP,min,348340,,,,5,0,2,Water Treatment Network Design : 5_units_net,https://www.minlp.org/library/problem/index.php?i=24
+m24_MTG_EX5,191,309,MINLP,max,5924.20,,,,78,0,24,Periodic Scheduling of Continuous Multiproduct Plants : EX5,https://www.minlp.org/library/problem/index.php?i=34
+m29_Dinkelbachs,1000,501,MINLP,max,2.6339,,,,500,0,29,Solving Mixed-Integer Linear Fractional Programming Problems with Dinkelbach’s Algorithm and MINLP Methods : Dinkelbach Algorithm,https://www.minlp.org/library/problem/index.php?i=45
+m79_Specilized_Model_Case3_NLP_Improvement,260,250,MINLP,min,64937.23,,,,60,0,79,Mixed-Integer Nonlinear Programming Models for Optimal Simultaneous Synthesis of Heat Exchangers Network : Example3,https://www.minlp.org/library/problem/index.php?i=93
+m84_Ex_2__WaterNetwokProblem_B_Eps,232,249,MINLP,min,1062733.395,,,,72,0,84,Integrated Process Water Networks Design Problem : Ex 2_ WaterNetwokProblem,https://www.minlp.org/library/problem/index.php?i=101
+m129_generalizedpooling_meyer10,394,423,MIQCP,min,1.086 * 10^6,,,,187,0,129,Generalized Pooling Problem : Meyer 10,https://www.minlp.org/library/problem/index.php?i=123
+m211_Tank_MINLP2,500,517,MINLP,min,9.1635,,,,40,0,211,MINLP and MPCC formulations for the cascading tanks problem : 1,https://www.minlp.org/library/problem/index.php?i=140
+m269_MPBP_721,222,627,MIQCP,max,13.5268,,,,87,0,269,Multiperiod Blend Scheduling Problem : 8T-3P-2Q-721,https://www.minlp.org/library/problem/index.php?i=168
+m303_Trigeneration_Max_Profit_Point_B,291,262,MINLP,max,998207.6647,,,,45,0,303,Sustainable Integration of Trigeneration Systems with Heat Exchanger Networks : Trigeneration-Max Profit,https://www.minlp.org/library/problem/index.php?i=176
+m305_MINLP_EX1,288,428,MIQCP,max,209721,,,,96,0,305,Hydro Energy System Scheduling : EX1,https://www.minlp.org/library/problem/index.php?i=181
+m348_MotivatingExampleModelv1,784,749,MINLP,max,259.69,,,,60,0,348,Optimal Procurement Contract Selection with Price Optimization under Uncertainty for Process Networks : Motivating Example,https://www.minlp.org/library/problem/index.php?i=196
+m363_CT_MINLP_EX1,310,565,MINLP,min,210537,,,,80,0,363,Crude Oil Pooling Problem : EX1,https://www.minlp.org/library/problem/index.php?i=270
+m388_fullspace3,414,432,MIQCP,min,-1338,,,,114,0,388,Stochastic pooling problem with contract selection : 1,https://www.minlp.org/library/problem/index.php?i=303
+m395_CLay0405BM,85,155,MIQCP,min,8092.5000,,,,55,0,395,Constrained Layout: Convex MINLPs Derived from Generalized Disjunctive Programming using Cones : Clay0405BM,https://www.minlp.org/library/problem/index.php?i=306
+m397_CLay0204HRcone,188,258,MIQCP,min,6545.0000,,,,32,0,397,Constrained Layout: Convex MINLPs Derived from Generalized Disjunctive Programming using Cones : Clay0204HRcone,https://www.minlp.org/library/problem/index.php?i=306
+m404_CLay0204HRc,172,242,MIQCP,min,6545.0000,,,,32,0,404,Constrained Layout: Convex MINLPs Derived from Generalized Disjunctive Programming using Cones : Clay0204HRc,https://www.minlp.org/library/problem/index.php?i=306
+m407_CLay0304HRc,188,270,MIQCP,min,40262.3874,,,,36,0,407,Constrained Layout: Convex MINLPs Derived from Generalized Disjunctive Programming using Cones : Clay0304HRc,https://www.minlp.org/library/problem/index.php?i=306
+m411_CLay0204HRS,164,234,MINLP,min,6545.0000,,,,32,0,411,Constrained Layout: Convex MINLPs Derived from Generalized Disjunctive Programming using Cones : Clay0204HRS,https://www.minlp.org/library/problem/index.php?i=306
+m413_CLay0303HRS,99,150,MINLP,min,26669.1096,,,,21,0,413,Constrained Layout: Convex MINLPs Derived from Generalized Disjunctive Programming using Cones : Clay0303HRS,https://www.minlp.org/library/problem/index.php?i=306
+m414_CLay0304HRS,176,258,MINLP,min,40262.3874,,,,36,0,414,Constrained Layout: Convex MINLPs Derived from Generalized Disjunctive Programming using Cones : Clay0304HRS,https://www.minlp.org/library/problem/index.php?i=306

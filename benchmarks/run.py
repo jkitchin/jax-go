@@ -57,6 +57,7 @@ INSTANCES = "instances.csv"  # the instance list of a library other than minlpli
 REL_GAP, ABS_GAP, FEAS_TOL = 1e-4, 1e-6, 1e-6
 EXTRA = {"safe": True} if os.environ.get("JAXGLOBAL_SAFE") == "1" else {}  # check_wrong.py --safe
 EXTRA.update(json.loads(os.environ.get("JAXGLOBAL_OPTS", "{}")))  # extra minimize options, e.g. '{"branch_var": "reliability"}'
+# $JAXGLOBAL_SET: module constants set in the worker before the solve (JSON, see worker())
 # "load" (1-min load average when the run started) was added for the SCIP-gap re-baseline; CSVs
 # written before it have no such column and are appended to with their own header
 # "threads" (--threads-per-job, 0: no cap) was added the same way
@@ -96,6 +97,13 @@ def worker(name, tl):
     sys.path.insert(0, str(HERE.parent))
     from jaxglobal import minimize
     from jaxglobal.nl import NLError, read_nl
+
+    import importlib
+
+    # module constants for an A/B arm, as profile_root.py's --set: '{"bnb._FAST_COMPILE": {...}}'
+    for key, val in json.loads(os.environ.get("JAXGLOBAL_SET", "{}")).items():
+        mod, attr = key.rsplit(".", 1)
+        setattr(importlib.import_module(f"jaxglobal.{mod}"), attr, val)
 
     try:
         M = read_nl(LIB / "nl" / f"{name}.nl", integers="mask")

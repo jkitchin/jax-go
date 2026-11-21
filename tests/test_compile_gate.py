@@ -108,3 +108,52 @@ def test_tiered_compile(monkeypatch):
     k.better[key].result(timeout=60)
     b = np.asarray(k(lo, hi, c))
     assert np.allclose(a, b, rtol=1e-12)
+
+
+def test_tier_early(monkeypatch):
+    """With ``_TIER_EARLY`` the tier gate opens once the fast executable is compiled."""
+    monkeypatch.setattr(bnb, "_FAST_COMPILE", {"xla_backend_optimization_level": 0})
+    monkeypatch.setattr(bnb, "_TIER_TRACE_S", 0.0)
+    monkeypatch.setattr(bnb, "_TIER_EARLY", True)
+    k = bnb._Precompiled(jax.jit(jax.vmap(lambda lo, hi, c: jnp.sum(jnp.cos(lo) * hi) + c, in_axes=(0, 0, None))), "t")
+    tier = bnb._Gate()
+    k.start(4, 3, tier=tier).result(timeout=60).result(timeout=60)
+    lo, hi, c = jnp.arange(12.0).reshape(4, 3), jnp.ones((4, 3)), jnp.asarray(1.0, dtype=jnp.float64)
+    k.better[k._key((lo, hi, c))].result(timeout=60)  # (not held: the gate opened by itself)
+    assert tier.is_open
+
+
+def test_light_compile(monkeypatch):
+    """Kernels named in ``_LIGHT_KERNELS`` (and the local solver's callbacks with
+    ``local.COMPILE_OPTIONS``) compile with other XLA options and give the same values."""
+    from jaxglobal import local
+
+    O0 = {"xla_backend_optimization_level": 0}
+    fn = jax.vmap(lambda lo, hi, c: jnp.sum(jnp.exp(lo) * hi) + c, in_axes=(0, 0, None))
+    lo, hi, c = jnp.arange(12.0).reshape(4, 3) / 10, jnp.ones((4, 3)), jnp.asarray(1.0, dtype=jnp.float64)
+    ref = np.asarray(jax.jit(fn)(lo, hi, c))
+    monkeypatch.setattr(bnb, "_LIGHT_COMPILE", O0)
+    monkeypatch.setattr(bnb, "_LIGHT_KERNELS", ("dive", "screen"))
+    assert bnb._light("dive") == O0 and bnb._light("bound") is None
+    assert np.allclose(np.asarray(bnb._jit(fn, "screen")(lo, hi, c)), ref, rtol=1e-12)
+    k = bnb._Precompiled(jax.jit(fn), "dive")
+    k.start(4, 3).result(timeout=60).result(timeout=60)
+    assert np.allclose(np.asarray(k(lo, hi, c)), ref, rtol=1e-12)
+    monkeypatch.setattr(local, "COMPILE_OPTIONS", O0)
+    g = local._jit(lambda x: jnp.sum(x**2))
+    assert float(g(jnp.arange(3.0))) == 5.0
+
+
+def test_dropped_call_marks_device_busy():
+    """A kernel call dropped at the deadline (``_await``) is remembered while it still runs: work
+    queued after it on the device would wait for it (``_device_busy``)."""
+    body = lambda i, x: jnp.tanh(x @ x.T / 2000.0)  # noqa: E731
+    f = jax.jit(lambda x: jax.lax.fori_loop(0, 60, body, x))
+    x = jnp.ones((1200, 1200))
+    f(x).block_until_ready()
+    out = f(x)
+    with pytest.raises(bnb._Deadline):
+        bnb._await(out, time.perf_counter() + 1e-3, "slow")
+    assert bnb._device_busy()
+    out.block_until_ready()
+    assert not bnb._device_busy()

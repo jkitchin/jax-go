@@ -149,6 +149,68 @@ def _color_columns(rows, cols, n):
     return color, int(color.max()) + 1 if n else 0
 
 
+def _jit(fn):
+    return jax.jit(fn) if not COMPILE_OPTIONS else jax.jit(fn, compiler_options=dict(COMPILE_OPTIONS))
+
+
+# Experimental, None by default: XLA options for the local solver's callbacks (``_Callbacks``)
+COMPILE_OPTIONS = None
+# The Lagrangian Hessian is compiled at LLVM -O0 first; when that compile takes longer than this (s),
+# the -O0 executable is kept, else the Hessian is compiled again with XLA's defaults (None: always
+# the defaults). minlp.org m79 (260 variables, 282 real powers): 165 s at the defaults, inside the
+# first local solve, which neither the deadline nor pounce's max_wall_time can interrupt (the solve
+# returned after 99-121 s of a 60 s limit); 8.9 s at -O0, 0.7 ms per call. Elsewhere the -O0 compile
+# takes 0.1-1.5 s and the default one 0.2-3.6 s (stage-2b and -2c models, cold).
+HESS_SLOW_O0 = 3.0
+
+
+_SLOW_MODULES = {}  # ``_TieredJit``: HLO hash -> whether its -O0 compile took over HESS_SLOW_O0
+
+
+class _TieredJit:
+    """``jax.jit(fn)`` whose first call (or ``warm``) compiles at -O0, and again with XLA's defaults
+    unless the -O0 compile took over ``HESS_SLOW_O0`` s. Falls back to ``jax.jit`` on any failure."""
+
+    def __init__(self, fn):
+        import threading
+
+        self.jitted, self.exe, self.lock = jax.jit(fn), None, threading.Lock()
+
+    def _build(self, args):
+        import hashlib
+        import time
+
+        low = self.jitted.trace(*args).lower()
+        key = hashlib.sha1(low.as_text().encode()).hexdigest()
+        slow = _SLOW_MODULES.get(key)
+        if slow is None:
+            t = time.perf_counter()
+            exe = low.compile(compiler_options={"xla_backend_optimization_level": 0})
+            # (a persistent-cache hit compiles in no time: the verdict is kept per module, for the
+            # process, so a second instance of the same callbacks does not take the slow path)
+            slow = _SLOW_MODULES.setdefault(key, time.perf_counter() - t > HESS_SLOW_O0)
+            if slow:
+                return exe
+        elif slow:
+            return low.compile(compiler_options={"xla_backend_optimization_level": 0})
+        return low.compile()
+
+    def __call__(self, *args):
+        if HESS_SLOW_O0 is None or COMPILE_OPTIONS:
+            return self.jitted(*args)
+        if self.exe is None:
+            with self.lock:
+                if self.exe is None:
+                    try:
+                        self.exe = self._build(args)
+                    except Exception:  # noqa: BLE001 -- jit compiles it as before
+                        self.exe = False
+        if self.exe is False:
+            return self.jitted(*args)
+        try:
+            return self.exe(*args)
+        except Exception:  # noqa: BLE001 -- argument types other than the first call's
+            return self.jitted(*args)
 _MAX_COLOR_SHARE = 0.5  # compressed derivatives when they need at most this share of n directions
 
 
@@ -174,18 +236,18 @@ class _Callbacks:
         self.m = m
         self._jrows, self._jcols = (np.asarray(v, np.int64) for v in struct.jacobianstructure())
         self._hrows, self._hcols = (np.asarray(v, np.int64) for v in struct.hessianstructure())
-        self._f, self._grad = jax.jit(f), jax.jit(jax.grad(f))
+        self._f, self._grad = _jit(f), _jit(jax.grad(f))
         lag = (lambda x, lam, s: s * f(x) + jnp.dot(lam, c(x))) if m else (lambda x, s: s * f(x))
         self._jac_seed = self._hess_seed = None
         if m:
-            self._c = jax.jit(c)
+            self._c = _jit(c)
             color, k = _color_columns(self._jrows, self._jcols, n)
             if 0 < k <= _MAX_COLOR_SHARE * n:
                 SJ = jnp.asarray(np.eye(k)[color].T)  # (k, n): column j in direction color[j]
-                self._jac = jax.jit(lambda x: jax.vmap(lambda s: jax.jvp(c, (x,), (s,))[1])(SJ))
+                self._jac = _jit(lambda x: jax.vmap(lambda s: jax.jvp(c, (x,), (s,))[1])(SJ))
                 self._jac_seed = color[self._jcols]
             else:
-                self._jac = jax.jit(jax.jacfwd(c) if n < m else jax.jacrev(c))
+                self._jac = _jit(jax.jacfwd(c) if n < m else jax.jacrev(c))
         # the Hessian's full pattern (it is stored as the lower triangle) colored the same way
         full_r, full_c = np.r_[self._hrows, self._hcols], np.r_[self._hcols, self._hrows]
         color, k = _color_columns(full_r, full_c, n)
@@ -196,10 +258,10 @@ class _Callbacks:
             def hv(x, *a):
                 return jax.vmap(lambda s: jax.jvp(lambda xx: grad_lag(xx, *a), (x,), (s,))[1])(SH)
 
-            self._hess = jax.jit(hv)
+            self._hess = _TieredJit(hv) if not COMPILE_OPTIONS else _jit(hv)
             self._hess_seed = color[self._hcols]
         else:
-            self._hess = jax.jit(jax.hessian(lag))
+            self._hess = _TieredJit(jax.hessian(lag)) if not COMPILE_OPTIONS else _jit(jax.hessian(lag))
 
     def precompile(self, x0):
         """Compile every callback at ``x0`` in a background thread (returns its future).
@@ -278,7 +340,7 @@ def _pounce_local(f, ineq, eq, lo, hi, options=None, patterns=None):
         prob = from_jax(f, **kw)
     # the same problem with jaxglobal's callbacks (_Callbacks): pounce's sparsity, cheaper calls
     cb = _Callbacks(f, c, lo.size, mi + me, prob.problem_obj)
-    cb.precompile(np.clip(0.5 * (lo + hi), lo, hi))
+    ready = cb.precompile(np.clip(0.5 * (lo + hi), lo, hi))
     prob = pounce.Problem(n=lo.size, m=mi + me, problem_obj=cb, lb=lo, ub=hi, cl=kw.get("cl"), cu=kw.get("cu"))
     # bound_relax_factor 0: Ipopt's default (1e-8) lets a solution sit up to 1e-8 * max(1, |bound|)
     # past a bound; the caller clips it back into the box, which moves the constraint values by
@@ -295,6 +357,7 @@ def _pounce_local(f, ineq, eq, lo, hi, options=None, patterns=None):
         res = pounce.solve_nlp_batch(probs, list(X0), options={**opts, **(options or {})})
         return np.stack([x for x, _ in res])
 
+    solve.ready = ready  # (the callbacks' background compile: a solve before it is done waits for it)
     return solve
 
 

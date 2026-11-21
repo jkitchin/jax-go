@@ -45,6 +45,7 @@ from .fbbt import make_fbbt
 from .lifted import make_lifted_bounder
 from .lp import make_constrained_bounder, make_obbt, make_pool_cuts, pool_parts, reduce_ranges
 from .pseudoboolean import EPS, objective_polynomial, solve_binary_polynomial
+from .quadratic import MAX_COLUMNS
 from .quadratic import (binary_only, make_quadratic_bounder, make_quadratic_obbt, polynomial_form, quadratic_form,
                         with_bigm)
 from .structure import structure
@@ -335,6 +336,7 @@ def _pools():
 # 0.06 s alone; on m34_convex2 the final float64 check (_verify: eager ops) took 22 s next to the
 # OA kernel's trace.
 SWITCH_INTERVAL = 0.001
+_VERIFY_SWITCH = 1e-5  # ``_verify``: the GIL switch interval while it evaluates eagerly (None: unchanged)
 _GATE_COMPILES = True  # hold the compiles not needed for the root bound (``_Gate``); False: compile each once traced
 _GATE_TRACE_S = 1.0  # ...but not behind a bound kernel traced (or loaded from the disk cache) in less than this
 # Optional, off by default (mixed evidence): the root bound kernel is first compiled with these XLA
@@ -345,7 +347,24 @@ _GATE_TRACE_S = 1.0  # ...but not behind a bound kernel traced (or loaded from t
 # the root bound came earlier, but root probing ran on the slower kernel. Empty: no tiers.
 _FAST_COMPILE = {}
 _TIER_TRACE_S = 3.0
+# Experimental, off by default: XLA options for the kernels named in _LIGHT_KERNELS ("dive",
+# "obbt", "pool_cuts", "screen"), which are called far less than the bound kernel; their compiles
+# compete with its compile for the CPU on a cold cache.
+_LIGHT_COMPILE = {}
+_LIGHT_KERNELS = ()
+_TIER_EARLY = False  # open the tier gate once the fast executable is compiled, not at the search's start
 _LIVE = threading.local()  # ``gates``: the ``_Gate``s of the running ``minimize`` on this thread
+
+
+def _light(name):
+    """The XLA compile options of kernel ``name`` (``_LIGHT_COMPILE``), or None: XLA's defaults."""
+    return dict(_LIGHT_COMPILE) if _LIGHT_COMPILE and name in _LIGHT_KERNELS else None
+
+
+def _jit(fn, name):
+    """``jax.jit(fn)``, with kernel ``name``'s compile options (``_light``)."""
+    opts = _light(name)
+    return jax.jit(fn) if opts is None else jax.jit(fn, compiler_options=opts)
 
 
 def _live_gates():
@@ -473,11 +492,30 @@ def _await(out, deadline, name, kernel=None):
     while not all(x.is_ready() for x in leaves):
         now = time.perf_counter()
         if now > deadline:
+            with _DROPPED_LOCK:
+                _DROPPED.extend(leaves)  # (``_device_busy``: still running after this returns)
             raise _Deadline(name)
         time.sleep(min(_POLL[1], max(_POLL[0], _POLL[2] * (now - t)), deadline - now + _POLL[0]))
     if kernel is not None:
         kernel.slowest = max(slow or 0.0, time.perf_counter() - t)
     return out
+
+
+# Outputs of kernel calls dropped at the deadline (``_await``). Such a call keeps running on the
+# device, and XLA:CPU runs the next work, eager ops included, behind it: the final float64 check
+# (``_verify``) and the incumbent repair (a local solve) then waited for it. minlp.org m388, whose
+# first bound call takes ~200 s, returned after 258 s of a 60 s limit once it had an incumbent.
+_DROPPED, _DROPPED_LOCK = [], threading.Lock()
+
+
+def _device_busy():
+    """Whether a kernel call dropped at the deadline is still running (and clear the finished)."""
+    with _DROPPED_LOCK:
+        _DROPPED[:] = [x for x in _DROPPED if not x.is_ready()]
+        return bool(_DROPPED)
+
+
+_BUSY_NOTE = "not re-verified in float64: a kernel call dropped at the time limit still occupies the device"
 
 
 class _Precompiled:
@@ -536,8 +574,12 @@ class _Precompiled:
                 self.traced_seconds = time.perf_counter() - t
                 if tier is not None and _FAST_COMPILE and self.traced_seconds >= _TIER_TRACE_S:
                     self.better[key] = kcache.track(tier.submit(lowered.compile))
-                    return submit(functools.partial(lowered.compile, compiler_options=dict(_FAST_COMPILE)))
-                return submit(lowered.compile)
+                    fast = submit(functools.partial(lowered.compile, compiler_options=dict(_FAST_COMPILE)))
+                    if _TIER_EARLY:
+                        fast.add_done_callback(tier.open)
+                    return fast
+                opts = _light(self.name)
+                return submit(lowered.compile if opts is None else functools.partial(lowered.compile, compiler_options=opts))
 
             self.ready[key] = kcache.track(tracer.submit(build))
         return self.ready[key]
@@ -787,13 +829,13 @@ class _Kernels:
         self.pool_cuts = None
         if constrained and not lifted and cut_pool:
             self.bound_pool = _Precompiled(jax.jit(jax.vmap(node, in_axes=(0, 0, None, None, None))), "bound_pool")
-            self.pool_cuts = jax.jit(jax.vmap(make_pool_cuts(f, ineq, eq, univariate=univariate, alphabb=alphabb,
-                                                             multivariate=multivariate, safe=safe, exact=exact),
-                                              in_axes=(0, None, None)))  # fmt: skip
+            self.pool_cuts = _jit(jax.vmap(make_pool_cuts(f, ineq, eq, univariate=univariate, alphabb=alphabb,
+                                                          multivariate=multivariate, safe=safe, exact=exact),
+                                           in_axes=(0, None, None)), "pool_cuts")  # fmt: skip
         self.obbt = _Precompiled(jax.jit(jax.vmap(node_obbt, in_axes=(0, 0, None))), "obbt") if obbt else None
         self._problem, self._opts, self._fingerprints, self._nonlinear, self._structure = (f, ineq, eq), opts, {}, {}, {}
         self._quadratic, self._use_quadratic, self._qlock = {}, bool(quadratic) and not lifted, threading.Lock()
-        self.viol = jax.jit(jax.vmap(violation))
+        self.viol = _jit(jax.vmap(violation), "screen")
         self.dive = None
         if idx.size and fbbt:
             # its own FBBT (own tape and interpreter caches): this kernel is traced on the
@@ -830,7 +872,7 @@ class _Kernels:
                 return jax.lax.fori_loop(p0, p1, step, (blo, bhi, failed))
 
             self.dive = _Precompiled(jax.jit(jax.vmap(dive, in_axes=(0, 0, 0, None, 0, None, None))), "dive")
-        self.fvals = jax.jit(jax.vmap(f))
+        self.fvals = _jit(jax.vmap(f), "screen")
         self.fns = [fn for fn in (f, ineq, eq) if fn is not None]
         self.hessians = [_hessian(fn) for fn in self.fns]
 
@@ -1060,10 +1102,19 @@ def _verify(f, ineq, eq, x, fun, lo, hi, feas_tol, integer=None):
     if not np.isfinite(fun):
         return float("inf"), False, ""
     xj = jnp.asarray(x, dtype=jnp.float64)
-    with jax.disable_jit():
-        fx = float(np.sum(np.asarray(f(xj))))
-        g = np.atleast_1d(np.asarray(ineq(xj), dtype=np.float64)) if ineq is not None else np.zeros(0)
-        h = np.atleast_1d(np.asarray(eq(xj), dtype=np.float64)) if eq is not None else np.zeros(0)
+    # (the eager ops retake the GIL thousands of times; a kernel still being traced in the background
+    # held it for up to the switch interval at each: on minlp.org m79 this check ran 6-17 s past the
+    # time limit. A short interval for its duration (``_VERIFY_SWITCH``) lets the main thread back in)
+    switch = sys.getswitchinterval()
+    if _VERIFY_SWITCH:
+        sys.setswitchinterval(min(switch, _VERIFY_SWITCH))
+    try:
+        with jax.disable_jit():
+            fx = float(np.sum(np.asarray(f(xj))))
+            g = np.atleast_1d(np.asarray(ineq(xj), dtype=np.float64)) if ineq is not None else np.zeros(0)
+            h = np.atleast_1d(np.asarray(eq(xj), dtype=np.float64)) if eq is not None else np.zeros(0)
+    finally:
+        sys.setswitchinterval(switch)
     box = max(float(np.max(np.maximum(lo - x, 0.0), initial=0.0)), float(np.max(np.maximum(x - hi, 0.0), initial=0.0)))
     viol = max(box, float(np.max(np.maximum(g, 0.0), initial=0.0)), float(np.max(np.abs(h), initial=0.0)))
     if np.isnan(viol) or np.isnan(fx):
@@ -1132,6 +1183,18 @@ MILP_ROOT_SHARE, MILP_ROOT_SECONDS = 0.25, 60.0  # integer-aware root bound: at 
 # assignments from MILPs over the relaxation's cuts, completed by fixed-integer local solves
 _OA = True
 _OA_SHARE, _OA_SECONDS = 0.15, 30.0  # its time: at most this share of time_limit (in all) and seconds per call
+# While there is no incumbent (the search cannot prune on the objective), the heuristic gets this
+# share instead, this many MILP rounds per call, and its cut program is built right after the root
+# dives (beside root OBBT and probing) instead of after the root stages. minlp.org
+# m400_CLay0304HRcone (36 binaries, a 54k-equation cut program, no cut pool): its root dives find
+# nothing, and the MILPs propose about ten infeasible assignments (four rectangles in one circle; SCIP
+# confirms each) before a feasible one at 1-2 s each; with 15% of 60 s, 8 rounds per call and the
+# build after the root stages it reported no solution, with these the optimum (40262.39, cold, at
+# 46.5 s). Models with an incumbent after the root dives are unaffected. docs/ANALYSIS-noinc.md
+_OA_SHARE_NOINC = 0.5  # (None: _OA_SHARE always)
+_OA_ROUNDS_NOINC = 64  # (None: _OA_ROUNDS)
+_OA_NOINC_START = True
+_OA_FORM = True  # without a cut pool, the heuristic's cuts from the lifted quadratic form (``oa_mb``)
 _OA_EVERY = 0.1  # the search resumes it each time this share of the time limit (at most 600 s) has passed
 _OA_MILP = 0.5  # each MILP of a call gets at most this share of the call's budget
 # MILP rounds per call, within its time budget (32 was tried: on minlp.org m406 the root call's 8 rounds
@@ -1338,7 +1401,19 @@ _POLISH_MIN, _POLISH_FRAC = 2.0, 0.1  # polish time budget: _POLISH_MIN s plus t
 # solves (polish's included) at most _ROOT_LOCAL_SHARE (None: no such limit)
 _POLISH_ROOT_SHARE = 0.05
 _ROOT_LOCAL_SHARE = 0.15
+# while the root bound kernel builds and there is no incumbent: local solves for a first one, for at
+# most this share of the time limit (None: off), _FALLBACK_STARTS random starts per round after the
+# box center
+_FALLBACK_SHARE = 0.25
+_FALLBACK_STARTS = 4
+_FALLBACK_DELAY = 15.0  # ...after the main thread has waited this long for the kernel
+# ...on problems of at least this many variables: on a small one a slow kernel build means a loaded
+# machine, and the fallback's point displaced the root's (tests/test_nonfinite_incumbent.py under
+# pytest -n auto, cold: f = 4.7e-7 instead of 0)
+_FALLBACK_N = 100
 _NEAR_ZERO_STARTS = 4  # extra random starts for the scaled local solves of a near-zero objective
+_POLISH_RELAX = 0.45  # polish: a local solve with the rows (and bounds) relaxed by this share of feas_tol (None: off;
+# clipping the point back into its box adds up to as much again to a row's violation)
 _STRICT_FRAC = 1e-3  # repair_incumbent: violation (x feas_tol) above which a reported incumbent is repaired
 _REPAIR_SLACK = 100.0  # repair_incumbent: largest accepted rise of f, in units of feas_tol * (1 + |f|)
 _REPAIR_GAP = 100.0  # a repaired incumbent keeps "optimal" only with fun - lower_bound <= this x the gap tolerance
@@ -1362,10 +1437,21 @@ def _auto_branch_var(imask):
     return "width" if np.asarray(imask).any() else "pseudocost"
 
 
+# the lifted quadratic LP is used up to max(quadratic.MAX_COLUMNS, this * n) columns: on a large problem
+# the alternative, the reduced-space kernel, is far costlier than the IPM's N x N solve. minlp.org
+# m388_fullspace3 (414 variables, 594 columns): first bound call ~200 s reduced-space, 2 s lifted; m129
+# (394, 694). The small dense smallinvDAX models (31 variables, 496 columns) keep the reduced space.
+_QUAD_COLS_PER_VAR = 2
+# a constrained problem on the reduced-space kernel with at least _ROOT_SIZE_N variables also gets a
+# kernel for batches of _ROOT_SIZE boxes (the root's call: m303 74 -> 11 s, m84 88 -> 14 s); None: off
+_ROOT_SIZE, _ROOT_SIZE_N = 2, 200
+
+
 def _quadratic_form(f, ineq, eq, n):
     """``quadratic.quadratic_form`` of the problem (kept in the kernel cache: ``minimize`` reads
     it before it builds the kernels, see ``_assignment_bigm``, and the kernels reuse it)."""
-    return _cached(("quadratic_form", f, ineq, eq, n), lambda: quadratic_form(f, ineq, eq, n))
+    return _cached(("quadratic_form", f, ineq, eq, n),
+                   lambda: quadratic_form(f, ineq, eq, n, max_columns=max(MAX_COLUMNS, _QUAD_COLS_PER_VAR * n)))
 
 
 def _kernel_opts(*, n_fw, n_kelley, fbbt, fbbt_rounds, dbbt, obbt, obbt_rounds, univariate, alphabb, multivariate,
@@ -1890,6 +1976,12 @@ def _minimize(
     _mark("start_compile")
     t_build = time.perf_counter()
     extra = () if pool is None else (pool["rows"].shape, pool["root"].shape)  # the bound kernel's pool arguments
+    if _ROOT_SIZE and tuple(batch_sizes) == (16,) and lo.size >= _ROOT_SIZE_N and constrained and not lifted \
+            and _quadratic_form(f, ineq, eq, lo.size) is None:  # fmt: skip
+        # (``_ROOT_SIZE``) a large reduced-space problem: its per-box LP is dense in all n variables, and
+        # the root's single box padded to 16 paid 16 times for it (minlp.org m303, 291 variables: 74 s;
+        # m84 88 s). The small size is compiled first (the root's), the full one behind it (``later``)
+        batch_sizes = (_ROOT_SIZE, 16)
     padded = _Padder(batch, batch_sizes, jax.devices() if devices is None else list(devices))
     # the other kernels' XLA compiles wait for the root bound kernel's (``_Gate``): traced now, compiled
     # once it is compiled (or as soon as one is needed); root OBBT's once the root decides it will run
@@ -1929,7 +2021,7 @@ def _minimize(
         if ok:
             pool["exe"] = done
         else:
-            pool["exe"] = kcache.track(tracer.submit(lambda: later.submit(K.pool_cuts.trace(pts, vec, vec).lower().compile)))
+            pool["exe"] = kcache.track(tracer.submit(lambda: later.submit(functools.partial(K.pool_cuts.trace(pts, vec, vec).lower().compile, compiler_options=_light("pool_cuts")))))
             with _CACHE_LOCK:
                 if not hasattr(K, "_pool_exe"):
                     K._pool_exe = {}
@@ -2028,7 +2120,7 @@ def _minimize(
     from concurrent.futures import ThreadPoolExecutor
 
     _ex = ThreadPoolExecutor(1, thread_name_prefix="jaxglobal-screen")
-    kcache.track(_ex.submit(_warm_screen))
+    screen_ready = kcache.track(_ex.submit(_warm_screen))  # (``_FALLBACK_SHARE`` waits for it)
     _ex.shutdown(wait=False)
 
     def local(starts, options=None, boxes=None):
@@ -2498,6 +2590,23 @@ def _minimize(
         if not local_solve or not np.isfinite(ub) or ub >= polished["ub"]:
             return
         _sub("polish")
+        if (~imask).any() and _POLISH_RELAX and not _past(deadline):
+            # (once per new incumbent, outside the time budget below: one local solve; on m441
+            # cold the root polish had spent its budget before reaching it)
+            # the incumbent's continuous variables solved again with the rows relaxed by
+            # _POLISH_RELAX * feas_tol (Ipopt's ``bound_relax_factor``): the search bounds the
+            # problem relaxed by feas_tol, and on an ill-conditioned one the strictly feasible
+            # optimum lies above that problem's optimum by more than rel_tol (minlp.org m441:
+            # 0.3289229 against 0.3288834, 1.2e-4 relative), so the last open box was split
+            # for 3,250 of 4,693 nodes. The point is screened (violation <= feas_tol), and
+            # ``repair_incumbent`` reports a strictly feasible one as before.
+            x = np.where(imask, np.round(xbest), xbest)
+            L, H = np.where(imask, x, lo), np.where(imask, x, hi)
+            X = np.clip(np.asarray(solve_local(x[None], L[None], H[None],
+                                               options={"bound_relax_factor": _POLISH_RELAX * feas_tol})), L, H)  # fmt: skip
+            F = screen(X)
+            if F[0] < ub:
+                ub, xbest = float(F[0]), X[0]
         start = time.perf_counter()
         stop = min(start + _POLISH_MIN + _POLISH_FRAC * (start - t0) - polished["time"], t0 + time_limit)
         if root["on"] and deadline is not None and _POLISH_ROOT_SHARE is not None:
@@ -2797,7 +2906,23 @@ def _minimize(
     # (``_OA_POOL``) the heuristic's cuts from the cut pool's tangent kernel, when there is one
     oa_pool = bool(_OA_POOL and pool is not None and pool.get("exe") is not None)
 
+    # (``_OA_FORM``) without a pool, a quadratic problem's heuristic takes its cuts from its lifted
+    # quadratic form (``milpbound.form_tangents``: McCormick planes in numpy) instead of its own cut
+    # program (54k jaxpr equations on minlp.org m400, 10-20 s of trace and compile cold)
+    oa_form = None
+    if _OA_FORM and not oa_pool and quadratic and not lifted and imask.any():
+        try:
+            Qf = _quadratic_form(f, ineq, eq, lo.size)
+            oa_form = None if Qf is None else milpbound.form_tangents(Qf, lo.size)
+        except Exception:  # noqa: BLE001 -- optional: the generic cut program instead
+            oa_form = None
+
     def oa_mb():
+        if oa_form is not None:
+            with _CACHE_LOCK:
+                if oa_state.get("form_mb") is None:
+                    oa_state["form_mb"] = milpbound.MilpBound(f, ineq, eq, lo.size, feas_tol=feas_tol, tangents=oa_form)
+            return oa_state["form_mb"]
         if oa_pool:  # (per solve: its tangents are this solve's kernel)
             with _CACHE_LOCK:
                 if oa_state.get("pool_mb") is None:
@@ -2827,6 +2952,11 @@ def _minimize(
         the tracing and compiling of the 10-25 s above compete less with the root stages than
         they did (the compiles are gated, ``_Gate``)."""
         if oa_state.get("fut") is not None or not (_OA and oa_binary and local_solve):
+            return
+        if oa_form is not None:  # nothing to trace or compile
+            done = Future()
+            done.set_result(True)
+            oa_state["fut"] = done
             return
         if early or oa_pool:
             out = Future()
@@ -2925,7 +3055,8 @@ def _minimize(
         try:
             pts = ([xbest] if np.isfinite(ub) else []) + S0
             oa_state["mb"] = MB.propose(blo, bhi, imask, complete, extra=pts, cutoff=ub, budget=budget, tol=tol(),
-                                        milp_time=_OA_MILP * budget, state=oa_state["mb"], rounds=_OA_ROUNDS)  # fmt: skip
+                                        milp_time=_OA_MILP * budget, state=oa_state["mb"],
+                                        rounds=_OA_ROUNDS if np.isfinite(ub) or _OA_ROUNDS_NOINC is None else _OA_ROUNDS_NOINC)  # fmt: skip
         except Exception:  # noqa: BLE001 -- an optional heuristic: any failure keeps the incumbent
             pass
         finally:
@@ -2939,7 +3070,8 @@ def _minimize(
     def oa_budget():
         """Seconds the next ``oa_primal`` call may take: what is left of ``_OA_SHARE`` of the time
         limit (or of the elapsed time without one), at most ``_OA_SECONDS`` and half the time left."""
-        total = _OA_SHARE * (time_limit if deadline is not None else max(time.perf_counter() - t0, 10.0))
+        share = _OA_SHARE if np.isfinite(ub) or _OA_SHARE_NOINC is None else max(_OA_SHARE, _OA_SHARE_NOINC)
+        total = share * (time_limit if deadline is not None else max(time.perf_counter() - t0, 10.0))
         b = min(total - oa_state["time"], _OA_SECONDS)
         if deadline is not None:
             b = min(b, 0.5 * (deadline - time.perf_counter()))
@@ -2991,19 +3123,69 @@ def _minimize(
         # built early (not behind a small bound kernel: a small problem's root may close the gap,
         # and its heuristic is then never needed); queued behind the OBBT kernel's trace
         oa_start(early=True)
+    if _FALLBACK_SHARE and building and local_solve and deadline is not None and not np.isfinite(ub) \
+            and lo.size >= _FALLBACK_N:  # fmt: skip
+        # (``_FALLBACK_SHARE``) the main thread would only wait for the bound kernel's build: local
+        # solves from the box center and random points meanwhile, for a first incumbent. On the
+        # larger minlp.org models (200-400 variables) the build takes 20-60 s and the first bound
+        # call longer still, and 10 of 20 stage-2c models ended with no point at all
+        fb_end = time.perf_counter() + _FALLBACK_SHARE * time_limit
+        fb_rng = np.random.default_rng(2)  # (fixed, as the other heuristics' generators)
+        ctr = 0.5 * (lo + hi)
+        root["on"] = False  # (not charged to the root's local-solve share, ``_ROOT_LOCAL_SHARE``)
+        try:
+            k = 0
+            ready = getattr(solve_local_, "ready", None)  # (pounce: the callbacks' background compile)
+            # not before the main thread has waited _FALLBACK_DELAY s for the kernel: next to a kernel
+            # that is nearly built, the solves only slow its compile (minlp.org m34 37 -> 42 s,
+            # smallinvDAXr5b150-165 52 s -> time limit, both with root incumbents of their own)
+            wait_end = min(time.perf_counter() + _FALLBACK_DELAY, deadline)
+            while time.perf_counter() < wait_end and any(bound_kernel.pending(b, lo.size, extra) for b in padded.sizes):
+                time.sleep(0.2)
+            fb_end = time.perf_counter() + _FALLBACK_SHARE * time_limit
+            while not np.isfinite(ub) and any(bound_kernel.pending(b, lo.size, extra) for b in padded.sizes):
+                left = min(fb_end, deadline) - time.perf_counter()
+                if left <= 0.5:
+                    break
+                if (ready is not None and not ready.done()) or not screen_ready.done():
+                    # a solve now would compile the callbacks on this thread, where neither the deadline
+                    # nor pounce's max_wall_time reaches (minlp.org m303: 91 s; the solve returned at 93 s),
+                    # and so would ``screen`` before its executables are built (m84 returned at 118 s);
+                    # the wait is idle time anyway, so the share counts from when they are ready
+                    time.sleep(0.2)
+                    fb_end = time.perf_counter() + _FALLBACK_SHARE * time_limit
+                    continue
+                S = ctr[None] if k == 0 else fb_rng.uniform(lo, hi, (_FALLBACK_STARTS, lo.size))
+                k += 1
+                # (``local`` runs up to four solve batches one after another with integers: relaxation,
+                # roundings, retries, repairs; each gets a share of what is left)
+                x, fx = local(np.where(imask, np.round(S), S), options={"max_wall_time": float(left / (4 if imask.any() else 2))})
+                if fx < ub:
+                    ub, xbest = float(fx), np.asarray(x)
+        except _CompileTimeout:
+            pass
+        finally:
+            root["on"] = True
     try:
         lb, xc, fc, rlo, rhi, rxr = evaluate(lo[None], hi[None])
     except _CompileTimeout as e:  # no bound at all yet: report what is known
         why = "before the root bound" if isinstance(e, _Deadline) else f"while compiling the '{e}' kernel"
         xbest = np.asarray(xbest)
-        maxv, verified, _ = _verify(f, ineq, eq, xbest, ub, lo_user, hi_user, feas_tol, integer=imask)
+        note = ""
+        if np.isfinite(ub) and _device_busy():  # (the check would wait for the dropped call)
+            maxv, verified, note = float("nan"), False, f" ({_BUSY_NOTE})"
+        else:
+            maxv, verified, _ = _verify(f, ineq, eq, xbest, ub, lo_user, hi_user, feas_tol, integer=imask)
         return Result(x=xbest, fun=ub, lower_bound=-np.inf, converged=False, iterations=0, nodes=0,
                       evaluations=evaluations, time=time.perf_counter() - t0, status="time_limit",
-                      message=f"time_limit reached {why}; no bound computed",
+                      message=f"time_limit reached {why}; no bound computed{note}",
                       max_violation=maxv, verified=verified)  # fmt: skip
     _mk("root_incumbent")
     build_s = time.perf_counter() - t_build  # the root bound kernel's build (trace + compile) and first call
     update_incumbent(xc, fc, lb)
+    # an incumbent from the fallback above that the root did not improve on: polished here, with the
+    # root's budget (polish's grows with the elapsed time; a no-op once it is polished)
+    polish()
 
     if need_obbt():
         # compile the root OBBT kernel only now, while the root dives run: a problem whose root
@@ -3031,6 +3213,12 @@ def _minimize(
             S = np.where((np.arange(len(A)) % 4 == 0)[:, None], rxr, rng.uniform(L, H))
             fixed_solve(L, H, S)
     _mk("root_obbt")
+    if _OA_NOINC_START and imask.any() and not np.isfinite(ub) and np.all(np.isfinite(lb)) and deadline is not None:
+        # no incumbent after the root dives: build the heuristic's cut program now, beside root OBBT
+        # and probing, rather than once they are done (``_OA_NOINC_START``)
+        oa_start()
+        if oa_form is not None:  # its cuts need no build: run it now, before root OBBT and probing
+            oa_primal(rlo.min(axis=0), rhi.max(axis=0), list(np.atleast_2d(rxr)[:2]), oa_budget())
     # The root OBBT kernel solves two LPs per variable in one call, which cannot be interrupted:
     # skip it when the time left is under _ROOT_OBBT_COST times the slowest bound-kernel call (on
     # minlp.org m49, cold under load, it started with 11.6 s left and ran 30.6 s, 4.3 times the root
@@ -3421,15 +3609,19 @@ def _minimize(
     if imask.any() and np.isfinite(ub):
         xbest = np.where(imask, np.round(xbest), xbest)
     message = ""
-    if constrained and local_solve and np.isfinite(ub):
+    busy = np.isfinite(ub) and _device_busy()  # (repair and check would wait for the dropped call)
+    if constrained and local_solve and np.isfinite(ub) and not busy:
         xbest, ub, message = repair_incumbent(xbest, ub)
         glb = min(glb, ub)  # (the repair solve may also lower f)
         status, converged, message = _status_after_repair(status, converged, ub, glb, tol(), message)
-    maxv, verified, why = _verify(f, ineq, eq, xbest, ub, lo_user, hi_user, feas_tol, integer=imask)
-    if np.isfinite(ub) and not verified:
-        message = f"incumbent failed float64 verification: {why}"
-        if status == "optimal":
-            status, converged = "unverified", False
+    if busy:
+        maxv, verified, message = float("nan"), False, _BUSY_NOTE
+    else:
+        maxv, verified, why = _verify(f, ineq, eq, xbest, ub, lo_user, hi_user, feas_tol, integer=imask)
+        if np.isfinite(ub) and not verified:
+            message = f"incumbent failed float64 verification: {why}"
+            if status == "optimal":
+                status, converged = "unverified", False
     return Result(
         x=xbest,
         fun=ub,
