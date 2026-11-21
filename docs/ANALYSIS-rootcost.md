@@ -149,3 +149,17 @@ m388 and m129 are quadratic (MIQCP), but their lifted forms have 594 and 694 col
 **Which models change.** No stage-2b, int50 or start50 model qualifies: they have at most 50 variables, or a lifted form (m400, m441).
 
 **Remaining.** On m303 the 2-box kernel is not ready until about 58 s: the trace (25 s) and compile (19 s) are now the limit there.
+
+## Tried: alternating (MI)LP on the bilinear pooling models (not kept)
+
+**Method.** The product graph of m388, m129 and m472 is bipartite: 180 / 300 / 54 products, two colour classes. Fixing one class makes every row linear in the other. Each step is then an elastic (MI)LP: slacks on every row, a penalty of 1e3 for 4 steps, then 1e5, solved with HiGHS. Twelve steps, alternating classes, from the box center and 3 random points. Prototype only: `altlp.py` in the session's scratch.
+
+**Results:**
+
+| model | result | best known | current incumbent |
+|---|---|---|---|
+| m388 | 0 (all flows off) from every start | −1338.25 | 0 |
+| m129 | 5.9–8.4 million, after 37–163 s per start | 1.086 million | 1.12 million (fallback) |
+| m472 | infeasible after 12 steps (violation 0.18–13.5) | | |
+
+From uninformed starts the alternation settles in trivial or poor pooling configurations. A start from the root relaxation's point might do better; not tried.
