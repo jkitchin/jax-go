@@ -35,6 +35,8 @@ from typing import NamedTuple
 import jax
 import jax.numpy as jnp
 import jax.scipy.linalg
+import threading
+
 import numpy as np
 
 from .fbbt import batched_init
@@ -1466,6 +1468,107 @@ def _certificate(pat, vals, b, y, cvec, safe):
     return val - err, jnp.sign(coef) * jnp.maximum(jnp.abs(coef) - cerr, 0.0)
 
 
+# Node LP solver of ``make_quadratic_bounder``: "ipm" (the batched interior point method in the kernel)
+# or "highs" (HiGHS's dual simplex on the host through ``jax.pure_callback``, one box at a time).
+# Experimental. Either way the bound is ``_certificate`` at the solver's duals, a weak-duality
+# certificate whatever the solver returns.
+NODE_LP = "ipm"
+
+
+HIGHS_WARM = True  # ``_highs_solve_host``: start each LP from the thread's last basis of its shape
+_HIGHS_TLS = threading.local()
+
+
+def _highs_slot(N, m):
+    """This thread's ``(Highs, [basis])`` for LPs of ``N`` columns and ``m`` rows."""
+    import highspy
+
+    slots = getattr(_HIGHS_TLS, "slots", None)
+    if slots is None:
+        slots = _HIGHS_TLS.slots = {}
+    if (N, m) not in slots:
+        h = highspy.Highs()
+        h.setOptionValue("output_flag", False)
+        h.setOptionValue("threads", 1)
+        slots[(N, m)] = (h, [None])
+    return slots[(N, m)]
+
+
+def _highs_solve_host(c, rows, cols, vals, b, active):
+    """Host side of ``_highs_lp``: ``min c.u, A u <= b, 0 <= u <= 1`` per box (leading axis of the
+    batched arguments; ``rows`` is static). Returns ``(u, y)`` with ``y >= 0`` the row duals in
+    ``_certificate``'s convention (an infeasible LP: its dual ray, scaled)."""
+    import highspy
+
+    c, cols, vals, b, active = (np.asarray(a) for a in (c, cols, vals, b, active))
+    batched = c.ndim == 2
+    if not batched:
+        c, cols, vals, b, active = c[None], cols[None], vals[None], b[None], active[None]
+    B = max(a.shape[0] for a in (c, cols, vals, b, active))
+    c, cols, vals, b = (np.broadcast_to(a, (B,) + a.shape[1:]) for a in (c, cols, vals, b))
+    active = np.broadcast_to(active.reshape(active.shape[0], -1)[:, :1], (B, 1))
+    N = c.shape[1]
+    m = b.shape[1]
+    U, Y, INF = np.zeros((B, N)), np.zeros((B, m)), np.zeros(B, bool)
+    rows = np.asarray(rows)
+    for k in range(B):
+        if not bool(np.reshape(active[k], -1)[0]):
+            U[k] = 0.5
+            continue
+        h, basis = _highs_slot(N, m)
+        lp = highspy.HighsLp()
+        lp.num_col_, lp.num_row_ = N, m
+        lp.col_cost_ = c[k]
+        lp.col_lower_, lp.col_upper_ = np.zeros(N), np.ones(N)
+        bk = b[k]
+        lp.row_lower_ = np.full(m, -highspy.kHighsInf)
+        lp.row_upper_ = np.where(np.isfinite(bk), bk, highspy.kHighsInf)
+        v = vals[k]
+        keep = v != 0.0
+        r, cc, vv = rows[keep], cols[k][keep], v[keep]
+        order = np.lexsort((r, cc))  # column-major
+        r, cc, vv = r[order], cc[order], vv[order]
+        lp.a_matrix_.format_ = highspy.MatrixFormat.kColwise
+        lp.a_matrix_.start_ = np.searchsorted(cc, np.arange(N + 1)).astype(np.int32)
+        lp.a_matrix_.index_ = r.astype(np.int32)
+        lp.a_matrix_.value_ = vv
+        h.passModel(lp)
+        if HIGHS_WARM and basis[0] is not None:
+            h.setBasis(basis[0])  # (the last basis of this thread for this LP shape: typically a sibling's)
+        h.run()
+        st = h.getModelStatus()
+        if st == highspy.HighsModelStatus.kOptimal:
+            basis[0] = h.getBasis()
+        if st == highspy.HighsModelStatus.kOptimal:
+            sol = h.getSolution()
+            U[k] = np.clip(np.asarray(sol.col_value), 0.0, 1.0)
+            Y[k] = np.maximum(-np.asarray(sol.row_dual), 0.0)
+        elif st == highspy.HighsModelStatus.kInfeasible:
+            _, has, ray = h.getDualRay()
+            if has:  # (the sign whose weak-duality value is positive: a proof of infeasibility)
+                ray = np.asarray(ray, np.float64)
+                for cand in (np.maximum(-ray, 0.0), np.maximum(ray, 0.0)):
+                    coef = np.bincount(cols[k], weights=vals[k] * cand[rows], minlength=N)
+                    if np.sum(np.minimum(coef, 0.0)) - cand @ np.where(np.isfinite(b[k]), b[k], 0.0) > 0:
+                        Y[k] = cand / cand.max()
+                        INF[k] = True  # (the ray's weak-duality value is > 0: scaled up, it is unbounded)
+                        break
+            U[k] = 0.5
+        else:
+            U[k] = 0.5
+    return (U, Y, INF) if batched else (U[0], Y[0], INF[0])
+
+
+def _highs_lp(c, pat, vals, b, active):
+    """``(u, y, infeasible)`` of the unit-space LP by HiGHS on the host (``NODE_LP = "highs"``);
+    ``infeasible``: ``y`` is a dual ray whose weak-duality value is positive."""
+    N, m = c.shape[0], pat.m
+    rows = np.asarray(pat.rows)
+    shapes = (jax.ShapeDtypeStruct((N,), c.dtype), jax.ShapeDtypeStruct((m,), c.dtype), jax.ShapeDtypeStruct((), jnp.bool_))
+    return jax.pure_callback(lambda c_, cols_, v_, b_, a_: _highs_solve_host(c_, rows, cols_, v_, b_, a_),
+                             shapes, c, jnp.asarray(pat.cols), vals, b, active, vmap_method="expand_dims")
+
+
 def _ipm(c, pat, vals, b, iters=40, sigma=0.2, cert=None, mu_tol=1e-10, target=jnp.inf, gap_tol=1e-9,
          settled=None, pc=None, blocks=None):
     """``lp.ipm`` for ``min c.u, A u <= b, 0 <= u <= 1`` with ``A`` in the sparse pattern
@@ -1730,8 +1833,16 @@ def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False, n_s
             pk = pat._replace(cols=cols)
             A, bu = _unit(pk, vals, b, vlo, scale, safe)
             target = (prune_at - f0) / cn + 1e-9 * (1 + jnp.abs(prune_at) / cn)  # unit-space value that prunes
-            z, y, val = _ipm(chat, pk, A, bu, jnp.where(active, ipm_iters, 0), target=target, settled=settled,
-                             cert=lambda y: _certificate(pk, A, bu, y, chat, safe)[0], blocks=L.blocks)  # fmt: skip
+            if NODE_LP == "highs":
+                z, y, ray = _highs_lp(chat, pk, A, bu, active)
+                val = _certificate(pk, A, bu, y, chat, safe)[0]
+                # a ray with a positive certificate proves the LP infeasible (scaled up, the bound
+                # grows without limit); checked here in JAX, with the certificate's own rounding terms
+                ray_val = _certificate(pk, A, bu, y, jnp.zeros_like(chat), safe)[0]
+                val = jnp.where(ray & (ray_val > 0), jnp.inf, val)
+            else:
+                z, y, val = _ipm(chat, pk, A, bu, jnp.where(active, ipm_iters, 0), target=target, settled=settled,
+                                 cert=lambda y: _certificate(pk, A, bu, y, chat, safe)[0], blocks=L.blocks)  # fmt: skip
             lb = jnp.where(jnp.isnan(val) | ~finite | ~active, -jnp.inf, lower(val))
             best = jnp.maximum(best, lb)
             _, r = _certificate(pk, A, bu, y, chat, safe)
