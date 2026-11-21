@@ -131,3 +131,21 @@ m388 and m129 are quadratic (MIQCP), but their lifted forms have 594 and 694 col
 - **Primals:** 14 → 15.
 - **Solved:** the same 3.
 - **m348:** returned at 68.4 s in this run, from the fallback path, run-to-run.
+
+## Follow-up: a small kernel for the root's single box
+
+**Why the first call was slow.** The reduced-space LP has modest cut rows on these models: 2,041 on m84, 358 on m303, 25 on m348 (`_cut_rows`, plus the affine rows). It is dense in all n variables, though, and the kernel is compiled for batches of 16. The root's one box was padded to 16 and paid 16 times.
+
+**Change** (`bnb._ROOT_SIZE` = 2, `_ROOT_SIZE_N` = 200). A constrained problem with at least 200 variables and no lifted quadratic form also gets a kernel for batches of 2. It is compiled first; the 16-box kernel compiles behind it (`later`).
+
+**Effect on the root call:** m303 74 → 11 s, m84 88 → 14 s.
+
+**Stage 2c** (`stage2c_rootsize.csv` against `stage2c_qcols.csv`):
+- **Finite bounds:** 12 → 13. m84 gets 1,033,487 with incumbent 1,062,714, the best known value: a 2.8% gap, where it had no bound.
+- **Primals:** 15 → 15. m407's incumbent goes 41,386 → 40,709 (optimum 40,262).
+- **Solved:** the same 3 (43.1 / 38.1 / 39.9 s).
+- **Overruns:** at most 64.7 s.
+
+**Which models change.** No stage-2b, int50 or start50 model qualifies: they have at most 50 variables, or a lifted form (m400, m441).
+
+**Remaining.** On m303 the 2-box kernel is not ready until about 58 s: the trace (25 s) and compile (19 s) are now the limit there.

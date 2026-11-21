@@ -1438,6 +1438,9 @@ def _auto_branch_var(imask):
 # m388_fullspace3 (414 variables, 594 columns): first bound call ~200 s reduced-space, 2 s lifted; m129
 # (394, 694). The small dense smallinvDAX models (31 variables, 496 columns) keep the reduced space.
 _QUAD_COLS_PER_VAR = 2
+# a constrained problem on the reduced-space kernel with at least _ROOT_SIZE_N variables also gets a
+# kernel for batches of _ROOT_SIZE boxes (the root's call: m303 74 -> 11 s, m84 88 -> 14 s); None: off
+_ROOT_SIZE, _ROOT_SIZE_N = 2, 200
 
 
 def _quadratic_form(f, ineq, eq, n):
@@ -1969,6 +1972,12 @@ def _minimize(
     _mark("start_compile")
     t_build = time.perf_counter()
     extra = () if pool is None else (pool["rows"].shape, pool["root"].shape)  # the bound kernel's pool arguments
+    if _ROOT_SIZE and tuple(batch_sizes) == (16,) and lo.size >= _ROOT_SIZE_N and constrained and not lifted \
+            and _quadratic_form(f, ineq, eq, lo.size) is None:  # fmt: skip
+        # (``_ROOT_SIZE``) a large reduced-space problem: its per-box LP is dense in all n variables, and
+        # the root's single box padded to 16 paid 16 times for it (minlp.org m303, 291 variables: 74 s;
+        # m84 88 s). The small size is compiled first (the root's), the full one behind it (``later``)
+        batch_sizes = (_ROOT_SIZE, 16)
     padded = _Padder(batch, batch_sizes, jax.devices() if devices is None else list(devices))
     # the other kernels' XLA compiles wait for the root bound kernel's (``_Gate``): traced now, compiled
     # once it is compiled (or as soon as one is needed); root OBBT's once the root decides it will run
