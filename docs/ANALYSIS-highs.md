@@ -191,3 +191,43 @@ The screen's gains did not hold up on the full sets, and the cap is not adopted.
 runs vary by ±5–10 s on these models (m391: 46.3 s and 60.3 s, m420: 57.2 s and 41.7 s), so a
 6-model single-run screen cannot detect effects of this size. A screen needs repeated runs, or
 must measure something less noisy than wall time.
+
+## Easy models: setup and root stages against SCIP (2026-11-22)
+
+`benchmarks/profile_root.py` was run on m403, m396 and m34, which SCIP solves in 0.4–0.7 s. Each
+cell is wall time, then node-search time:
+
+| model | cold | warm cache |
+|---|---|---|
+| m403 | 27.5 s, search 2.6 s | 20.5 s, search 2.4 s |
+| m396 | 28.7 s, search 3.4 s | 20.2 s, search 3.2 s |
+| m34 | 35.2 s, search 5.7 s | 21.1 s, search 4.7 s |
+
+Warm, the root stages are:
+- root bound: 1.7–3.6 s;
+- dives: 4–5 s;
+- OA heuristic: 1.6–4.8 s;
+- probing: up to 3.3 s;
+- domain bounding and the local solver build: 1–2 s each.
+
+The dive, probe and OA budgets are shares of the time limit.
+
+**Each stage switched off, warm cache, 60 s.** Two base runs give the noise: 20.5 / 20.6 s on m403,
+and 35.5 / 40.9 s on m410. Each cell is wall time / nodes.
+
+| model | base | dives off | OA off | probe off | all off |
+|---|---|---|---|---|---|
+| m403 | 20.5 / 357 | 19.7 / 353 | 17.4 / 493 | 19.8 / 341 | 18.9 / 919 |
+| m396 | 20.6 / 355 | 18.9 / 299 | 16.2 / 355 | 19.2 / 335 | 27.9 / 2517 |
+| m34 | 20.7 / 25 | 21.3 / 25 | 28.6 / 53 | 25.6 / 51 | 50.7 / 367 |
+| m441 | 38.9 / 755 | 40.8 / 1131 | 40.0 / 2537 | 38.7 / 755 | 43.9 / 3085 |
+| m410 | 35.5–40.9 / 289–363 | 33.8 / 351 | 36.4 / 617 | 32.3 / 359 | 41.0 / 601 |
+| m400 | limit / 2265–2797 | optimal 60.4 / 2797 | limit (no optimum) / 2789 | limit / 2701 | optimal 55.6 / 5225 |
+
+Switching a stage off saves at most 1–4 s and usually costs nodes. Switching all three off makes
+m396, m34 and m441 slower. The root stages pay for themselves; their budgets are not where the
+gap to SCIP is.
+
+On these models, the gap is a fixed per-solve cost of about 15–18 s warm (12–25 s cold for the
+kernel compiles). It is spread over root stages that each take seconds where SCIP's take
+milliseconds. No single knob removes it.
