@@ -108,3 +108,52 @@ Per LP: m426 35 iterations, 1.3 ms; m407 ~100 iterations, ~3 ms. Over 8–10k so
   - Two were the NaN above, fixed.
   - Three (`test_xlogx`, `test_time_limit::test_root_local_budget`, `test_trace_sharing`) pass alone. They failed under memory pressure: an OOM-killed worker, a timeout.
 - **Pass:** test_batching, including the multi-device subprocess test; test_highs_lp; test_lifted_poly; test_quadratic.
+
+## Parent-basis warm starts (`HIGHS_PARENT`, off by default)
+
+Each solved box's optimal basis is stored per LP shape and Kelley round, for the last
+`HIGHS_PARENT` boxes. A new box's round-k LP starts from the round-k basis of the tightest stored
+box that contains it, which is normally its parent and otherwise an ancestor. When no stored box
+contains it, the LP starts from the thread's last basis as before.
+
+**Offline check:** children of a box, branched on its most fractional binary. The figure is mean
+dual simplex iterations per child LP.
+
+| model | cold | parent's basis | an unrelated box's basis |
+|---|---|---|---|
+| m407 | 105.5 | 41.8 | 171.2 |
+| m426 | 50.0 | 8.8 | 30.2 |
+| m394 | 63.8 | 9.8 | 55.1 |
+
+**In the search** (60 s solves): mean iterations per LP went from 46 to 14 (m407), 29 to 7 (m426)
+and 31 to 6 (m394).
+
+HiGHS's own time per LP only fell about 1.4–2×. Each LP still refactorizes its basis after
+`setBasis`, and Python overhead in the callback (building the LP, waiting on other threads) is
+about as large as the solve itself.
+
+Finding the parent:
+- Checking every stored box for containment costs about 0.1 ms per lookup at 512 boxes, done once
+  per box. The first version took 6–9 s per run.
+- 90–100 % of the parents are among the last 512 stored boxes.
+
+**Full sets, cold, 60 s, same container** (off `p0_*`, on `pw_*`):
+
+| set | solved off | solved on | geometric mean time, both solved: off / on |
+|---|---|---|---|
+| stage 2b | 13 | 13 | 36.5 / 34.6 s |
+| stage 2c | 4 | 3 | 39.6 / 40.9 s |
+| int50 | 47 | 46 | 13.4 / 14.0 s |
+| start50 | 39 | 39 | 10.3 / 9.6 s |
+
+The differences are all on borderline instances:
+- m407 (stage 2c): 59.2 s off, the time limit on.
+- tln4 (int50): 53 s off, the time limit on.
+- m420 (stage 2b): 51.6 s off, 59.9 s on.
+
+Two instances got faster: kall_circles_c7a (46 → 24 s) and ex8_4_5 (29 → 18 s).
+
+The fewer iterations don't turn into node throughput, because most of the per-LP cost is fixed
+overhead. The next step is that overhead (update the HiGHS model in place instead of
+`passModel`, and keep the factorization by solving a box's rounds without resetting the basis).
+After that, this is worth measuring again.

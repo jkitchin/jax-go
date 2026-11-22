@@ -1492,7 +1492,7 @@ HIGHS_TARGET = True  # ``_highs_solve_host``: stop the dual simplex once the box
 # contains it (its parent in the search tree, or an ancestor), kept for the last ``HIGHS_PARENT`` boxes
 # of each LP shape (0: off, the thread's last basis only). "rounds": how rounds after the first start:
 # "parent" (the container's basis of that round) or "own" (the box's own previous round)
-HIGHS_PARENT = 512
+HIGHS_PARENT = 0  # (off: 512 cut simplex iterations 3-5x but was neutral on the benchmark sets, docs/ANALYSIS-highs.md)
 HIGHS_PARENT_ROUNDS = "parent"
 _HIGHS_TLS = threading.local()
 _HIGHS_STORES = {}
