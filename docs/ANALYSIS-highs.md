@@ -1,5 +1,7 @@
 # HiGHS as the node LP of the lifted quadratic bounder, 2026-11-22
 
+(Updated with the branching follow-up below: `NODE_LP = "auto"`, the default, now uses HiGHS when `highspy` is installed.)
+
 **Question.** The batched interior-point LP costs about 7.2 ms of LP work per node, against about 0.6 ms for a warm-started dual simplex (ANALYSIS-node-speed, Phase 3). Its interior solutions also leave every binary fractional, so branching is uninformed (ANALYSIS-bigm). Does HiGHS's dual simplex, called from the JAX kernel, pay off, and what happens to differentiability?
 
 ## Design (`quadratic.NODE_LP = "highs"`, off by default)
@@ -65,3 +67,44 @@ Per LP: m426 35 iterations, 1.3 ms; m407 ~100 iterations, ~3 ms. Over 8–10k so
 - Branching on vertex solutions: integral binaries at the LP point, pseudocosts on exact LP values.
 - Per-node warm starts from the parent's basis: requires carrying basis ids through the search; the thread's last basis is a poor start on the layout models, ~100 iterations.
 - Moving the lifted OBBT kernel (`make_quadratic_obbt`) to HiGHS too.
+
+
+## Follow-up: branching and dives on vertex LP points (now the default)
+
+**Branching screen** on the HiGHS path (`brh_*`; width = the default rule, `hs_*` / `hs2_*`; 60 s cold):
+- **pseudocost** is the best rule on the k-means big-M models. Bounds: m420 1.08 (solved, 59 s), m421 1.52, m422 2.12, against 1.08 / 1.28–1.34 / 1.87–1.99 with width. With the IPM it lost those models' bounds (ANALYSIS-bigm).
+- **pseudocost** is neutral on the hull layout models.
+- **reliability** is far worse everywhere: lost m391, m394, m410, and its bounds are near 0.
+
+**Root dives from a vertex.** The LP point's binaries are at 0/1, and the dives (perturbation 0.1 × width) kept the vertex's assignment. On m397 / m404 they found no incumbent, and the outer-approximation heuristic then ran for 21 s at the root under its no-incumbent rules. That is the HiGHS path's slowdown on these models, measured as the root-OBBT stage at 21.9 s against 0.5 s. With perturbation 0.3: 59 / 52 s → 49 / 43 s.
+
+**Changes:**
+- **Default solver:** `quadratic.NODE_LP = "auto"` (HiGHS when `highspy` is installed, else the IPM; `node_lp()`). `highspy` is in the `dev` extra and a new `highs` extra.
+- **Branching:** with vertex LP points (`vertex_lp` in `minimize`), every assignment model (`_assignment_bigm` > 0) gets pseudocost, not only those whose binaries switch linear rows.
+- **Root dives:** perturbation `_DIVE_NOISE_VERTEX` = 0.3 with vertex LP points.
+- **Fix:** `make_quadratic_bounder.lower` returns `+inf` for an infinite certificate (a verified dual ray). In safe mode the rounding margin made it inf − inf = NaN (`test_lifted_poly::test_bound_below_true_min[True-4]`).
+
+**Full sets, cold, 60 s, same container** (IPM `hs_*`, HiGHS with these rules `hs3_*`):
+
+| set | IPM | HiGHS (default now) |
+|---|---|---|
+| stage 2b | 10 | **12** (m420 55.3 s, m441 45.9 s) |
+| stage 2c | 3 | 3 |
+| int50 | 45 | 45 (no differences) |
+| start50 | 39 | 39 (one swap at the limit, as in every run) |
+
+**Stage 2b details:**
+- **Times:** most solved models faster (m6 38.6 → 22.6 s, m399 35.1 → 31.0 s, m403 32.5 → 28.0 s, m410 56.1 → 49.1 s); m394 +5 s, m474 +7 s.
+- **Bounds:** m400 3,025 → 26,178, m422 2.07 → 2.18, m472 (max) 810.5 → 735.9; m421 1.52 → 1.48.
+
+**Stage 2c details:**
+- **Times:** the held-out layout models at 49.5 / 41.6 / 44.4 s against 46.0 / 42.9 / 42.1 s.
+- **m407:** the same bound as the IPM (40,262.33), but a worse incumbent.
+- **m129:** a primal and a better bound.
+- **m413:** a better bound.
+
+**Tests:**
+- **Full non-slow suite** (`-n 3`, cold): 5 failures.
+  - Two were the NaN above, fixed.
+  - Three (`test_xlogx`, `test_time_limit::test_root_local_budget`, `test_trace_sharing`) pass alone. They failed under memory pressure: an OOM-killed worker, a timeout.
+- **Pass:** test_batching, including the multi-device subprocess test; test_highs_lp; test_lifted_poly; test_quadratic.

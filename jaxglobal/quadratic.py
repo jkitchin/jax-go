@@ -1471,10 +1471,18 @@ def _certificate(pat, vals, b, y, cvec, safe):
 
 
 # Node LP solver of ``make_quadratic_bounder``: "ipm" (the batched interior point method in the kernel)
-# or "highs" (HiGHS's dual simplex on the host through ``jax.pure_callback``, one box at a time).
-# Experimental. Either way the bound is ``_certificate`` at the solver's duals, a weak-duality
+# or "highs" (HiGHS's dual simplex on the host through ``jax.pure_callback``, one box at a time). Either way the bound is ``_certificate`` at the solver's duals, a weak-duality
 # certificate whatever the solver returns.
-NODE_LP = "ipm"
+NODE_LP = "auto"  # "auto": "highs" when highspy is installed, else "ipm" (docs/ANALYSIS-highs.md)
+
+
+def node_lp():
+    """The node LP solver ``NODE_LP`` selects ("auto" resolved)."""
+    if NODE_LP != "auto":
+        return NODE_LP
+    import importlib.util
+
+    return "highs" if importlib.util.find_spec("highspy") is not None else "ipm"
 
 
 HIGHS_PRESOLVE = None  # ``_highs_slot``: HiGHS's "presolve" option ("off", "on"; None: its default)
@@ -1854,7 +1862,9 @@ def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False, n_s
             lbv = f0 + cn * val
             if safe:
                 lbv = lbv - SAFE_K * EPS * (N + 3) * (fmag + jnp.abs(f0) + cn * jnp.abs(val))
-            return lbv
+            # (a certified infeasible LP, val = +inf from a dual ray, NODE_LP = "highs": the margin
+            # above is inf too, and inf - inf would be NaN)
+            return jnp.where(val == jnp.inf, jnp.inf, lbv)
 
         settled = None
         if Q.lattice is not None:  # the lattice point is reached: more iterations cannot raise _snap
@@ -1874,7 +1884,7 @@ def make_quadratic_bounder(Q, n_kelley=4, ipm_iters=40, tol=0.0, safe=False, n_s
             pk = pat._replace(cols=cols)
             A, bu = _unit(pk, vals, b, vlo, scale, safe)
             target = (prune_at - f0) / cn + 1e-9 * (1 + jnp.abs(prune_at) / cn)  # unit-space value that prunes
-            if NODE_LP == "highs":
+            if node_lp() == "highs":
                 z, y, ray = _highs_lp(chat, pk, A, bu, active, target)
                 val = _certificate(pk, A, bu, y, chat, safe)[0]
                 # a ray with a positive certificate proves the LP infeasible (scaled up, the bound

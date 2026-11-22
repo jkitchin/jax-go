@@ -45,6 +45,7 @@ from .fbbt import make_fbbt
 from .lifted import make_lifted_bounder
 from .lp import make_constrained_bounder, make_obbt, make_pool_cuts, pool_parts, reduce_ranges
 from .pseudoboolean import EPS, objective_polynomial, solve_binary_polynomial
+from . import quadratic as _quadratic_mod
 from .quadratic import MAX_COLUMNS
 from .quadratic import (binary_only, make_quadratic_bounder, make_quadratic_obbt, polynomial_form, quadratic_form,
                         with_bigm)
@@ -1177,6 +1178,11 @@ class _Padder:
 _LAM, _BETA = 0.75, 0.2  # branch_point="relax": pull toward the relaxation minimizer, margin from faces
 INT_TOL = 1e-6  # integer variables: a value within INT_TOL of an integer counts as integral
 ROUNDINGS = (0.5, INT_TOL, 1.0 - INT_TOL, 0.25, 0.75)  # incumbent candidates: round up fractions above each
+_DIVE_NOISE = 0.1  # root dives: perturbation of the relaxation point, as a share of the box width
+# ...with a vertex LP point (``quadratic.NODE_LP = "highs"``): its binaries sit at 0 / 1, and dives from
+# it kept the vertex's assignment (minlp.org m397 / m404: no root incumbent, then 21 s of the OA
+# heuristic; 59 / 52 s -> 49 / 43 s with 0.3)
+_DIVE_NOISE_VERTEX = 0.3
 _DIVES = 16  # propagation dives per call (integer variables)
 MILP_ROOT_SHARE, MILP_ROOT_SECONDS = 0.25, 60.0  # integer-aware root bound: at most this share of time_limit and seconds
 # outer-approximation primal heuristic (``oa_primal`` in ``minimize``, ``MilpBound.propose``): integer
@@ -2063,7 +2069,12 @@ def _minimize(
     # held the best box's bound for 21 of 60 iterations without them: 2813 -> 1777 nodes)
     gap_form = quad if quad is not None or not _GAP_POLY else lf
     width0 = np.where(branchable, width0, np.inf)  # never split linear variables
-    if branch_auto and branch_var == "width" and assign >= _ASSIGN_LINEAR:
+    vertex_lp = quad is not None and _quadratic_mod.node_lp() == "highs"  # (the node LP returns simplex vertices)
+    if branch_auto and branch_var == "width" and (assign >= _ASSIGN_LINEAR or (vertex_lp and assign > 0)):
+        # (with vertex LP points, ``vertex_lp``: every assignment model. The pseudocosts then rest on
+        # exact LP values: on minlp.org m420-m422 (k-means, big-M) it is the best rule, bounds
+        # 1.08 / 1.52 / 2.12 against 1.08 / 1.28-1.34 / 1.87-1.99 with width; with the IPM's interior
+        # points it lost m421 / m422's bounds and m441, docs/ANALYSIS-bigm.md, ANALYSIS-highs.md)
         # disjunctive assignment models switching linear rows (docs/ANALYSIS-bigm.md); on the
         # k-means models (quadratic rows only) pseudocost wins on m420 but loses on m421 / m422
         branch_var = "pseudocost"
@@ -3196,7 +3207,8 @@ def _minimize(
             obbt_gate.open()
     _mk("root_dives")
     if imask.any() and np.all(np.isfinite(lb)) and np.all(np.isfinite(rxr)):  # root dives: relaxation point, perturbed
-        P = np.clip(rxr + rng.normal(size=(_DIVES, lo.size)) * 0.1 * (rhi - rlo) * (np.arange(_DIVES) > 0)[:, None],
+        noise = _DIVE_NOISE_VERTEX if vertex_lp else _DIVE_NOISE
+        P = np.clip(rxr + rng.normal(size=(_DIVES, lo.size)) * noise * (rhi - rlo) * (np.arange(_DIVES) > 0)[:, None],
                     rlo, rhi)  # fmt: skip
         # (``_ROOT_DIVE_SHARE``: minlp.org m426, 100 binaries, spent 10-16 s of a 60 s limit here)
         dive(np.repeat(rlo, _DIVES, 0), np.repeat(rhi, _DIVES, 0), P,

@@ -12,7 +12,8 @@ dependencies = ["jax>=0.11.2,<0.12", "numpy", "scipy", "optax", "flatbuffers"]
 
 [project.optional-dependencies]
 pounce = ["pounce-solver>=0.12"]  # default local NLP solver when installed
-dev = ["pytest", "matplotlib", "mpmath", "pounce-solver>=0.12", "pyomo"]
+highs = ["highspy>=1.7"]  # node LPs of the lifted quadratic bounder by HiGHS (quadratic.NODE_LP)
+dev = ["pytest", "matplotlib", "mpmath", "pounce-solver>=0.12", "pyomo", "highspy>=1.7"]
 docs = ["mkdocs>=1.6,<2", "mkdocs-material>=9.5", "mkdocs-jupyter>=0.25", "mkdocstrings[python]>=0.26"]  # also docs-site/requirements.txt
 
 [build-system]
