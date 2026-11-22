@@ -157,3 +157,37 @@ The fewer iterations don't turn into node throughput, because most of the per-LP
 overhead. The next step is that overhead (update the HiGHS model in place instead of
 `passModel`, and keep the factorization by solving a box's rounds without resetting the basis).
 After that, this is worth measuring again.
+
+## Where the wall time goes, and the OA heuristic's cap (not adopted)
+
+**Profile.** These are 60 s solves of m426, m407 and m394, sampled every 50 ms. The node search
+runs for only about 18–24 s of each:
+- **Before the search:** setup, root bound, dives and local solves take 12–20 s.
+- **Root OA heuristic:** `MilpBound.propose` runs on the main thread with no node work alongside
+  it, for 25 s on m426, 9 s on m407 and 9 s on m394.
+- **During the search:** about 70% of node-thread time is in the HiGHS callback. HiGHS's own
+  solve is half of that; rebuilding the LP in NumPy is about 30%.
+
+**What OA contributed.**
+- m426 had no incumbent at the root, so OA found all of them; its last improvement came at 27.8 s
+  of a 36 s call.
+- On m407, OA found nothing in 9 s.
+- On m394, OA found the optimum after 4.7 s, then ran 4.5 s more.
+
+**Single-run screen** (6 models, `_OA_SECONDS = 3` against 30): faster on every model it solved,
+by 1.6–25 s. m400 was solved in 41.6 s against 60.3 s; with OA off entirely, m400 was not solved.
+
+**Full sets, cold, 60 s, same container** (`b0_*` base, `oa3_*` capped). The first comparison
+used the `p0_*` runs from before a container restart, about 10–25% faster, and was discarded.
+
+| set | base | cap | geometric mean time, both solved |
+|---|---|---|---|
+| stage 2b | 12 | 11 (lost m441: 48.9 s → time limit) | 36.9 / 37.9 s |
+| stage 2c | 3 | 3 | 44.3 / 50.6 s |
+| int50 | 45 | 46 (gained smallinvDAXr5b150-165) | 15.6 / 15.7 s |
+| start50 | 39 | 39 | 11.2 / 11.5 s |
+
+The screen's gains did not hold up on the full sets, and the cap is not adopted. Single 60 s
+runs vary by ±5–10 s on these models (m391: 46.3 s and 60.3 s, m420: 57.2 s and 41.7 s), so a
+6-model single-run screen cannot detect effects of this size. A screen needs repeated runs, or
+must measure something less noisy than wall time.
