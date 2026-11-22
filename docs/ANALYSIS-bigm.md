@@ -182,3 +182,28 @@ check_wrong (`--sample 12 --time-limit 20`, seeds 0 and 1), with the defaults an
 - The pre-search overhead on these models.
 - m391 and m394 finish with a thin margin under load (49–52 s at load 8–10; m394 did not finish at load 13).
 - The k-means branching rule is not understood: most-fractional beats pseudocost for d ≥ 3, but not for d = 2.
+
+# Part 3: does SCIP's bound stall on the k-means big-M models too? (2026-11-22)
+
+Yes. These are SCIP 10 runs (pyscipopt 6.3), single-threaded, 60 s, in the same container as
+the `b0_*` runs:
+
+| model (best known) | SCIP: status, dual, nodes | jaxglobal (`b0_s2b`, HiGHS node LP), dual |
+|---|---|---|
+| m420 (1.0836) | optimal 21.2 s, 16,364 | optimal 57.2 s |
+| m421 (2.602) | limit, **1.163**, 62,318 | limit, 1.48–1.60 |
+| m422 (4.734) | limit, **1.457**, 36,895 | limit, 2.07–2.21 |
+| m426 (0.3299) | limit, **0.026**, 39,730 | limit, 0.002–0.093 |
+
+On m421 and m422, jaxglobal's bound after 60 s is above SCIP's. On m426, both are near 0 against
+an optimum of 0.33.
+
+The bound stall is a property of the big-M formulation, not of jaxglobal. Part 1 showed that the
+node relaxation is the exact continuous relaxation: disjuncts mix fractionally until most
+assignments of a point are fixed. A B&B on this formulation closes the gap only by fixing most
+of the 60–100 binaries, so the bound cannot be improved by speeding up the node LP or the
+heuristics.
+
+What remains on these models is the incumbent on m426 (jaxglobal 0.42–0.71, SCIP 0.339) and
+m420's time (57 s against SCIP's 21 s). The stage 2b instances SCIP solves and jaxglobal does
+not, or solves 10–50x slower, are the CLay and hull models (m391–m410, m441, m400) and m472.
