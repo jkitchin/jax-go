@@ -1,0 +1,3 @@
+solver,name,status,time,primal,dual,nodes,message,load,threads,peak_rss_mb
+jaxglobal,nvs03,optimal,11.064692609999838,16.0,16.0,1,optimal,2.63,2,605
+jaxglobal,st_e13,optimal,8.07834354500028,2.00000000001,1.9999979993729984,1,optimal,3.08,2,614
