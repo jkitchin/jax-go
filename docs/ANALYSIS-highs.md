@@ -231,3 +231,30 @@ gap to SCIP is.
 On these models, the gap is a fixed per-solve cost of about 15–18 s warm (12–25 s cold for the
 kernel compiles). It is spread over root stages that each take seconds where SCIP's take
 milliseconds. No single knob removes it.
+
+## Root bound and dives on the easy models (2026-11-23)
+
+Profiled with a warm compile cache: main-thread stacks sampled every 5 ms, per stage.
+
+**Root bound (about 5 s on m403).** The main thread waits on the kernel future about 4 s of
+it. Meanwhile, background threads retrace and relower the cached export
+(`jax.jit(exp.call).trace().lower()`) and fetch the executable from JAX's compilation cache.
+This cost only arises with a warm cache: cold, the time is the XLA compile itself.
+
+**Root dives (about 5 s on m403).** Nearly all of it is local NLP solves of the dives' fixed boxes
+(43 NLPs, 4.9 s in `solve_nlp_batch`). Calls back into JAX cost 180–450 µs each in the parallel
+batch, against 20–76 µs single-threaded. Run sequentially, callback time falls from 8.4 to 2.1 s,
+but the batch's wall time does not change (4.85 → 4.96 s), so the callbacks are not what bounds it.
+
+**What the NLPs are doing.** Most of them prove an integer assignment infeasible, at 70–150 iterations
+each. Over a whole solve:
+
+| model | NLPs | failed | failed and proved infeasible by FBBT + LP bound | succeeded but flagged infeasible |
+|---|---|---|---|---|
+| m403 | 90 | 75 (root dives 38 of 44, OA 24 of 30) | 75 | 0 |
+| m441 | 104 | 59 (root dives 39 of 57) | 57 | 0 |
+
+The check is FBBT (20 rounds) plus the lifted quadratic LP bound (2 Kelley rounds) on each NLP's
+box, batched. It costs 8–16 ms per box. Each failed NLP costs 50–400 ms (NLP wall summed:
+m403 28.6 s, of which failed NLPs 27 s; m441 18.8 s, of which failed 15 s, in parallel batches).
+m410 has no quadratic form, so the check above does not cover it.
