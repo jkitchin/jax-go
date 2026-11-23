@@ -258,3 +258,29 @@ The check is FBBT (20 rounds) plus the lifted quadratic LP bound (2 Kelley round
 box, batched. It costs 8–16 ms per box. Each failed NLP costs 50–400 ms (NLP wall summed:
 m403 28.6 s, of which failed NLPs 27 s; m441 18.8 s, of which failed 15 s, in parallel batches).
 m410 has no quadratic form, so the check above does not cover it.
+
+## Skipping local solves on dead fixed-integer boxes (`_FIXED_SCREEN`, on by default)
+
+Before a batch of local NLP solves, the boxes whose integers are all fixed run through the bound
+kernel (`evaluate`) once. A box the kernel proves infeasible, or bounds at `ub - tol` or above,
+is not solved. The screen fires only after the bound kernel has run, on the main thread, and only
+when every padded size it needs is already compiled, so it never waits for a compile.
+
+Same-container A/B (no restart between arms), 60 s limit:
+
+| set | solved off → on | geo-mean time, models both solve |
+|---|---|---|
+| minlp.org stage 2b | 12 → 12 | 41.0 → 36.8 s |
+| minlp.org stage 2c | 3 → 4 (m407) | 46.0 → 38.3 s |
+| int50 | 46 → 46 (one model each way, smallinvDAXr4b/r5b, both at about 60 s) | 16.6 → 15.0 s |
+| start50 | 39 → 39 | 11.9 → 11.3 s |
+
+The largest gains are on the clay layout HR models (m396, m399, m403, m406, m397, m404: 20–35%).
+On stage 2c, five time-limited models lost their incumbent in the screen-on arm (m84, m129,
+m211, m411, m414). Reruns tie none of them to the screen:
+- m84 and m414 flip the other way with fresh caches.
+- m211 timed out compiling its bound kernel, before the screen can fire.
+- m411 ranged from no incumbent to the optimum over five runs, screen on or off.
+
+These runs end at the time limit, so what they find depends on when compiles finish. Results:
+`benchmarks/results/fs{0,1}_{s2b,s2c,int50,start50}.csv` (fs0 off, fs1 on).
