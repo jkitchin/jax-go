@@ -1236,6 +1236,11 @@ _PROBE = True  # integer variables: root probing on binaries (``probe`` in ``min
 # root probing's estimated cost may take at most this share of the time left (None: no limit); minlp.org
 # m400 (36 binaries, 0.5-2 s per bound call cold) spent 10 s of a 60 s limit probing for no gain
 _PROBE_SHARE = 0.1
+# local solves of boxes with every integer fixed (dives, enumeration, the OA heuristic's completions,
+# node-box solves) are skipped when the bound kernel proves the box infeasible or unable to beat the
+# incumbent (``fixed_dead``): on minlp.org m403 75 of 90 such NLPs failed, each at 70-150 interior-point
+# iterations, and the bound kernel proved every one infeasible (m441: 57 of 59), at 8-16 ms a box
+_FIXED_SCREEN = True
 _ENUM = 32  # integer variables: at the root, fix-and-solve every assignment when there are at most this many
 _PC_FRAC_POW = 1.0  # branch_var="pseudocost": an integer's score is multiplied by min(f, 1 - f) to this power
 _PC_PROBE = True  # integer variables, branch_var != "width": root probing seeds the pseudocosts (``seed_pseudocosts``)
@@ -2116,10 +2121,57 @@ def _minimize(
             options["max_wall_time"] = float(min(options.get("max_wall_time", np.inf), cap))
         t = time.perf_counter()
         try:
-            return solve_local_(X0, LO, HI, options=options)
+            dead = fixed_dead(LO, HI)
+            if dead is None:
+                return solve_local_(X0, LO, HI, options=options)
+            X = np.array(X0, dtype=np.float64)
+            if not dead.all():
+                live = np.flatnonzero(~dead)
+                X[live] = np.asarray(solve_local_(X[live], np.asarray(LO)[live], np.asarray(HI)[live], options=options))
+            return X
         finally:
             if timed:
                 root["local"] += time.perf_counter() - t
+
+    def fixed_dead(LO, HI):
+        """(``_FIXED_SCREEN``) Which boxes of a local-solve batch whose integers are all fixed the
+        bound kernel shows hold no point better than the incumbent: infeasible (FBBT or the LP's
+        certificate) or bounded at ``ub - tol``. Their solves are skipped (the caller's screen
+        then rejects the unsolved start). None: nothing to skip, or the kernel has not run yet
+        (no wait for its compile), or not on the main thread."""
+        if not (_FIXED_SCREEN and LO is not None and imask.any() and bound_call[0] > 0.0) or _past(deadline):
+            return None
+        if threading.current_thread() is not threading.main_thread():
+            return None
+        L, H = np.asarray(LO, np.float64), np.asarray(HI, np.float64)
+        fixed = np.all(L[:, imask] == H[:, imask], axis=1)
+        if not fixed.any():
+            return None
+        k, top = int(fixed.sum()), padded.sizes[-1]
+        need = {top} if k >= top else set()
+        if k % top:
+            need.add(next(z for z in padded.sizes if z >= k % top))
+        if padded.mesh is not None or not all(kernel_ready(bound_kernel, z) for z in need):
+            return None  # (no wait for a compile: the solves run as before)
+        try:
+            blb = evaluate(L[fixed], H[fixed])[0]
+        except (_CompileTimeout, _Deadline):
+            return None
+        dead = np.zeros(len(L), bool)
+        dead[fixed] = (blb == np.inf) | (np.isfinite(ub) & (blb >= ub - tol()))
+        fixed_skipped[0] += int(dead.sum())
+        return dead if dead.any() else None
+
+    fixed_skipped = [0]  # local solves ``fixed_dead`` skipped
+
+    def kernel_ready(kern, size):
+        """Whether ``kern``'s executable for batches of ``size`` boxes is compiled."""
+        for key, fut in list(kern.ready.items()):
+            if key and key[0][0] and key[0][0][0] == size and fut.done() and fut.exception() is None:
+                inner = fut.result()
+                if not hasattr(inner, "done") or (inner.done() and inner.exception() is None):
+                    return True
+        return False
 
     def _warm_screen():  # both screen batch sizes, compiled off the main thread (see _batched)
         for k in _SCREEN_BATCHES:
@@ -3616,6 +3668,8 @@ def _minimize(
     else:
         status = "max_iter"
     xbest = np.asarray(xbest)
+    if verbose and fixed_skipped[0]:
+        print(f"fixed-integer local solves skipped (box infeasible or bounded above the incumbent): {fixed_skipped[0]}")
     if _TRACE is not None:
         _mk("end")
     if imask.any() and np.isfinite(ub):
